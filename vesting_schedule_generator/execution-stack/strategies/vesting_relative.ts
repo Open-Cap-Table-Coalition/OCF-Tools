@@ -1,15 +1,10 @@
 import { addDays, addMonths, getDate, lastDayOfMonth, setDate } from "date-fns";
-import {
-  ShouldBeInExecutionPathStrategy,
-  ShouldBeInExecutionPathStrategyConfig,
-} from "./strategy";
+import { ExecutionStrategy, ExecutionStrategyConfig } from "./strategy";
 import type { Day_Of_Month, GraphNode, RelativeGraphNode } from "types";
 
-export class VestingRelativeShouldBeInExecutionPath extends ShouldBeInExecutionPathStrategy<RelativeGraphNode> {
+export class VestingRelativeExecutionStrategy extends ExecutionStrategy<RelativeGraphNode> {
   private relativeCondition: GraphNode | undefined;
-  constructor(
-    config: ShouldBeInExecutionPathStrategyConfig<RelativeGraphNode>
-  ) {
+  constructor(config: ExecutionStrategyConfig<RelativeGraphNode>) {
     super(config);
     this.relativeCondition = this.config.executionStack.get(
       this.config.node.trigger.relative_to_condition_id

@@ -1,13 +1,10 @@
 import { parseISO } from "date-fns";
 import type { EventGraphNode, TX_Vesting_Event } from "types";
-import {
-  ShouldBeInExecutionPathStrategy,
-  ShouldBeInExecutionPathStrategyConfig,
-} from "./strategy";
+import { ExecutionStrategy, ExecutionStrategyConfig } from "./strategy";
 
-export class VestingEventShouldBeInExecutionPath extends ShouldBeInExecutionPathStrategy<EventGraphNode> {
+export class VestingEventExecutionStrategy extends ExecutionStrategy<EventGraphNode> {
   private tx: TX_Vesting_Event | undefined;
-  constructor(config: ShouldBeInExecutionPathStrategyConfig<EventGraphNode>) {
+  constructor(config: ExecutionStrategyConfig<EventGraphNode>) {
     super(config);
     this.tx = this.config.ocfData.vestingEventTransactions.find(
       (tx): tx is TX_Vesting_Event =>

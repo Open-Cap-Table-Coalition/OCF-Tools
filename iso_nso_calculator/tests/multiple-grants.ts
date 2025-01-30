@@ -1,4 +1,4 @@
-import { buildEquityAward } from "../../vesting_schedule_generator/tests/equity-award-builder";
+import { buildEquityAward } from "../../vesting_schedule_generator/tests/helpers/equity-award-builder";
 
 export const ocfPackage = buildEquityAward([
   {

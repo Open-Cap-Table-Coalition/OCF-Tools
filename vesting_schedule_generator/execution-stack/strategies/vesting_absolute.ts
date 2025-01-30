@@ -1,14 +1,9 @@
-import {
-  ShouldBeInExecutionPathStrategy,
-  ShouldBeInExecutionPathStrategyConfig,
-} from "./strategy";
+import { ExecutionStrategy, ExecutionStrategyConfig } from "./strategy";
 import type { AbsoluteGraphNode } from "types";
-import { parse, parseISO } from "date-fns";
+import { parseISO } from "date-fns";
 
-export class VestingAbsoluteShouldBeInExecutionPath extends ShouldBeInExecutionPathStrategy<AbsoluteGraphNode> {
-  constructor(
-    config: ShouldBeInExecutionPathStrategyConfig<AbsoluteGraphNode>
-  ) {
+export class VestingAbsoluteExecutionStrategy extends ExecutionStrategy<AbsoluteGraphNode> {
+  constructor(config: ExecutionStrategyConfig<AbsoluteGraphNode>) {
     super(config);
   }
 

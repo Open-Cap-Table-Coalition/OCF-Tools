@@ -1,13 +1,10 @@
 import { parseISO } from "date-fns";
 import { StartGraphNode, TX_Vesting_Start } from "types";
-import {
-  ShouldBeInExecutionPathStrategy,
-  ShouldBeInExecutionPathStrategyConfig,
-} from "./strategy";
+import { ExecutionStrategy, ExecutionStrategyConfig } from "./strategy";
 
-export class VestingStartShouldBeInExecutionPath extends ShouldBeInExecutionPathStrategy<StartGraphNode> {
+export class VestingStartExecutionStrategy extends ExecutionStrategy<StartGraphNode> {
   private tx: TX_Vesting_Start | undefined;
-  constructor(config: ShouldBeInExecutionPathStrategyConfig<StartGraphNode>) {
+  constructor(config: ExecutionStrategyConfig<StartGraphNode>) {
     super(config);
     this.tx = this.config.ocfData.vestingStartTransactions.find(
       (tx): tx is TX_Vesting_Start =>

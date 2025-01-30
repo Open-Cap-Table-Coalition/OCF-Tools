@@ -1,15 +1,15 @@
 import type { GraphNode, VestingInstallment, OCFDataBySecurityId } from "types";
 import { InstallmentStrategyFactory } from "./factory";
 
-export class VestingScheduleService {
-  public vestingSchedule: VestingInstallment[] = [];
+export class VestingInstallmentBuilder {
+  private vestingSchedule: VestingInstallment[] = [];
   private vestedCount = 0;
   constructor(
     private ocfData: OCFDataBySecurityId,
     private executionStack: Map<string, GraphNode>
   ) {}
 
-  public addToVestingSchedule(installments: VestingInstallment[]) {
+  private addToVestingSchedule(installments: VestingInstallment[]) {
     const totalVested = installments.reduce((acc, installment) => {
       return (acc += installment.quantity);
     }, 0);
@@ -19,7 +19,7 @@ export class VestingScheduleService {
     this.vestingSchedule.push(...installments);
   }
 
-  public createInstallments(node: GraphNode) {
+  private createInstallments(node: GraphNode) {
     const Strategy = InstallmentStrategyFactory.getStrategy(node);
 
     const installments = new Strategy({
@@ -30,5 +30,14 @@ export class VestingScheduleService {
     }).getInstallments();
 
     return installments;
+  }
+
+  public build() {
+    for (const node of this.executionStack.values()) {
+      const installments = this.createInstallments(node);
+      this.addToVestingSchedule(installments);
+    }
+
+    return this.vestingSchedule;
   }
 }

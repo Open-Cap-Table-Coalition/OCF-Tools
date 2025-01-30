@@ -1,5 +1,6 @@
 import { isBefore, parse } from "date-fns";
-import { generateVestingSchedule } from "..";
+import { VestingScheduleGenerator } from "vesting_schedule_generator";
+import { ExecutionStackBuilder } from "../execution-stack/ExecutionStackBuilder";
 import { ocfPackage as all_or_nothing } from "./testOcfPackages/documentation_examples/all-or-nothing";
 import { ocfPackage as all_or_nothing_with_expiration } from "./testOcfPackages/documentation_examples/all-or-nothing-with-expiration";
 import { ocfPackage as fourYear_oneYear_cliff_schedule } from "./testOcfPackages/documentation_examples/4yr-1yr-cliff-schedule";
@@ -13,6 +14,7 @@ import type {
   VestingInstallment,
 } from "types";
 import { OcfPackageContent } from "../../read_ocf_package";
+import { ExecutionStrategyFactory } from "../execution-stack/factory";
 
 /******************************
  * helper functions
@@ -27,7 +29,14 @@ const getTotalSharesUnderlying = (ocfPackage: OcfPackageContent) => {
 };
 
 const getSchedule = (ocfPackage: OcfPackageContent) => {
-  return generateVestingSchedule(ocfPackage, "equity_compensation_issuance_01");
+  // return generateVestingSchedule(ocfPackage, "equity_compensation_issuance_01");
+  const generator = new VestingScheduleGenerator(
+    ocfPackage,
+    ExecutionStackBuilder,
+    ExecutionStrategyFactory
+  );
+
+  return generator.generate("equity_compensation_issuance_01");
 };
 
 const getTotalVested = (schedule: VestingInstallment[]) => {

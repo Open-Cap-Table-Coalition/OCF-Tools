@@ -1,10 +1,12 @@
-import { determineVestingMode } from "../create_installment/rounding_service";
+import { VestingModeService } from "../create_installment/VestingModeService";
 
 const vestingSchedule = [4.5, 4.5, 4.5, 4.5];
 
-describe("rounding service", () => {
+describe("Vesting Mode Service", () => {
   test("Cumulative Rounding", () => {
-    const vestingMode = determineVestingMode("CUMULATIVE_ROUNDING");
+    const vestingMode = VestingModeService.determineVestingMode(
+      "CUMULATIVE_ROUNDING"
+    );
 
     const newVestingSchedule = vestingSchedule.map((installment, index) => {
       return vestingMode(index, 4, 18);
@@ -16,7 +18,9 @@ describe("rounding service", () => {
   });
 
   test("Cumulative Round Down", () => {
-    const vestingMode = determineVestingMode("CUMULATIVE_ROUND_DOWN");
+    const vestingMode = VestingModeService.determineVestingMode(
+      "CUMULATIVE_ROUND_DOWN"
+    );
 
     const newVestingSchedule = vestingSchedule.map((installment, index) => {
       return vestingMode(index, 4, 18);
@@ -28,7 +32,7 @@ describe("rounding service", () => {
   });
 
   test("Front Loaded", () => {
-    const vestingMode = determineVestingMode("FRONT_LOADED");
+    const vestingMode = VestingModeService.determineVestingMode("FRONT_LOADED");
 
     const newVestingSchedule = vestingSchedule.map((installment, index) => {
       return vestingMode(index, 4, 18);
@@ -40,7 +44,7 @@ describe("rounding service", () => {
   });
 
   test("Back Loaded", () => {
-    const vestingMode = determineVestingMode("BACK_LOADED");
+    const vestingMode = VestingModeService.determineVestingMode("BACK_LOADED");
 
     const newVestingSchedule = vestingSchedule.map((installment, index) => {
       return vestingMode(index, 4, 18);
@@ -52,7 +56,9 @@ describe("rounding service", () => {
   });
 
   test("Front Loaded To Single Tranche", () => {
-    const vestingMode = determineVestingMode("FRONT_LOADED_TO_SINGLE_TRANCHE");
+    const vestingMode = VestingModeService.determineVestingMode(
+      "FRONT_LOADED_TO_SINGLE_TRANCHE"
+    );
 
     const newVestingSchedule = vestingSchedule.map((installment, index) => {
       return vestingMode(index, 4, 18);
@@ -64,7 +70,9 @@ describe("rounding service", () => {
   });
 
   test("Back Loaded To Single Tranche", () => {
-    const vestingMode = determineVestingMode("BACK_LOADED_TO_SINGLE_TRANCHE");
+    const vestingMode = VestingModeService.determineVestingMode(
+      "BACK_LOADED_TO_SINGLE_TRANCHE"
+    );
 
     const newVestingSchedule = vestingSchedule.map((installment, index) => {
       return vestingMode(index, 4, 18);
@@ -76,7 +84,7 @@ describe("rounding service", () => {
   });
 
   test("Fractional", () => {
-    const vestingMode = determineVestingMode("FRACTIONAL");
+    const vestingMode = VestingModeService.determineVestingMode("FRACTIONAL");
 
     const newVestingSchedule = vestingSchedule.map((installment, index) => {
       return vestingMode(index, 4, 18);
@@ -95,7 +103,9 @@ describe("test rounding methods using random numbers", () => {
   const totalInstallments = 48;
 
   test.each(randomNumbers)("Cumulative Rounding - Random", (randomNumber) => {
-    const vestingMode = determineVestingMode("CUMULATIVE_ROUNDING");
+    const vestingMode = VestingModeService.determineVestingMode(
+      "CUMULATIVE_ROUNDING"
+    );
     const randomVestingSchedule = Array(totalInstallments).fill(
       randomNumber / totalInstallments
     );
@@ -110,7 +120,9 @@ describe("test rounding methods using random numbers", () => {
   });
 
   test.each(randomNumbers)("Cumulative Round Down - Random", (randomNumber) => {
-    const vestingMode = determineVestingMode("CUMULATIVE_ROUND_DOWN");
+    const vestingMode = VestingModeService.determineVestingMode(
+      "CUMULATIVE_ROUND_DOWN"
+    );
     const randomVestingSchedule = Array(totalInstallments).fill(
       randomNumber / totalInstallments
     );
@@ -125,7 +137,7 @@ describe("test rounding methods using random numbers", () => {
   });
 
   test.each(randomNumbers)("Front Loaded - Random", (randomNumber) => {
-    const vestingMode = determineVestingMode("FRONT_LOADED");
+    const vestingMode = VestingModeService.determineVestingMode("FRONT_LOADED");
     const randomVestingSchedule = Array(totalInstallments).fill(
       randomNumber / totalInstallments
     );
@@ -140,7 +152,7 @@ describe("test rounding methods using random numbers", () => {
   });
 
   test.each(randomNumbers)("Back Loaded - Random", (randomNumber) => {
-    const vestingMode = determineVestingMode("BACK_LOADED");
+    const vestingMode = VestingModeService.determineVestingMode("BACK_LOADED");
     const randomVestingSchedule = Array(totalInstallments).fill(
       randomNumber / totalInstallments
     );
@@ -158,7 +170,7 @@ describe("test rounding methods using random numbers", () => {
   test.each(randomNumbers)(
     "Front Loaded to Single Tranche - Random",
     (randomNumber) => {
-      const vestingMode = determineVestingMode(
+      const vestingMode = VestingModeService.determineVestingMode(
         "FRONT_LOADED_TO_SINGLE_TRANCHE"
       );
       const randomVestingSchedule = Array(totalInstallments).fill(
@@ -178,7 +190,9 @@ describe("test rounding methods using random numbers", () => {
   test.each(randomNumbers)(
     "Back Loaded to Single Tranche - Random",
     (randomNumber) => {
-      const vestingMode = determineVestingMode("BACK_LOADED_TO_SINGLE_TRANCHE");
+      const vestingMode = VestingModeService.determineVestingMode(
+        "BACK_LOADED_TO_SINGLE_TRANCHE"
+      );
       const randomVestingSchedule = Array(totalInstallments).fill(
         randomNumber / totalInstallments
       );

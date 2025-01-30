@@ -12,7 +12,7 @@ import type {
   RelativeGraphNode,
 } from "types";
 import { CreateInstallmentConfig, CreateInstallmentStrategy } from "./strategy";
-import { determineVestingMode } from "../rounding_service";
+import { VestingModeService } from "../VestingModeService";
 import Fraction from "fraction.js";
 
 export class VestingRelativeStrategy extends CreateInstallmentStrategy<RelativeGraphNode> {
@@ -61,7 +61,7 @@ export class VestingRelativeStrategy extends CreateInstallmentStrategy<RelativeG
       .mul(new Fraction(occurrences))
       .valueOf();
 
-    const vestingMode = determineVestingMode(
+    const vestingMode = VestingModeService.determineVestingMode(
       this.config.ocfData.issuanceVestingTerms!.allocation_type
     );
 

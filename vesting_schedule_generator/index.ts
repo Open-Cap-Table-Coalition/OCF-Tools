@@ -1,46 +1,51 @@
 import { OcfPackageContent } from "../read_ocf_package";
 import { getOCFDataBySecurityId } from "./get-ocf-data-by-security-id.ts";
-import { createExecutionStack } from "./execution-stack/create-execution-stack.ts";
-import { createVestingGraph } from "./create-vesting-graph.ts";
-import { GraphNode, VestingInstallment } from "types/index.ts";
-import { applyRounding } from "./apply-rounding.ts";
-import { parseISO } from "date-fns";
-import { processFirstVestingDate } from "./first-vesting-date.ts";
-import { VestingScheduleService } from "./create_installment/vestingScheduleService.ts";
+import { createVestingGraph } from "./execution-stack/create-vesting-graph.ts";
+import {
+  GraphNode,
+  OCFDataBySecurityId,
+  VestingInstallment,
+  VestingScheduleStatus,
+} from "types/index.ts";
+import { compareAsc, parseISO } from "date-fns";
+import { VestingInstallmentBuilder } from "./create_installment/VestingInstallmentBuilder.ts";
+import { ExecutionStackBuilder } from "./execution-stack/ExecutionStackBuilder.ts";
+import { IExecutionStrategyFactory } from "./execution-stack/factory.ts";
 
-export const generateVestingSchedule = (
-  ocfPackage: OcfPackageContent,
-  securityId: string
-): VestingInstallment[] => {
-  /**********************************
-   * Get OCF Data for the securityId
-   **********************************/
+export class VestingScheduleGenerator {
+  constructor(
+    private ocfPackage: OcfPackageContent,
+    private executionStackBuilder: new (
+      graph: Map<string, GraphNode>,
+      rootNodes: string[],
+      ocfData: OCFDataBySecurityId,
+      executionPathStrategyFactory: IExecutionStrategyFactory
+    ) => ExecutionStackBuilder,
+    private executionPathStrategyFactory: IExecutionStrategyFactory
+  ) {}
 
-  const ocfData = getOCFDataBySecurityId(ocfPackage, securityId);
+  private getOCFData(securityId: string): OCFDataBySecurityId {
+    return getOCFDataBySecurityId(this.ocfPackage, securityId);
+  }
 
-  /**************************************************************************************************
-   * Apply the strategy
-   *
+  /**
    * If both `vesting_terms_id` and `vestings` are provided, defer to the `vesting_terms_id`.
    * Absence of both `vesting_terms_id` and `vestings` means the shares are fully vested on issuance.
-   *
-   * TODO: Indicate whether this is natural language rule is already documented anywhere
-   **************************************************************************************************/
+   */
+  private getStrategy(OCFDataBySecurityId: OCFDataBySecurityId) {
+    if (OCFDataBySecurityId.issuanceVestingTerms) {
+      return this.imperativeStrategy(OCFDataBySecurityId);
+    } else if (OCFDataBySecurityId.vestingObjects) {
+      return this.declarativeStrategy(OCFDataBySecurityId);
+    } else {
+      return this.fullyVestedStrategy(OCFDataBySecurityId);
+    }
+  }
 
-  let vestingSchedule: VestingInstallment[];
-
-  /******************************
-   * If a `vesting_terms_id` is provided
-   *
-   * Prepare vesting conditions
-   * Create vesting graph
-   * Create the execution stack from the graph of vesting conditions
-   ******************************/
-  if (ocfData.issuanceVestingTerms) {
-    /******************************
-     * Prepare vesting conditions
-     ******************************/
-    const vestingConditions = ocfData.issuanceVestingTerms!.vesting_conditions;
+  private imperativeStrategy(OCFDataBySecurityId: OCFDataBySecurityId) {
+    // Prepare vesting conditions
+    const vestingConditions =
+      OCFDataBySecurityId.issuanceVestingTerms!.vesting_conditions;
     const graphNodes = vestingConditions.map((vc) => {
       const graphNode: GraphNode = {
         ...vc,
@@ -51,89 +56,174 @@ export const generateVestingSchedule = (
       return graphNode;
     });
 
-    /******************************
-     * Create vesting graph
-     ******************************/
-
+    // Create vesting graph
     const { graph, rootNodes } = createVestingGraph(graphNodes);
 
-    /******************************
-     * Create the execution stack
-     ******************************/
-    const executionStack = createExecutionStack(graph, rootNodes, ocfData);
+    // Create the execution stack
+    const executionStackBuilder = new this.executionStackBuilder(
+      graph,
+      rootNodes,
+      OCFDataBySecurityId,
+      this.executionPathStrategyFactory
+    );
+    const executionStack = executionStackBuilder.build();
 
-    /******************************************************************************************************
-     * Create installments from the execution stack
-     *
-     * Processing is deferred for nodes that are part of an EARLIER_OF or LATER_OF relationship
-     * Instead the vesting installments for these nodes are created when the relationship node is processed
-     ******************************************************************************************************/
+    // Create installments from the execution stack
+    const vestingInstallmentBuilder = new VestingInstallmentBuilder(
+      OCFDataBySecurityId,
+      executionStack
+    );
 
-    const service = new VestingScheduleService(ocfData, executionStack);
+    const vestingSchedule = vestingInstallmentBuilder.build();
 
-    for (const node of executionStack.values()) {
-      const installments = service.createInstallments(node);
-      service.addToVestingSchedule(installments);
-    }
+    return vestingSchedule;
+  }
 
-    vestingSchedule = service.vestingSchedule;
-
-    /******************************
-     * If Vesting Objects are provided
-     ******************************/
-  } else if (ocfData.vestingObjects) {
-    vestingSchedule = ocfData.vestingObjects.map((obj) => ({
+  private declarativeStrategy(OCFDataBySecurityId: OCFDataBySecurityId) {
+    return OCFDataBySecurityId.vestingObjects!.map((obj) => ({
       date: parseISO(obj.date),
       quantity: parseFloat(obj.amount),
     }));
+  }
 
-    /******************************
-     * If fully vested on the grant date
-     ******************************/
-  } else {
-    vestingSchedule = [
+  private fullyVestedStrategy(OCFDataBySecurityId: OCFDataBySecurityId) {
+    return [
       {
-        date: parseISO(ocfData.issuanceTransaction.date),
-        quantity: parseFloat(ocfData.issuanceTransaction.quantity),
+        date: parseISO(OCFDataBySecurityId.issuanceTransaction.date),
+        quantity: parseFloat(OCFDataBySecurityId.issuanceTransaction.quantity),
       },
     ];
   }
 
-  /******************************
-   * Apply Rounding
-   ******************************/
+  private applyRounding(vestingSchedule: VestingInstallment[]) {
+    let cumulativeRemainder = 0;
 
-  const roundedSchedule = applyRounding(vestingSchedule);
+    const roundedVestingSchedule = vestingSchedule.reduce(
+      (acc, installment) => {
+        const installmentRemainder =
+          installment.quantity - Math.floor(installment.quantity);
 
-  /*********************************************************************
-   * Address if the grant date is after the first scheduled vesting date
-   **********************************************************************/
+        const newQuantity =
+          installment.quantity + cumulativeRemainder + installmentRemainder;
 
-  const grantDate = parseISO(ocfData.issuanceTransaction.date);
-  const processedSchedule = processFirstVestingDate(roundedSchedule, grantDate);
+        acc.push({
+          ...installment,
+          quantity: Math.floor(newQuantity),
+        });
 
-  /*****************************************
-   * Evaluate total number of shares vested
-   *****************************************/
+        cumulativeRemainder = newQuantity - Math.floor(newQuantity);
 
-  const totalSharesUnderlying = parseFloat(
-    ocfData.issuanceTransaction.quantity
-  );
-  const totalSharesVested = processedSchedule.reduce((acc, installment) => {
-    return (acc += installment.quantity);
-  }, 0);
-
-  /*
-  TODO
-  Consider throwing a warning if not all shares are scheduled to vest
-  throw new Error(`Not all shares underlying equity issuance with security id ${ocfData.issuanceTransaction.id} are scheduled to vest`)
-  */
-
-  if (totalSharesVested > totalSharesUnderlying) {
-    throw new Error(
-      `More shares are scheduled to vest than underlie equity issuance with security id ${ocfData.issuanceTransaction.id}`
+        return acc;
+      },
+      [] as VestingInstallment[]
     );
+
+    return roundedVestingSchedule;
   }
 
-  return processedSchedule;
-};
+  private processFirstVestingDate(
+    vestingSchedule: VestingInstallment[],
+    grantDate: Date
+  ) {
+    const firstIndexOnOrAfterGrantDate = vestingSchedule.findIndex(
+      (installment) =>
+        // this determines whether installment.date is after or equal to grantDate
+        compareAsc(installment.date, grantDate) >= 0
+    );
+
+    let accumulatedQuantity = 0;
+
+    const processedVestingSchedule = vestingSchedule.reduce(
+      (acc, installment, index) => {
+        accumulatedQuantity += installment.quantity;
+
+        // accumulate and move on if the installment is before the firstVestingDateIndex
+        if (index < firstIndexOnOrAfterGrantDate) {
+          return acc;
+        }
+
+        if (index === firstIndexOnOrAfterGrantDate) {
+          const modInstallment: VestingInstallment = {
+            date: installment.date,
+            quantity: accumulatedQuantity,
+          };
+
+          acc.push(modInstallment);
+          return acc;
+        }
+
+        const modInstallment: VestingInstallment = {
+          date: installment.date,
+          quantity: installment.quantity,
+        };
+
+        acc.push(modInstallment);
+        return acc;
+      },
+      [] as VestingInstallment[]
+    );
+
+    return processedVestingSchedule;
+  }
+
+  public generateSchedule(securityId: string): VestingInstallment[] {
+    const OCFDataBySecurityId = this.getOCFData(securityId);
+    const unroundedSchedule = this.getStrategy(OCFDataBySecurityId);
+
+    const roundedSchedule = this.applyRounding(unroundedSchedule);
+
+    const grantDate = parseISO(OCFDataBySecurityId.issuanceTransaction.date);
+    const processedSchedule = this.processFirstVestingDate(
+      roundedSchedule,
+      grantDate
+    );
+
+    return processedSchedule;
+  }
+
+  public getStatus(vestingSchedule: VestingInstallment[], securityId: string) {
+    const ocfData = this.getOCFData(securityId);
+
+    const EARLY_EXERCISABLE = !!ocfData.issuanceTransaction.early_exercisable;
+    const totalQuantity = parseFloat(ocfData.issuanceTransaction.quantity);
+
+    // sort by vesting date
+    vestingSchedule.sort((a, b) => compareAsc(a.date, b.date));
+
+    let totalVested = 0;
+    let totalUnvested = totalQuantity;
+
+    const vestingScheduleWithStatus = vestingSchedule.map((installment) => {
+      totalVested += installment.quantity;
+      totalUnvested -= installment.quantity;
+
+      const status: VestingScheduleStatus = {
+        ...installment,
+        becameVested: installment.quantity,
+        totalVested,
+        totalUnvested,
+        becameExercisable: EARLY_EXERCISABLE ? 0 : installment.quantity,
+      };
+
+      return status;
+    });
+
+    // Add an installment for the grant date if the option is EARLY_EXERCISABLE and not fully vested on the grant date
+
+    if (
+      (ocfData.issuanceVestingTerms || ocfData.vestingObjects) &&
+      EARLY_EXERCISABLE
+    ) {
+      vestingScheduleWithStatus.unshift({
+        date: parseISO(ocfData.issuanceTransaction.date),
+        quantity: 0,
+        becameVested: 0,
+        totalVested: 0,
+        totalUnvested: totalQuantity,
+        becameExercisable: EARLY_EXERCISABLE ? totalQuantity : 0,
+      });
+    }
+
+    return vestingScheduleWithStatus;
+  }
+}

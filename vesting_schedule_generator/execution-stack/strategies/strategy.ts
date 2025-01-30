@@ -1,17 +1,17 @@
 import { max } from "date-fns";
 import type { GraphNode, OCFDataBySecurityId } from "types";
 
-export interface ShouldBeInExecutionPathStrategyConfig<T extends GraphNode> {
+export interface ExecutionStrategyConfig<T extends GraphNode> {
   node: T;
   graph: Map<string, GraphNode>;
   executionStack: Map<string, GraphNode>;
   ocfData: OCFDataBySecurityId;
 }
 
-export abstract class ShouldBeInExecutionPathStrategy<T extends GraphNode> {
-  protected config: ShouldBeInExecutionPathStrategyConfig<T>;
+export abstract class ExecutionStrategy<T extends GraphNode> {
+  protected config: ExecutionStrategyConfig<T>;
   protected parentNodes: GraphNode[];
-  constructor(config: ShouldBeInExecutionPathStrategyConfig<T>) {
+  constructor(config: ExecutionStrategyConfig<T>) {
     this.config = config;
     this.parentNodes = this.getParentNodes();
   }
