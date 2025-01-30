@@ -1,4 +1,4 @@
-import { VestingModeService } from "../create_installment/VestingModeService";
+import { VestingModeService } from "../vesting-installment/VestingModeService";
 
 const vestingSchedule = [4.5, 4.5, 4.5, 4.5];
 

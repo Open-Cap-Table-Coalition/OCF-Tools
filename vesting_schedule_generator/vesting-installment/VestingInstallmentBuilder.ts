@@ -6,7 +6,7 @@ export class VestingInstallmentBuilder {
   private vestedCount = 0;
   constructor(
     private ocfData: OCFDataBySecurityId,
-    private executionStack: Map<string, GraphNode>
+    private executionPath: Map<string, GraphNode>
   ) {}
 
   private addToVestingSchedule(installments: VestingInstallment[]) {
@@ -26,14 +26,14 @@ export class VestingInstallmentBuilder {
       node,
       vestedCount: this.vestedCount,
       ocfData: this.ocfData,
-      executionStack: this.executionStack,
+      executionPath: this.executionPath,
     }).getInstallments();
 
     return installments;
   }
 
   public build() {
-    for (const node of this.executionStack.values()) {
+    for (const node of this.executionPath.values()) {
       const installments = this.createInstallments(node);
       this.addToVestingSchedule(installments);
     }

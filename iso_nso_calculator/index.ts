@@ -3,8 +3,8 @@ import { OcfPackageContent } from "../read_ocf_package";
 import type { VestingScheduleStatus, OCFDataBySecurityId } from "types";
 import { VestingScheduleGenerator } from "../vesting_schedule_generator/index.ts";
 import { getOCFDataBySecurityId } from "../vesting_schedule_generator/get-ocf-data-by-security-id.ts";
-import { ExecutionStackBuilder } from "../vesting_schedule_generator/execution-stack/ExecutionStackBuilder.ts";
-import { ExecutionStrategyFactory } from "../vesting_schedule_generator/execution-stack/factory.ts";
+import { ExecutionPathBuilder } from "../vesting_schedule_generator/execution-path/ExecutionPathBuilder.ts";
+import { ExecutionStrategyFactory } from "../vesting_schedule_generator/execution-path/factory.ts";
 
 // Define the interface for the data supplied to the calculator
 interface Installment extends VestingScheduleStatus {
@@ -57,7 +57,7 @@ export class ISOCalculator {
 
       const generator = new VestingScheduleGenerator(
         this.ocfPackage,
-        ExecutionStackBuilder,
+        ExecutionPathBuilder,
         ExecutionStrategyFactory
       );
 

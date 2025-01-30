@@ -1,4 +1,4 @@
-import { createVestingGraph } from "../../execution-stack/create-vesting-graph";
+import { createVestingGraph } from "../../execution-path/create-vesting-graph";
 import type { GraphNode } from "types";
 import {
   buildPopulatedGraphNode,

@@ -1,9 +1,9 @@
-import { generateVestingSchedule } from "vesting_schedule_generator";
+import { VestingScheduleGenerator } from "vesting_schedule_generator";
 import { OcfPackageContent, readOcfPackage } from "../read_ocf_package";
-import { getVestingScheduleStatus } from "vesting_schedule_generator/getVestingScheduleStatus";
-import { getOCFDataBySecurityId } from "vesting_schedule_generator/get-ocf-data-by-security-id";
 import { isBefore, parseISO } from "date-fns";
 import { VestingScheduleStatus } from "types";
+import { ExecutionPathBuilder } from "vesting_schedule_generator/execution-path/ExecutionPathBuilder";
+import { ExecutionStrategyFactory } from "vesting_schedule_generator/execution-path/factory";
 
 const packagePath = "./sample_ocf_folders/acme_holdings_limited";
 const securityId = "equity_compensation_issuance_01";
@@ -12,9 +12,13 @@ const ocfPackage: OcfPackageContent = readOcfPackage(packagePath);
 try {
   const checkDateString = "2020-06-15";
   const checkDate = parseISO(checkDateString);
-  const schedule = generateVestingSchedule(ocfPackage, securityId);
-  const ocfData = getOCFDataBySecurityId(ocfPackage, securityId);
-  const scheduleWithStatus = getVestingScheduleStatus(schedule, ocfData); // known to be sorted in ascending order
+  const scheduleGenerator = new VestingScheduleGenerator(
+    ocfPackage,
+    ExecutionPathBuilder,
+    ExecutionStrategyFactory
+  );
+  const schedule = scheduleGenerator.generateSchedule(securityId);
+  const scheduleWithStatus = scheduleGenerator.getStatus(schedule, securityId); // known to be sorted in ascending order
 
   const getlatestInstallment = (
     schedule: VestingScheduleStatus[],

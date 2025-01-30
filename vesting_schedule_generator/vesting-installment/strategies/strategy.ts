@@ -5,7 +5,7 @@ export interface CreateInstallmentConfig<T extends GraphNode> {
   node: T;
   vestedCount: number;
   ocfData: OCFDataBySecurityId;
-  executionStack: Map<string, GraphNode>;
+  executionPath: Map<string, GraphNode>;
   beforeCliff?: boolean;
 }
 

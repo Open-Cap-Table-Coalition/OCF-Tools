@@ -4,7 +4,7 @@ import type { GraphNode, OCFDataBySecurityId } from "types";
 export interface ExecutionStrategyConfig<T extends GraphNode> {
   node: T;
   graph: Map<string, GraphNode>;
-  executionStack: Map<string, GraphNode>;
+  executionPath: Map<string, GraphNode>;
   ocfData: OCFDataBySecurityId;
 }
 

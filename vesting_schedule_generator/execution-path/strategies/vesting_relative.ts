@@ -6,7 +6,7 @@ export class VestingRelativeExecutionStrategy extends ExecutionStrategy<Relative
   private relativeCondition: GraphNode | undefined;
   constructor(config: ExecutionStrategyConfig<RelativeGraphNode>) {
     super(config);
-    this.relativeCondition = this.config.executionStack.get(
+    this.relativeCondition = this.config.executionPath.get(
       this.config.node.trigger.relative_to_condition_id
     );
   }

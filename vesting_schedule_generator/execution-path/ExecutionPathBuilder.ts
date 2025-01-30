@@ -8,31 +8,31 @@
  */
 
 import type { GraphNode, OCFDataBySecurityId } from "types";
-import { IExecutionStrategyFactory } from "./factory";
+import { IExecutionStrategyFactory } from "../execution-path/factory";
 import { compareAsc } from "date-fns";
 
 /**
  * Builder class to create an ordered execution stack from a vesting graph
  */
-export class ExecutionStackBuilder {
+export class ExecutionPathBuilder {
   private visited: Set<string>;
-  private executionStack: Map<string, GraphNode>;
+  private executionPath: Map<string, GraphNode>;
   private recusionStack: Set<string>;
 
   constructor(
     private graph: Map<string, GraphNode>,
     private rootNodes: string[],
     private ocfData: OCFDataBySecurityId,
-    private executionPathStrategyFactory: IExecutionStrategyFactory
+    private executionStrategyFactory: IExecutionStrategyFactory
   ) {
     this.visited = new Set<string>();
-    this.executionStack = new Map<string, GraphNode>();
+    this.executionPath = new Map<string, GraphNode>();
     this.recusionStack = new Set<string>();
   }
 
   public build(): Map<string, GraphNode> {
     this.processSiblings(this.rootNodes);
-    return this.executionStack;
+    return this.executionPath;
   }
 
   private processSiblings(siblingIds: string[]): void {
@@ -46,7 +46,7 @@ export class ExecutionStackBuilder {
     if (!earliestNode) return;
 
     this.visited.add(earliestNode.id);
-    this.executionStack.set(earliestNode.id, earliestNode);
+    this.executionPath.set(earliestNode.id, earliestNode);
 
     // Process children of earliest node as next sibling group
     if (earliestNode.next_condition_ids.length > 0) {
@@ -66,11 +66,11 @@ export class ExecutionStackBuilder {
   }
 
   private shouldBeIncluded(node: GraphNode): boolean {
-    const strategy = this.executionPathStrategyFactory.getStrategy(node);
+    const strategy = this.executionStrategyFactory.getStrategy(node);
     return new strategy({
       node,
       graph: this.graph,
-      executionStack: this.executionStack,
+      executionPath: this.executionPath,
       ocfData: this.ocfData,
     }).execute();
   }

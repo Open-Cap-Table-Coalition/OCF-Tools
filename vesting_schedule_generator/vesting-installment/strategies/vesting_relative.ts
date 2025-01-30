@@ -34,7 +34,7 @@ export class VestingRelativeStrategy extends CreateInstallmentStrategy<RelativeG
       this.config.node.trigger.relative_to_condition_id;
 
     const relativeCondition =
-      this.config.executionStack.get(relativeConditionId);
+      this.config.executionPath.get(relativeConditionId);
 
     if (!relativeCondition) {
       throw new Error(

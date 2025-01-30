@@ -1,6 +1,6 @@
 import { OcfPackageContent } from "../read_ocf_package";
 import { getOCFDataBySecurityId } from "./get-ocf-data-by-security-id.ts";
-import { createVestingGraph } from "./execution-stack/create-vesting-graph.ts";
+import { createVestingGraph } from "./execution-path/create-vesting-graph.ts";
 import {
   GraphNode,
   OCFDataBySecurityId,
@@ -8,19 +8,19 @@ import {
   VestingScheduleStatus,
 } from "types/index.ts";
 import { compareAsc, parseISO } from "date-fns";
-import { VestingInstallmentBuilder } from "./create_installment/VestingInstallmentBuilder.ts";
-import { ExecutionStackBuilder } from "./execution-stack/ExecutionStackBuilder.ts";
-import { IExecutionStrategyFactory } from "./execution-stack/factory.ts";
+import { VestingInstallmentBuilder } from "./vesting-installment/VestingInstallmentBuilder.ts";
+import { ExecutionPathBuilder } from "./execution-path/ExecutionPathBuilder.ts";
+import { IExecutionStrategyFactory } from "./execution-path/factory.ts";
 
 export class VestingScheduleGenerator {
   constructor(
     private ocfPackage: OcfPackageContent,
-    private executionStackBuilder: new (
+    private executionPathBuilder: new (
       graph: Map<string, GraphNode>,
       rootNodes: string[],
       ocfData: OCFDataBySecurityId,
       executionPathStrategyFactory: IExecutionStrategyFactory
-    ) => ExecutionStackBuilder,
+    ) => ExecutionPathBuilder,
     private executionPathStrategyFactory: IExecutionStrategyFactory
   ) {}
 
@@ -60,18 +60,18 @@ export class VestingScheduleGenerator {
     const { graph, rootNodes } = createVestingGraph(graphNodes);
 
     // Create the execution stack
-    const executionStackBuilder = new this.executionStackBuilder(
+    const executionPathBuilder = new this.executionPathBuilder(
       graph,
       rootNodes,
       OCFDataBySecurityId,
       this.executionPathStrategyFactory
     );
-    const executionStack = executionStackBuilder.build();
+    const executionPath = executionPathBuilder.build();
 
     // Create installments from the execution stack
     const vestingInstallmentBuilder = new VestingInstallmentBuilder(
       OCFDataBySecurityId,
-      executionStack
+      executionPath
     );
 
     const vestingSchedule = vestingInstallmentBuilder.build();

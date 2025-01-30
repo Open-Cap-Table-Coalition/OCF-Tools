@@ -4,13 +4,12 @@ import { ocfPackage as FourYearMonthly1YearCliff } from "../testOcfPackages/docu
 import { parseISO } from "date-fns";
 import { ocfPackage as DeliberateCycle } from "../testOcfPackages/deliberate-cycle";
 import { ocfPackage as NoRootNodes } from "../testOcfPackages/no-root-nodes";
-// import { createExecutionStack } from "../create-execution-stack";
-import { ExecutionStackBuilder } from "../../execution-stack/ExecutionStackBuilder";
-import { ExecutionStrategyFactory } from "../../execution-stack/factory";
-import { createVestingGraph } from "../../execution-stack/create-vesting-graph";
+import { ExecutionPathBuilder } from "../../execution-path/ExecutionPathBuilder";
+import { ExecutionStrategyFactory } from "../../execution-path/factory";
+import { createVestingGraph } from "../../execution-path/create-vesting-graph";
 import { OcfPackageContent } from "read_ocf_package";
 
-const getExecutionStack = (
+const getExecutionPath = (
   ocfPackage: OcfPackageContent,
   securityId: string
 ): Map<string, GraphNode> => {
@@ -52,20 +51,20 @@ const getExecutionStack = (
   /******************************
    * Create the execution stack
    ******************************/
-  const builder = new ExecutionStackBuilder(
+  const builder = new ExecutionPathBuilder(
     graph,
     rootNodes,
     ocfData,
     ExecutionStrategyFactory
   );
 
-  const executionStack = builder.build();
+  const executionPath = builder.build();
 
-  return executionStack;
+  return executionPath;
 };
 
 describe("4 year monthly with one year cliff", () => {
-  const executionStack = getExecutionStack(
+  const executionPath = getExecutionPath(
     FourYearMonthly1YearCliff,
     "equity_compensation_issuance_01"
   );
@@ -135,14 +134,14 @@ describe("4 year monthly with one year cliff", () => {
       ],
     ]);
 
-    expect(executionStack).toStrictEqual(expectedStack);
+    expect(executionPath).toStrictEqual(expectedStack);
   });
 });
 
 describe("Deliberate cycle", () => {
   test("Should throw an error when cycle is detected", () => {
     expect(() =>
-      getExecutionStack(DeliberateCycle, "equity_compensation_issuance_01")
+      getExecutionPath(DeliberateCycle, "equity_compensation_issuance_01")
     ).toThrow("Cycle detected involving the vesting condition with id 2");
   });
 });
@@ -150,7 +149,7 @@ describe("Deliberate cycle", () => {
 describe("No root nodes", () => {
   test("Should throw an error when cycle is detected", () => {
     expect(() =>
-      getExecutionStack(NoRootNodes, "equity_compensation_issuance_01")
+      getExecutionPath(NoRootNodes, "equity_compensation_issuance_01")
     ).toThrow(
       `The graph must have at least one starting condition with no prior conditions`
     );
