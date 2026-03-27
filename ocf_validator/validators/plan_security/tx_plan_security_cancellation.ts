@@ -46,6 +46,7 @@ const valid_tx_plan_security_cancellation = (
       ele.security_id === event.data.security_id &&
       ele.object_type !== 'TX_PLAN_SECURITY_ISSUANCE' &&
       ele.object_type !== 'TX_PLAN_SECURITY_ACCEPTANCE' &&
+      ele.object_type !== 'TX_STOCK_PLAN_RETURN_TO_POOL' &&
       !(ele.object_type === 'TX_PLAN_SECURITY_CANCELLATION' && ele.id === event.data.id)
     ) {
       only_transaction_validity = false;
