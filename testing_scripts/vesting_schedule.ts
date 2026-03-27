@@ -5,11 +5,16 @@ import { VestingConditionStrategyFactory } from "../vesting_schedule_generator_v
 
 const packagePath = "./testing_scripts/testPackage";
 const securityId = "equity_compensation_issuance_01";
-const ocfPackage: OcfPackageContent = readOcfPackage(packagePath);
 
-const vestingSchedule = new VestingScheduleGenerator(
-  ocfPackage,
-  ExecutionPathBuilder,
-  VestingConditionStrategyFactory
-).generateScheduleWithStatus(securityId);
-console.table(vestingSchedule);
+export function getVestingSchedule() {
+  const ocfPackage: OcfPackageContent = readOcfPackage(packagePath);
+  return new VestingScheduleGenerator(
+    ocfPackage,
+    ExecutionPathBuilder,
+    VestingConditionStrategyFactory
+  ).generateScheduleWithStatus(securityId);
+}
+
+if (require.main === module) {
+  console.table(getVestingSchedule());
+}

@@ -3,11 +3,15 @@ import { OcfPackageContent, readOcfPackage } from "../read_ocf_package";
 
 const packagePath = "./sample_ocf_folders/acme_holdings_limited";
 const stakeholderId = "emilyEmployee";
-const ocfPackage: OcfPackageContent = readOcfPackage(packagePath);
 
-try {
+export function getIsoNsoResults() {
+  const ocfPackage: OcfPackageContent = readOcfPackage(packagePath);
   const calculator = new ISOCalculator(ocfPackage);
-  const results = calculator.execute(stakeholderId);
+  return calculator.execute(stakeholderId);
+}
+
+if (require.main === module) {
+  const results = getIsoNsoResults();
 
   const years: number[] = [];
   results.map((result) => {
@@ -20,9 +24,4 @@ try {
     const resultsByYear = results.filter((result) => result.Year === year);
     console.table(resultsByYear);
   });
-} catch (error) {
-  if (error instanceof Error) {
-    console.error("Error message:", error.message);
-  }
-  console.error("Unknown error:", error);
 }
