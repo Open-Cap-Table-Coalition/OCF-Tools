@@ -1,5 +1,4 @@
 import { VestingScheduleGenerator } from "../vesting_schedule_generator_v1";
-// import { ocfPackage } from "../vesting_schedule_generator_v1/tests/testOcfPackages/documentation_examples/4yr-1yr-cliff-schedule";
 import {
   TX_Equity_Compensation_Issuance,
   TX_Vesting_Event,
@@ -11,7 +10,7 @@ import { ExecutionPathBuilder } from "../vesting_schedule_generator_v1/Execution
 import { VestingConditionStrategyFactory } from "../vesting_schedule_generator_v1/vesting-condition-strategies/factory";
 import { OcfPackageContent } from "read_ocf_package";
 
-try {
+export function getBackLoadedCliffSchedule() {
   const vestingConditions: VestingCondition[] = [
     {
       id: "vesting-start",
@@ -108,15 +107,13 @@ try {
 
   ocfPackage.transactions.push(start_event);
 
-  const vestingSchedule = new VestingScheduleGenerator(
+  return new VestingScheduleGenerator(
     ocfPackage,
     ExecutionPathBuilder,
     VestingConditionStrategyFactory
   ).generateSchedule(securityId);
-  console.table(vestingSchedule);
-} catch (error) {
-  if (error instanceof Error) {
-    console.error("Error message:", error.message);
-  }
-  console.error("Unknown error:", error);
+}
+
+if (require.main === module) {
+  console.table(getBackLoadedCliffSchedule());
 }
