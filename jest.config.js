@@ -13,5 +13,8 @@ module.exports = {
   },
   moduleNameMapper: {
     "^vesting_schedule_generator$": "<rootDir>/vesting_schedule_generator_v1",
+    "^vesting_schedule_generator_v1(/.*)?$": "<rootDir>/vesting_schedule_generator_v1$1",
+    "^iso_nso_calculator(/.*)?$": "<rootDir>/iso_nso_calculator$1",
+    "^read_ocf_package(/.*)?$": "<rootDir>/read_ocf_package$1",
   },
 };
