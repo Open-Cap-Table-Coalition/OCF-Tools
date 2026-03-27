@@ -1,0 +1,23 @@
+{
+  "file_type": "OCF_STOCK_PLANS_FILE",
+  "items": [
+    {
+      "id": "stock_plan_01",
+      "object_type": "STOCK_PLAN",
+      "plan_name": "2019 Stock Option Plan",
+      "board_approval_date": "2019-01-01",
+      "initial_shares_reserved": "2000000",
+      "default_cancellation_behavior": "RETURN_TO_POOL",
+      "stock_class_ids": ["ordinaryB"]
+    },
+    {
+      "id": "stock_plan_02",
+      "object_type": "STOCK_PLAN",
+      "plan_name": "2023 Equity Incentive Plan",
+      "board_approval_date": "2023-01-01",
+      "initial_shares_reserved": "500000",
+      "default_cancellation_behavior": "RETURN_TO_POOL",
+      "stock_class_ids": ["ordinaryB"]
+    }
+  ]
+}
