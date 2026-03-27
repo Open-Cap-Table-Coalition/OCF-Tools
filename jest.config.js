@@ -1,3 +1,8 @@
+// Pin timezone to UTC so Date serialization in fixture-based tests is
+// consistent across local dev machines and CI. Regenerate fixtures with:
+//   TZ=UTC npx ts-node -r tsconfig-paths/register testing_scripts/capture_fixtures.ts
+process.env.TZ = "UTC";
+
 /** @type {import('ts-jest').JestConfigWithTsJest} **/
 module.exports = {
   preset: `ts-jest/presets/default-esm`,

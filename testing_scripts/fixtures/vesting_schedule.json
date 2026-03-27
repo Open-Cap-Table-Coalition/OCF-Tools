@@ -1,258 +1,258 @@
 [
   {
-    "date": "2020-06-01T05:00:00.000Z",
+    "date": "2020-06-01T00:00:00.000Z",
     "quantity": 90000,
     "totalVested": 90000,
     "totalUnvested": 270000,
     "becameExercisable": 90000
   },
   {
-    "date": "2020-07-01T05:00:00.000Z",
+    "date": "2020-07-01T00:00:00.000Z",
     "quantity": 7500,
     "totalVested": 97500,
     "totalUnvested": 262500,
     "becameExercisable": 7500
   },
   {
-    "date": "2020-08-01T05:00:00.000Z",
+    "date": "2020-08-01T00:00:00.000Z",
     "quantity": 7500,
     "totalVested": 105000,
     "totalUnvested": 255000,
     "becameExercisable": 7500
   },
   {
-    "date": "2020-09-01T05:00:00.000Z",
+    "date": "2020-09-01T00:00:00.000Z",
     "quantity": 7500,
     "totalVested": 112500,
     "totalUnvested": 247500,
     "becameExercisable": 7500
   },
   {
-    "date": "2020-10-01T05:00:00.000Z",
+    "date": "2020-10-01T00:00:00.000Z",
     "quantity": 7500,
     "totalVested": 120000,
     "totalUnvested": 240000,
     "becameExercisable": 7500
   },
   {
-    "date": "2020-11-01T05:00:00.000Z",
+    "date": "2020-11-01T00:00:00.000Z",
     "quantity": 7500,
     "totalVested": 127500,
     "totalUnvested": 232500,
     "becameExercisable": 7500
   },
   {
-    "date": "2020-12-01T06:00:00.000Z",
+    "date": "2020-12-01T00:00:00.000Z",
     "quantity": 7500,
     "totalVested": 135000,
     "totalUnvested": 225000,
     "becameExercisable": 7500
   },
   {
-    "date": "2021-01-01T06:00:00.000Z",
+    "date": "2021-01-01T00:00:00.000Z",
     "quantity": 7500,
     "totalVested": 142500,
     "totalUnvested": 217500,
     "becameExercisable": 7500
   },
   {
-    "date": "2021-02-01T06:00:00.000Z",
+    "date": "2021-02-01T00:00:00.000Z",
     "quantity": 7500,
     "totalVested": 150000,
     "totalUnvested": 210000,
     "becameExercisable": 7500
   },
   {
-    "date": "2021-03-01T06:00:00.000Z",
+    "date": "2021-03-01T00:00:00.000Z",
     "quantity": 7500,
     "totalVested": 157500,
     "totalUnvested": 202500,
     "becameExercisable": 7500
   },
   {
-    "date": "2021-04-01T05:00:00.000Z",
+    "date": "2021-04-01T00:00:00.000Z",
     "quantity": 7500,
     "totalVested": 165000,
     "totalUnvested": 195000,
     "becameExercisable": 7500
   },
   {
-    "date": "2021-05-01T05:00:00.000Z",
+    "date": "2021-05-01T00:00:00.000Z",
     "quantity": 7500,
     "totalVested": 172500,
     "totalUnvested": 187500,
     "becameExercisable": 7500
   },
   {
-    "date": "2021-06-01T05:00:00.000Z",
+    "date": "2021-06-01T00:00:00.000Z",
     "quantity": 7500,
     "totalVested": 180000,
     "totalUnvested": 180000,
     "becameExercisable": 7500
   },
   {
-    "date": "2021-07-01T05:00:00.000Z",
+    "date": "2021-07-01T00:00:00.000Z",
     "quantity": 7500,
     "totalVested": 187500,
     "totalUnvested": 172500,
     "becameExercisable": 7500
   },
   {
-    "date": "2021-08-01T05:00:00.000Z",
+    "date": "2021-08-01T00:00:00.000Z",
     "quantity": 7500,
     "totalVested": 195000,
     "totalUnvested": 165000,
     "becameExercisable": 7500
   },
   {
-    "date": "2021-09-01T05:00:00.000Z",
+    "date": "2021-09-01T00:00:00.000Z",
     "quantity": 7500,
     "totalVested": 202500,
     "totalUnvested": 157500,
     "becameExercisable": 7500
   },
   {
-    "date": "2021-10-01T05:00:00.000Z",
+    "date": "2021-10-01T00:00:00.000Z",
     "quantity": 7500,
     "totalVested": 210000,
     "totalUnvested": 150000,
     "becameExercisable": 7500
   },
   {
-    "date": "2021-11-01T05:00:00.000Z",
+    "date": "2021-11-01T00:00:00.000Z",
     "quantity": 7500,
     "totalVested": 217500,
     "totalUnvested": 142500,
     "becameExercisable": 7500
   },
   {
-    "date": "2021-12-01T06:00:00.000Z",
+    "date": "2021-12-01T00:00:00.000Z",
     "quantity": 7500,
     "totalVested": 225000,
     "totalUnvested": 135000,
     "becameExercisable": 7500
   },
   {
-    "date": "2022-01-01T06:00:00.000Z",
+    "date": "2022-01-01T00:00:00.000Z",
     "quantity": 7500,
     "totalVested": 232500,
     "totalUnvested": 127500,
     "becameExercisable": 7500
   },
   {
-    "date": "2022-02-01T06:00:00.000Z",
+    "date": "2022-02-01T00:00:00.000Z",
     "quantity": 7500,
     "totalVested": 240000,
     "totalUnvested": 120000,
     "becameExercisable": 7500
   },
   {
-    "date": "2022-03-01T06:00:00.000Z",
+    "date": "2022-03-01T00:00:00.000Z",
     "quantity": 7500,
     "totalVested": 247500,
     "totalUnvested": 112500,
     "becameExercisable": 7500
   },
   {
-    "date": "2022-04-01T05:00:00.000Z",
+    "date": "2022-04-01T00:00:00.000Z",
     "quantity": 7500,
     "totalVested": 255000,
     "totalUnvested": 105000,
     "becameExercisable": 7500
   },
   {
-    "date": "2022-05-01T05:00:00.000Z",
+    "date": "2022-05-01T00:00:00.000Z",
     "quantity": 7500,
     "totalVested": 262500,
     "totalUnvested": 97500,
     "becameExercisable": 7500
   },
   {
-    "date": "2022-06-01T05:00:00.000Z",
+    "date": "2022-06-01T00:00:00.000Z",
     "quantity": 7500,
     "totalVested": 270000,
     "totalUnvested": 90000,
     "becameExercisable": 7500
   },
   {
-    "date": "2022-07-01T05:00:00.000Z",
+    "date": "2022-07-01T00:00:00.000Z",
     "quantity": 7500,
     "totalVested": 277500,
     "totalUnvested": 82500,
     "becameExercisable": 7500
   },
   {
-    "date": "2022-08-01T05:00:00.000Z",
+    "date": "2022-08-01T00:00:00.000Z",
     "quantity": 7500,
     "totalVested": 285000,
     "totalUnvested": 75000,
     "becameExercisable": 7500
   },
   {
-    "date": "2022-09-01T05:00:00.000Z",
+    "date": "2022-09-01T00:00:00.000Z",
     "quantity": 7500,
     "totalVested": 292500,
     "totalUnvested": 67500,
     "becameExercisable": 7500
   },
   {
-    "date": "2022-10-01T05:00:00.000Z",
+    "date": "2022-10-01T00:00:00.000Z",
     "quantity": 7500,
     "totalVested": 300000,
     "totalUnvested": 60000,
     "becameExercisable": 7500
   },
   {
-    "date": "2022-11-01T05:00:00.000Z",
+    "date": "2022-11-01T00:00:00.000Z",
     "quantity": 7500,
     "totalVested": 307500,
     "totalUnvested": 52500,
     "becameExercisable": 7500
   },
   {
-    "date": "2022-12-01T06:00:00.000Z",
+    "date": "2022-12-01T00:00:00.000Z",
     "quantity": 7500,
     "totalVested": 315000,
     "totalUnvested": 45000,
     "becameExercisable": 7500
   },
   {
-    "date": "2023-01-01T06:00:00.000Z",
+    "date": "2023-01-01T00:00:00.000Z",
     "quantity": 7500,
     "totalVested": 322500,
     "totalUnvested": 37500,
     "becameExercisable": 7500
   },
   {
-    "date": "2023-02-01T06:00:00.000Z",
+    "date": "2023-02-01T00:00:00.000Z",
     "quantity": 7500,
     "totalVested": 330000,
     "totalUnvested": 30000,
     "becameExercisable": 7500
   },
   {
-    "date": "2023-03-01T06:00:00.000Z",
+    "date": "2023-03-01T00:00:00.000Z",
     "quantity": 7500,
     "totalVested": 337500,
     "totalUnvested": 22500,
     "becameExercisable": 7500
   },
   {
-    "date": "2023-04-01T05:00:00.000Z",
+    "date": "2023-04-01T00:00:00.000Z",
     "quantity": 7500,
     "totalVested": 345000,
     "totalUnvested": 15000,
     "becameExercisable": 7500
   },
   {
-    "date": "2023-05-01T05:00:00.000Z",
+    "date": "2023-05-01T00:00:00.000Z",
     "quantity": 7500,
     "totalVested": 352500,
     "totalUnvested": 7500,
     "becameExercisable": 7500
   },
   {
-    "date": "2023-06-01T05:00:00.000Z",
+    "date": "2023-06-01T00:00:00.000Z",
     "quantity": 7500,
     "totalVested": 360000,
     "totalUnvested": 0,

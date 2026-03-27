@@ -1,7 +1,7 @@
 [
   {
     "Year": 2019,
-    "date": "2019-07-01T05:00:00.000Z",
+    "date": "2019-07-01T00:00:00.000Z",
     "quantity": 7500,
     "grantDate": "2019-06-01",
     "securityId": "equity_compensation_issuance_01",
@@ -15,7 +15,7 @@
   },
   {
     "Year": 2019,
-    "date": "2019-08-01T05:00:00.000Z",
+    "date": "2019-08-01T00:00:00.000Z",
     "quantity": 7500,
     "grantDate": "2019-06-01",
     "securityId": "equity_compensation_issuance_01",
@@ -29,7 +29,7 @@
   },
   {
     "Year": 2019,
-    "date": "2019-09-01T05:00:00.000Z",
+    "date": "2019-09-01T00:00:00.000Z",
     "quantity": 7500,
     "grantDate": "2019-06-01",
     "securityId": "equity_compensation_issuance_01",
@@ -43,7 +43,7 @@
   },
   {
     "Year": 2019,
-    "date": "2019-10-01T05:00:00.000Z",
+    "date": "2019-10-01T00:00:00.000Z",
     "quantity": 7500,
     "grantDate": "2019-06-01",
     "securityId": "equity_compensation_issuance_01",
@@ -57,7 +57,7 @@
   },
   {
     "Year": 2019,
-    "date": "2019-11-01T05:00:00.000Z",
+    "date": "2019-11-01T00:00:00.000Z",
     "quantity": 7500,
     "grantDate": "2019-06-01",
     "securityId": "equity_compensation_issuance_01",
@@ -71,7 +71,7 @@
   },
   {
     "Year": 2019,
-    "date": "2019-12-01T06:00:00.000Z",
+    "date": "2019-12-01T00:00:00.000Z",
     "quantity": 7500,
     "grantDate": "2019-06-01",
     "securityId": "equity_compensation_issuance_01",
@@ -85,7 +85,7 @@
   },
   {
     "Year": 2020,
-    "date": "2020-01-01T06:00:00.000Z",
+    "date": "2020-01-01T00:00:00.000Z",
     "quantity": 7500,
     "grantDate": "2019-06-01",
     "securityId": "equity_compensation_issuance_01",
@@ -99,7 +99,7 @@
   },
   {
     "Year": 2020,
-    "date": "2020-02-01T06:00:00.000Z",
+    "date": "2020-02-01T00:00:00.000Z",
     "quantity": 7500,
     "grantDate": "2019-06-01",
     "securityId": "equity_compensation_issuance_01",
@@ -113,7 +113,7 @@
   },
   {
     "Year": 2020,
-    "date": "2020-03-01T06:00:00.000Z",
+    "date": "2020-03-01T00:00:00.000Z",
     "quantity": 7500,
     "grantDate": "2019-06-01",
     "securityId": "equity_compensation_issuance_01",
@@ -127,7 +127,7 @@
   },
   {
     "Year": 2020,
-    "date": "2020-04-01T05:00:00.000Z",
+    "date": "2020-04-01T00:00:00.000Z",
     "quantity": 7500,
     "grantDate": "2019-06-01",
     "securityId": "equity_compensation_issuance_01",
@@ -141,7 +141,7 @@
   },
   {
     "Year": 2020,
-    "date": "2020-05-01T05:00:00.000Z",
+    "date": "2020-05-01T00:00:00.000Z",
     "quantity": 7500,
     "grantDate": "2019-06-01",
     "securityId": "equity_compensation_issuance_01",
@@ -155,7 +155,7 @@
   },
   {
     "Year": 2020,
-    "date": "2020-06-01T05:00:00.000Z",
+    "date": "2020-06-01T00:00:00.000Z",
     "quantity": 7500,
     "grantDate": "2019-06-01",
     "securityId": "equity_compensation_issuance_01",
@@ -169,7 +169,7 @@
   },
   {
     "Year": 2020,
-    "date": "2020-07-01T05:00:00.000Z",
+    "date": "2020-07-01T00:00:00.000Z",
     "quantity": 7500,
     "grantDate": "2019-06-01",
     "securityId": "equity_compensation_issuance_01",
@@ -183,7 +183,7 @@
   },
   {
     "Year": 2020,
-    "date": "2020-08-01T05:00:00.000Z",
+    "date": "2020-08-01T00:00:00.000Z",
     "quantity": 7500,
     "grantDate": "2019-06-01",
     "securityId": "equity_compensation_issuance_01",
@@ -197,7 +197,7 @@
   },
   {
     "Year": 2020,
-    "date": "2020-09-01T05:00:00.000Z",
+    "date": "2020-09-01T00:00:00.000Z",
     "quantity": 7500,
     "grantDate": "2019-06-01",
     "securityId": "equity_compensation_issuance_01",
@@ -211,7 +211,7 @@
   },
   {
     "Year": 2020,
-    "date": "2020-10-01T05:00:00.000Z",
+    "date": "2020-10-01T00:00:00.000Z",
     "quantity": 7500,
     "grantDate": "2019-06-01",
     "securityId": "equity_compensation_issuance_01",
@@ -225,7 +225,7 @@
   },
   {
     "Year": 2020,
-    "date": "2020-11-01T05:00:00.000Z",
+    "date": "2020-11-01T00:00:00.000Z",
     "quantity": 7500,
     "grantDate": "2019-06-01",
     "securityId": "equity_compensation_issuance_01",
@@ -239,7 +239,7 @@
   },
   {
     "Year": 2020,
-    "date": "2020-12-01T06:00:00.000Z",
+    "date": "2020-12-01T00:00:00.000Z",
     "quantity": 7500,
     "grantDate": "2019-06-01",
     "securityId": "equity_compensation_issuance_01",
@@ -253,7 +253,7 @@
   },
   {
     "Year": 2021,
-    "date": "2021-01-01T06:00:00.000Z",
+    "date": "2021-01-01T00:00:00.000Z",
     "quantity": 7500,
     "grantDate": "2019-06-01",
     "securityId": "equity_compensation_issuance_01",
@@ -267,7 +267,7 @@
   },
   {
     "Year": 2021,
-    "date": "2021-02-01T06:00:00.000Z",
+    "date": "2021-02-01T00:00:00.000Z",
     "quantity": 7500,
     "grantDate": "2019-06-01",
     "securityId": "equity_compensation_issuance_01",
@@ -281,7 +281,7 @@
   },
   {
     "Year": 2021,
-    "date": "2021-03-01T06:00:00.000Z",
+    "date": "2021-03-01T00:00:00.000Z",
     "quantity": 7500,
     "grantDate": "2019-06-01",
     "securityId": "equity_compensation_issuance_01",
@@ -295,7 +295,7 @@
   },
   {
     "Year": 2021,
-    "date": "2021-04-01T05:00:00.000Z",
+    "date": "2021-04-01T00:00:00.000Z",
     "quantity": 7500,
     "grantDate": "2019-06-01",
     "securityId": "equity_compensation_issuance_01",
@@ -309,7 +309,7 @@
   },
   {
     "Year": 2021,
-    "date": "2021-05-01T05:00:00.000Z",
+    "date": "2021-05-01T00:00:00.000Z",
     "quantity": 7500,
     "grantDate": "2019-06-01",
     "securityId": "equity_compensation_issuance_01",
@@ -323,7 +323,7 @@
   },
   {
     "Year": 2021,
-    "date": "2021-06-01T05:00:00.000Z",
+    "date": "2021-06-01T00:00:00.000Z",
     "quantity": 7500,
     "grantDate": "2019-06-01",
     "securityId": "equity_compensation_issuance_01",
@@ -337,7 +337,7 @@
   },
   {
     "Year": 2021,
-    "date": "2021-07-01T05:00:00.000Z",
+    "date": "2021-07-01T00:00:00.000Z",
     "quantity": 7500,
     "grantDate": "2019-06-01",
     "securityId": "equity_compensation_issuance_01",
@@ -351,7 +351,7 @@
   },
   {
     "Year": 2021,
-    "date": "2021-08-01T05:00:00.000Z",
+    "date": "2021-08-01T00:00:00.000Z",
     "quantity": 7500,
     "grantDate": "2019-06-01",
     "securityId": "equity_compensation_issuance_01",
@@ -365,7 +365,7 @@
   },
   {
     "Year": 2021,
-    "date": "2021-09-01T05:00:00.000Z",
+    "date": "2021-09-01T00:00:00.000Z",
     "quantity": 7500,
     "grantDate": "2019-06-01",
     "securityId": "equity_compensation_issuance_01",
@@ -379,7 +379,7 @@
   },
   {
     "Year": 2021,
-    "date": "2021-10-01T05:00:00.000Z",
+    "date": "2021-10-01T00:00:00.000Z",
     "quantity": 7500,
     "grantDate": "2019-06-01",
     "securityId": "equity_compensation_issuance_01",
@@ -393,7 +393,7 @@
   },
   {
     "Year": 2021,
-    "date": "2021-11-01T05:00:00.000Z",
+    "date": "2021-11-01T00:00:00.000Z",
     "quantity": 7500,
     "grantDate": "2019-06-01",
     "securityId": "equity_compensation_issuance_01",
@@ -407,7 +407,7 @@
   },
   {
     "Year": 2021,
-    "date": "2021-12-01T06:00:00.000Z",
+    "date": "2021-12-01T00:00:00.000Z",
     "quantity": 7500,
     "grantDate": "2019-06-01",
     "securityId": "equity_compensation_issuance_01",
@@ -421,7 +421,7 @@
   },
   {
     "Year": 2022,
-    "date": "2022-01-01T06:00:00.000Z",
+    "date": "2022-01-01T00:00:00.000Z",
     "quantity": 7500,
     "grantDate": "2019-06-01",
     "securityId": "equity_compensation_issuance_01",
@@ -435,7 +435,7 @@
   },
   {
     "Year": 2022,
-    "date": "2022-02-01T06:00:00.000Z",
+    "date": "2022-02-01T00:00:00.000Z",
     "quantity": 7500,
     "grantDate": "2019-06-01",
     "securityId": "equity_compensation_issuance_01",
@@ -449,7 +449,7 @@
   },
   {
     "Year": 2022,
-    "date": "2022-03-01T06:00:00.000Z",
+    "date": "2022-03-01T00:00:00.000Z",
     "quantity": 7500,
     "grantDate": "2019-06-01",
     "securityId": "equity_compensation_issuance_01",
@@ -463,7 +463,7 @@
   },
   {
     "Year": 2022,
-    "date": "2022-04-01T05:00:00.000Z",
+    "date": "2022-04-01T00:00:00.000Z",
     "quantity": 7500,
     "grantDate": "2019-06-01",
     "securityId": "equity_compensation_issuance_01",
@@ -477,7 +477,7 @@
   },
   {
     "Year": 2022,
-    "date": "2022-05-01T05:00:00.000Z",
+    "date": "2022-05-01T00:00:00.000Z",
     "quantity": 7500,
     "grantDate": "2019-06-01",
     "securityId": "equity_compensation_issuance_01",
@@ -491,7 +491,7 @@
   },
   {
     "Year": 2022,
-    "date": "2022-06-01T05:00:00.000Z",
+    "date": "2022-06-01T00:00:00.000Z",
     "quantity": 7500,
     "grantDate": "2019-06-01",
     "securityId": "equity_compensation_issuance_01",
@@ -505,7 +505,7 @@
   },
   {
     "Year": 2022,
-    "date": "2022-07-01T05:00:00.000Z",
+    "date": "2022-07-01T00:00:00.000Z",
     "quantity": 7500,
     "grantDate": "2019-06-01",
     "securityId": "equity_compensation_issuance_01",
@@ -519,7 +519,7 @@
   },
   {
     "Year": 2022,
-    "date": "2022-08-01T05:00:00.000Z",
+    "date": "2022-08-01T00:00:00.000Z",
     "quantity": 7500,
     "grantDate": "2019-06-01",
     "securityId": "equity_compensation_issuance_01",
@@ -533,7 +533,7 @@
   },
   {
     "Year": 2022,
-    "date": "2022-09-01T05:00:00.000Z",
+    "date": "2022-09-01T00:00:00.000Z",
     "quantity": 7500,
     "grantDate": "2019-06-01",
     "securityId": "equity_compensation_issuance_01",
@@ -547,7 +547,7 @@
   },
   {
     "Year": 2022,
-    "date": "2022-10-01T05:00:00.000Z",
+    "date": "2022-10-01T00:00:00.000Z",
     "quantity": 7500,
     "grantDate": "2019-06-01",
     "securityId": "equity_compensation_issuance_01",
@@ -561,7 +561,7 @@
   },
   {
     "Year": 2022,
-    "date": "2022-11-01T05:00:00.000Z",
+    "date": "2022-11-01T00:00:00.000Z",
     "quantity": 7500,
     "grantDate": "2019-06-01",
     "securityId": "equity_compensation_issuance_01",
@@ -575,7 +575,7 @@
   },
   {
     "Year": 2022,
-    "date": "2022-12-01T06:00:00.000Z",
+    "date": "2022-12-01T00:00:00.000Z",
     "quantity": 7500,
     "grantDate": "2019-06-01",
     "securityId": "equity_compensation_issuance_01",
@@ -589,7 +589,7 @@
   },
   {
     "Year": 2023,
-    "date": "2023-01-01T06:00:00.000Z",
+    "date": "2023-01-01T00:00:00.000Z",
     "quantity": 7500,
     "grantDate": "2019-06-01",
     "securityId": "equity_compensation_issuance_01",
@@ -603,7 +603,7 @@
   },
   {
     "Year": 2023,
-    "date": "2023-02-01T06:00:00.000Z",
+    "date": "2023-02-01T00:00:00.000Z",
     "quantity": 7500,
     "grantDate": "2019-06-01",
     "securityId": "equity_compensation_issuance_01",
@@ -617,7 +617,7 @@
   },
   {
     "Year": 2023,
-    "date": "2023-03-01T06:00:00.000Z",
+    "date": "2023-03-01T00:00:00.000Z",
     "quantity": 7500,
     "grantDate": "2019-06-01",
     "securityId": "equity_compensation_issuance_01",
@@ -631,7 +631,7 @@
   },
   {
     "Year": 2023,
-    "date": "2023-04-01T05:00:00.000Z",
+    "date": "2023-04-01T00:00:00.000Z",
     "quantity": 7500,
     "grantDate": "2019-06-01",
     "securityId": "equity_compensation_issuance_01",
@@ -645,7 +645,7 @@
   },
   {
     "Year": 2023,
-    "date": "2023-05-01T05:00:00.000Z",
+    "date": "2023-05-01T00:00:00.000Z",
     "quantity": 7500,
     "grantDate": "2019-06-01",
     "securityId": "equity_compensation_issuance_01",
@@ -659,7 +659,7 @@
   },
   {
     "Year": 2023,
-    "date": "2023-06-01T05:00:00.000Z",
+    "date": "2023-06-01T00:00:00.000Z",
     "quantity": 7500,
     "grantDate": "2019-06-01",
     "securityId": "equity_compensation_issuance_01",
@@ -673,7 +673,7 @@
   },
   {
     "Year": 2019,
-    "date": "2019-10-01T05:00:00.000Z",
+    "date": "2019-10-01T00:00:00.000Z",
     "quantity": 10000,
     "grantDate": "2019-09-01",
     "securityId": "equity_compensation_issuance_02",
@@ -687,7 +687,7 @@
   },
   {
     "Year": 2019,
-    "date": "2019-11-01T05:00:00.000Z",
+    "date": "2019-11-01T00:00:00.000Z",
     "quantity": 10000,
     "grantDate": "2019-09-01",
     "securityId": "equity_compensation_issuance_02",
@@ -701,7 +701,7 @@
   },
   {
     "Year": 2019,
-    "date": "2019-12-01T06:00:00.000Z",
+    "date": "2019-12-01T00:00:00.000Z",
     "quantity": 10000,
     "grantDate": "2019-09-01",
     "securityId": "equity_compensation_issuance_02",
@@ -715,7 +715,7 @@
   },
   {
     "Year": 2020,
-    "date": "2020-01-01T06:00:00.000Z",
+    "date": "2020-01-01T00:00:00.000Z",
     "quantity": 10000,
     "grantDate": "2019-09-01",
     "securityId": "equity_compensation_issuance_02",
@@ -729,7 +729,7 @@
   },
   {
     "Year": 2020,
-    "date": "2020-02-01T06:00:00.000Z",
+    "date": "2020-02-01T00:00:00.000Z",
     "quantity": 10000,
     "grantDate": "2019-09-01",
     "securityId": "equity_compensation_issuance_02",
@@ -743,7 +743,7 @@
   },
   {
     "Year": 2020,
-    "date": "2020-03-01T06:00:00.000Z",
+    "date": "2020-03-01T00:00:00.000Z",
     "quantity": 10000,
     "grantDate": "2019-09-01",
     "securityId": "equity_compensation_issuance_02",
@@ -757,7 +757,7 @@
   },
   {
     "Year": 2020,
-    "date": "2020-04-01T05:00:00.000Z",
+    "date": "2020-04-01T00:00:00.000Z",
     "quantity": 10000,
     "grantDate": "2019-09-01",
     "securityId": "equity_compensation_issuance_02",
@@ -771,7 +771,7 @@
   },
   {
     "Year": 2020,
-    "date": "2020-05-01T05:00:00.000Z",
+    "date": "2020-05-01T00:00:00.000Z",
     "quantity": 10000,
     "grantDate": "2019-09-01",
     "securityId": "equity_compensation_issuance_02",
@@ -785,7 +785,7 @@
   },
   {
     "Year": 2020,
-    "date": "2020-06-01T05:00:00.000Z",
+    "date": "2020-06-01T00:00:00.000Z",
     "quantity": 10000,
     "grantDate": "2019-09-01",
     "securityId": "equity_compensation_issuance_02",
@@ -799,7 +799,7 @@
   },
   {
     "Year": 2020,
-    "date": "2020-07-01T05:00:00.000Z",
+    "date": "2020-07-01T00:00:00.000Z",
     "quantity": 10000,
     "grantDate": "2019-09-01",
     "securityId": "equity_compensation_issuance_02",
@@ -813,7 +813,7 @@
   },
   {
     "Year": 2020,
-    "date": "2020-08-01T05:00:00.000Z",
+    "date": "2020-08-01T00:00:00.000Z",
     "quantity": 10000,
     "grantDate": "2019-09-01",
     "securityId": "equity_compensation_issuance_02",
@@ -827,7 +827,7 @@
   },
   {
     "Year": 2020,
-    "date": "2020-09-01T05:00:00.000Z",
+    "date": "2020-09-01T00:00:00.000Z",
     "quantity": 10000,
     "grantDate": "2019-09-01",
     "securityId": "equity_compensation_issuance_02",
@@ -841,7 +841,7 @@
   },
   {
     "Year": 2020,
-    "date": "2020-10-01T05:00:00.000Z",
+    "date": "2020-10-01T00:00:00.000Z",
     "quantity": 9999,
     "grantDate": "2019-09-01",
     "securityId": "equity_compensation_issuance_02",
@@ -855,7 +855,7 @@
   },
   {
     "Year": 2020,
-    "date": "2020-11-01T05:00:00.000Z",
+    "date": "2020-11-01T00:00:00.000Z",
     "quantity": 10001,
     "grantDate": "2019-09-01",
     "securityId": "equity_compensation_issuance_02",
@@ -869,7 +869,7 @@
   },
   {
     "Year": 2020,
-    "date": "2020-12-01T06:00:00.000Z",
+    "date": "2020-12-01T00:00:00.000Z",
     "quantity": 10000,
     "grantDate": "2019-09-01",
     "securityId": "equity_compensation_issuance_02",
@@ -883,7 +883,7 @@
   },
   {
     "Year": 2021,
-    "date": "2021-01-01T06:00:00.000Z",
+    "date": "2021-01-01T00:00:00.000Z",
     "quantity": 10000,
     "grantDate": "2019-09-01",
     "securityId": "equity_compensation_issuance_02",
@@ -897,7 +897,7 @@
   },
   {
     "Year": 2021,
-    "date": "2021-02-01T06:00:00.000Z",
+    "date": "2021-02-01T00:00:00.000Z",
     "quantity": 10000,
     "grantDate": "2019-09-01",
     "securityId": "equity_compensation_issuance_02",
@@ -911,7 +911,7 @@
   },
   {
     "Year": 2021,
-    "date": "2021-03-01T06:00:00.000Z",
+    "date": "2021-03-01T00:00:00.000Z",
     "quantity": 10000,
     "grantDate": "2019-09-01",
     "securityId": "equity_compensation_issuance_02",
@@ -925,7 +925,7 @@
   },
   {
     "Year": 2021,
-    "date": "2021-04-01T05:00:00.000Z",
+    "date": "2021-04-01T00:00:00.000Z",
     "quantity": 10000,
     "grantDate": "2019-09-01",
     "securityId": "equity_compensation_issuance_02",
@@ -939,7 +939,7 @@
   },
   {
     "Year": 2021,
-    "date": "2021-05-01T05:00:00.000Z",
+    "date": "2021-05-01T00:00:00.000Z",
     "quantity": 10000,
     "grantDate": "2019-09-01",
     "securityId": "equity_compensation_issuance_02",
@@ -953,7 +953,7 @@
   },
   {
     "Year": 2021,
-    "date": "2021-06-01T05:00:00.000Z",
+    "date": "2021-06-01T00:00:00.000Z",
     "quantity": 10000,
     "grantDate": "2019-09-01",
     "securityId": "equity_compensation_issuance_02",
@@ -967,7 +967,7 @@
   },
   {
     "Year": 2021,
-    "date": "2021-07-01T05:00:00.000Z",
+    "date": "2021-07-01T00:00:00.000Z",
     "quantity": 10000,
     "grantDate": "2019-09-01",
     "securityId": "equity_compensation_issuance_02",
@@ -981,7 +981,7 @@
   },
   {
     "Year": 2021,
-    "date": "2021-08-01T05:00:00.000Z",
+    "date": "2021-08-01T00:00:00.000Z",
     "quantity": 10000,
     "grantDate": "2019-09-01",
     "securityId": "equity_compensation_issuance_02",
@@ -995,7 +995,7 @@
   },
   {
     "Year": 2021,
-    "date": "2021-09-01T05:00:00.000Z",
+    "date": "2021-09-01T00:00:00.000Z",
     "quantity": 10000,
     "grantDate": "2019-09-01",
     "securityId": "equity_compensation_issuance_02",
@@ -1009,7 +1009,7 @@
   },
   {
     "Year": 2021,
-    "date": "2021-10-01T05:00:00.000Z",
+    "date": "2021-10-01T00:00:00.000Z",
     "quantity": 10000,
     "grantDate": "2019-09-01",
     "securityId": "equity_compensation_issuance_02",
@@ -1023,7 +1023,7 @@
   },
   {
     "Year": 2021,
-    "date": "2021-11-01T05:00:00.000Z",
+    "date": "2021-11-01T00:00:00.000Z",
     "quantity": 9999,
     "grantDate": "2019-09-01",
     "securityId": "equity_compensation_issuance_02",
@@ -1037,7 +1037,7 @@
   },
   {
     "Year": 2021,
-    "date": "2021-12-01T06:00:00.000Z",
+    "date": "2021-12-01T00:00:00.000Z",
     "quantity": 10001,
     "grantDate": "2019-09-01",
     "securityId": "equity_compensation_issuance_02",
@@ -1051,7 +1051,7 @@
   },
   {
     "Year": 2022,
-    "date": "2022-01-01T06:00:00.000Z",
+    "date": "2022-01-01T00:00:00.000Z",
     "quantity": 10000,
     "grantDate": "2019-09-01",
     "securityId": "equity_compensation_issuance_02",
@@ -1065,7 +1065,7 @@
   },
   {
     "Year": 2022,
-    "date": "2022-02-01T06:00:00.000Z",
+    "date": "2022-02-01T00:00:00.000Z",
     "quantity": 10000,
     "grantDate": "2019-09-01",
     "securityId": "equity_compensation_issuance_02",
@@ -1079,7 +1079,7 @@
   },
   {
     "Year": 2022,
-    "date": "2022-03-01T06:00:00.000Z",
+    "date": "2022-03-01T00:00:00.000Z",
     "quantity": 10000,
     "grantDate": "2019-09-01",
     "securityId": "equity_compensation_issuance_02",
@@ -1093,7 +1093,7 @@
   },
   {
     "Year": 2022,
-    "date": "2022-04-01T05:00:00.000Z",
+    "date": "2022-04-01T00:00:00.000Z",
     "quantity": 10000,
     "grantDate": "2019-09-01",
     "securityId": "equity_compensation_issuance_02",
@@ -1107,7 +1107,7 @@
   },
   {
     "Year": 2022,
-    "date": "2022-05-01T05:00:00.000Z",
+    "date": "2022-05-01T00:00:00.000Z",
     "quantity": 10000,
     "grantDate": "2019-09-01",
     "securityId": "equity_compensation_issuance_02",
@@ -1121,7 +1121,7 @@
   },
   {
     "Year": 2022,
-    "date": "2022-06-01T05:00:00.000Z",
+    "date": "2022-06-01T00:00:00.000Z",
     "quantity": 10000,
     "grantDate": "2019-09-01",
     "securityId": "equity_compensation_issuance_02",
@@ -1135,7 +1135,7 @@
   },
   {
     "Year": 2022,
-    "date": "2022-07-01T05:00:00.000Z",
+    "date": "2022-07-01T00:00:00.000Z",
     "quantity": 10000,
     "grantDate": "2019-09-01",
     "securityId": "equity_compensation_issuance_02",
@@ -1149,7 +1149,7 @@
   },
   {
     "Year": 2022,
-    "date": "2022-08-01T05:00:00.000Z",
+    "date": "2022-08-01T00:00:00.000Z",
     "quantity": 10000,
     "grantDate": "2019-09-01",
     "securityId": "equity_compensation_issuance_02",
@@ -1163,7 +1163,7 @@
   },
   {
     "Year": 2022,
-    "date": "2022-09-01T05:00:00.000Z",
+    "date": "2022-09-01T00:00:00.000Z",
     "quantity": 10000,
     "grantDate": "2019-09-01",
     "securityId": "equity_compensation_issuance_02",
@@ -1177,7 +1177,7 @@
   },
   {
     "Year": 2022,
-    "date": "2022-10-01T05:00:00.000Z",
+    "date": "2022-10-01T00:00:00.000Z",
     "quantity": 10000,
     "grantDate": "2019-09-01",
     "securityId": "equity_compensation_issuance_02",
@@ -1191,7 +1191,7 @@
   },
   {
     "Year": 2022,
-    "date": "2022-11-01T05:00:00.000Z",
+    "date": "2022-11-01T00:00:00.000Z",
     "quantity": 10000,
     "grantDate": "2019-09-01",
     "securityId": "equity_compensation_issuance_02",
@@ -1205,7 +1205,7 @@
   },
   {
     "Year": 2022,
-    "date": "2022-12-01T06:00:00.000Z",
+    "date": "2022-12-01T00:00:00.000Z",
     "quantity": 10000,
     "grantDate": "2019-09-01",
     "securityId": "equity_compensation_issuance_02",
@@ -1219,7 +1219,7 @@
   },
   {
     "Year": 2023,
-    "date": "2023-01-01T06:00:00.000Z",
+    "date": "2023-01-01T00:00:00.000Z",
     "quantity": 10000,
     "grantDate": "2019-09-01",
     "securityId": "equity_compensation_issuance_02",
@@ -1233,7 +1233,7 @@
   },
   {
     "Year": 2023,
-    "date": "2023-02-01T06:00:00.000Z",
+    "date": "2023-02-01T00:00:00.000Z",
     "quantity": 10000,
     "grantDate": "2019-09-01",
     "securityId": "equity_compensation_issuance_02",
@@ -1247,7 +1247,7 @@
   },
   {
     "Year": 2023,
-    "date": "2023-03-01T06:00:00.000Z",
+    "date": "2023-03-01T00:00:00.000Z",
     "quantity": 10000,
     "grantDate": "2019-09-01",
     "securityId": "equity_compensation_issuance_02",
@@ -1261,7 +1261,7 @@
   },
   {
     "Year": 2023,
-    "date": "2023-04-01T05:00:00.000Z",
+    "date": "2023-04-01T00:00:00.000Z",
     "quantity": 10000,
     "grantDate": "2019-09-01",
     "securityId": "equity_compensation_issuance_02",
@@ -1275,7 +1275,7 @@
   },
   {
     "Year": 2023,
-    "date": "2023-05-01T05:00:00.000Z",
+    "date": "2023-05-01T00:00:00.000Z",
     "quantity": 10000,
     "grantDate": "2019-09-01",
     "securityId": "equity_compensation_issuance_02",
@@ -1289,7 +1289,7 @@
   },
   {
     "Year": 2023,
-    "date": "2023-06-01T05:00:00.000Z",
+    "date": "2023-06-01T00:00:00.000Z",
     "quantity": 10000,
     "grantDate": "2019-09-01",
     "securityId": "equity_compensation_issuance_02",
@@ -1303,7 +1303,7 @@
   },
   {
     "Year": 2023,
-    "date": "2023-07-01T05:00:00.000Z",
+    "date": "2023-07-01T00:00:00.000Z",
     "quantity": 10000,
     "grantDate": "2019-09-01",
     "securityId": "equity_compensation_issuance_02",
@@ -1317,7 +1317,7 @@
   },
   {
     "Year": 2023,
-    "date": "2023-08-01T05:00:00.000Z",
+    "date": "2023-08-01T00:00:00.000Z",
     "quantity": 10000,
     "grantDate": "2019-09-01",
     "securityId": "equity_compensation_issuance_02",
@@ -1331,7 +1331,7 @@
   },
   {
     "Year": 2023,
-    "date": "2023-09-01T05:00:00.000Z",
+    "date": "2023-09-01T00:00:00.000Z",
     "quantity": 10000,
     "grantDate": "2019-09-01",
     "securityId": "equity_compensation_issuance_02",
@@ -1345,7 +1345,7 @@
   },
   {
     "Year": 2019,
-    "date": "2019-11-01T05:00:00.000Z",
+    "date": "2019-11-01T00:00:00.000Z",
     "quantity": 0,
     "grantDate": "2019-11-01",
     "securityId": "equity_compensation_issuance_03",
@@ -1359,7 +1359,7 @@
   },
   {
     "Year": 2019,
-    "date": "2019-12-01T06:00:00.000Z",
+    "date": "2019-12-01T00:00:00.000Z",
     "quantity": 5000,
     "grantDate": "2019-11-01",
     "securityId": "equity_compensation_issuance_03",
@@ -1373,7 +1373,7 @@
   },
   {
     "Year": 2020,
-    "date": "2020-01-01T06:00:00.000Z",
+    "date": "2020-01-01T00:00:00.000Z",
     "quantity": 5000,
     "grantDate": "2019-11-01",
     "securityId": "equity_compensation_issuance_03",
@@ -1387,7 +1387,7 @@
   },
   {
     "Year": 2020,
-    "date": "2020-02-01T06:00:00.000Z",
+    "date": "2020-02-01T00:00:00.000Z",
     "quantity": 5000,
     "grantDate": "2019-11-01",
     "securityId": "equity_compensation_issuance_03",
@@ -1401,7 +1401,7 @@
   },
   {
     "Year": 2020,
-    "date": "2020-03-01T06:00:00.000Z",
+    "date": "2020-03-01T00:00:00.000Z",
     "quantity": 5000,
     "grantDate": "2019-11-01",
     "securityId": "equity_compensation_issuance_03",
@@ -1415,7 +1415,7 @@
   },
   {
     "Year": 2020,
-    "date": "2020-04-01T05:00:00.000Z",
+    "date": "2020-04-01T00:00:00.000Z",
     "quantity": 5000,
     "grantDate": "2019-11-01",
     "securityId": "equity_compensation_issuance_03",
@@ -1429,7 +1429,7 @@
   },
   {
     "Year": 2020,
-    "date": "2020-05-01T05:00:00.000Z",
+    "date": "2020-05-01T00:00:00.000Z",
     "quantity": 5000,
     "grantDate": "2019-11-01",
     "securityId": "equity_compensation_issuance_03",
@@ -1443,7 +1443,7 @@
   },
   {
     "Year": 2020,
-    "date": "2020-06-01T05:00:00.000Z",
+    "date": "2020-06-01T00:00:00.000Z",
     "quantity": 5000,
     "grantDate": "2019-11-01",
     "securityId": "equity_compensation_issuance_03",
@@ -1457,7 +1457,7 @@
   },
   {
     "Year": 2020,
-    "date": "2020-07-01T05:00:00.000Z",
+    "date": "2020-07-01T00:00:00.000Z",
     "quantity": 5000,
     "grantDate": "2019-11-01",
     "securityId": "equity_compensation_issuance_03",
@@ -1471,7 +1471,7 @@
   },
   {
     "Year": 2020,
-    "date": "2020-08-01T05:00:00.000Z",
+    "date": "2020-08-01T00:00:00.000Z",
     "quantity": 5000,
     "grantDate": "2019-11-01",
     "securityId": "equity_compensation_issuance_03",
@@ -1485,7 +1485,7 @@
   },
   {
     "Year": 2020,
-    "date": "2020-09-01T05:00:00.000Z",
+    "date": "2020-09-01T00:00:00.000Z",
     "quantity": 5000,
     "grantDate": "2019-11-01",
     "securityId": "equity_compensation_issuance_03",
@@ -1499,7 +1499,7 @@
   },
   {
     "Year": 2020,
-    "date": "2020-10-01T05:00:00.000Z",
+    "date": "2020-10-01T00:00:00.000Z",
     "quantity": 5000,
     "grantDate": "2019-11-01",
     "securityId": "equity_compensation_issuance_03",
@@ -1513,7 +1513,7 @@
   },
   {
     "Year": 2020,
-    "date": "2020-11-01T05:00:00.000Z",
+    "date": "2020-11-01T00:00:00.000Z",
     "quantity": 5000,
     "grantDate": "2019-11-01",
     "securityId": "equity_compensation_issuance_03",
@@ -1527,7 +1527,7 @@
   },
   {
     "Year": 2020,
-    "date": "2020-12-01T06:00:00.000Z",
+    "date": "2020-12-01T00:00:00.000Z",
     "quantity": 4999,
     "grantDate": "2019-11-01",
     "securityId": "equity_compensation_issuance_03",
@@ -1541,7 +1541,7 @@
   },
   {
     "Year": 2021,
-    "date": "2021-01-01T06:00:00.000Z",
+    "date": "2021-01-01T00:00:00.000Z",
     "quantity": 5001,
     "grantDate": "2019-11-01",
     "securityId": "equity_compensation_issuance_03",
@@ -1555,7 +1555,7 @@
   },
   {
     "Year": 2021,
-    "date": "2021-02-01T06:00:00.000Z",
+    "date": "2021-02-01T00:00:00.000Z",
     "quantity": 5000,
     "grantDate": "2019-11-01",
     "securityId": "equity_compensation_issuance_03",
@@ -1569,7 +1569,7 @@
   },
   {
     "Year": 2021,
-    "date": "2021-03-01T06:00:00.000Z",
+    "date": "2021-03-01T00:00:00.000Z",
     "quantity": 5000,
     "grantDate": "2019-11-01",
     "securityId": "equity_compensation_issuance_03",
@@ -1583,7 +1583,7 @@
   },
   {
     "Year": 2021,
-    "date": "2021-04-01T05:00:00.000Z",
+    "date": "2021-04-01T00:00:00.000Z",
     "quantity": 5000,
     "grantDate": "2019-11-01",
     "securityId": "equity_compensation_issuance_03",
@@ -1597,7 +1597,7 @@
   },
   {
     "Year": 2021,
-    "date": "2021-05-01T05:00:00.000Z",
+    "date": "2021-05-01T00:00:00.000Z",
     "quantity": 5000,
     "grantDate": "2019-11-01",
     "securityId": "equity_compensation_issuance_03",
@@ -1611,7 +1611,7 @@
   },
   {
     "Year": 2021,
-    "date": "2021-06-01T05:00:00.000Z",
+    "date": "2021-06-01T00:00:00.000Z",
     "quantity": 5000,
     "grantDate": "2019-11-01",
     "securityId": "equity_compensation_issuance_03",
@@ -1625,7 +1625,7 @@
   },
   {
     "Year": 2021,
-    "date": "2021-07-01T05:00:00.000Z",
+    "date": "2021-07-01T00:00:00.000Z",
     "quantity": 5000,
     "grantDate": "2019-11-01",
     "securityId": "equity_compensation_issuance_03",
@@ -1639,7 +1639,7 @@
   },
   {
     "Year": 2021,
-    "date": "2021-08-01T05:00:00.000Z",
+    "date": "2021-08-01T00:00:00.000Z",
     "quantity": 5000,
     "grantDate": "2019-11-01",
     "securityId": "equity_compensation_issuance_03",
@@ -1653,7 +1653,7 @@
   },
   {
     "Year": 2021,
-    "date": "2021-09-01T05:00:00.000Z",
+    "date": "2021-09-01T00:00:00.000Z",
     "quantity": 5000,
     "grantDate": "2019-11-01",
     "securityId": "equity_compensation_issuance_03",
@@ -1667,7 +1667,7 @@
   },
   {
     "Year": 2021,
-    "date": "2021-10-01T05:00:00.000Z",
+    "date": "2021-10-01T00:00:00.000Z",
     "quantity": 5000,
     "grantDate": "2019-11-01",
     "securityId": "equity_compensation_issuance_03",
@@ -1681,7 +1681,7 @@
   },
   {
     "Year": 2021,
-    "date": "2021-11-01T05:00:00.000Z",
+    "date": "2021-11-01T00:00:00.000Z",
     "quantity": 5000,
     "grantDate": "2019-11-01",
     "securityId": "equity_compensation_issuance_03",
@@ -1695,7 +1695,7 @@
   },
   {
     "Year": 2021,
-    "date": "2021-12-01T06:00:00.000Z",
+    "date": "2021-12-01T00:00:00.000Z",
     "quantity": 5000,
     "grantDate": "2019-11-01",
     "securityId": "equity_compensation_issuance_03",
@@ -1709,7 +1709,7 @@
   },
   {
     "Year": 2022,
-    "date": "2022-01-01T06:00:00.000Z",
+    "date": "2022-01-01T00:00:00.000Z",
     "quantity": 4999,
     "grantDate": "2019-11-01",
     "securityId": "equity_compensation_issuance_03",
@@ -1723,7 +1723,7 @@
   },
   {
     "Year": 2022,
-    "date": "2022-02-01T06:00:00.000Z",
+    "date": "2022-02-01T00:00:00.000Z",
     "quantity": 5001,
     "grantDate": "2019-11-01",
     "securityId": "equity_compensation_issuance_03",
@@ -1737,7 +1737,7 @@
   },
   {
     "Year": 2022,
-    "date": "2022-03-01T06:00:00.000Z",
+    "date": "2022-03-01T00:00:00.000Z",
     "quantity": 5000,
     "grantDate": "2019-11-01",
     "securityId": "equity_compensation_issuance_03",
@@ -1751,7 +1751,7 @@
   },
   {
     "Year": 2022,
-    "date": "2022-04-01T05:00:00.000Z",
+    "date": "2022-04-01T00:00:00.000Z",
     "quantity": 5000,
     "grantDate": "2019-11-01",
     "securityId": "equity_compensation_issuance_03",
@@ -1765,7 +1765,7 @@
   },
   {
     "Year": 2022,
-    "date": "2022-05-01T05:00:00.000Z",
+    "date": "2022-05-01T00:00:00.000Z",
     "quantity": 5000,
     "grantDate": "2019-11-01",
     "securityId": "equity_compensation_issuance_03",
@@ -1779,7 +1779,7 @@
   },
   {
     "Year": 2022,
-    "date": "2022-06-01T05:00:00.000Z",
+    "date": "2022-06-01T00:00:00.000Z",
     "quantity": 5000,
     "grantDate": "2019-11-01",
     "securityId": "equity_compensation_issuance_03",
@@ -1793,7 +1793,7 @@
   },
   {
     "Year": 2022,
-    "date": "2022-07-01T05:00:00.000Z",
+    "date": "2022-07-01T00:00:00.000Z",
     "quantity": 5000,
     "grantDate": "2019-11-01",
     "securityId": "equity_compensation_issuance_03",
@@ -1807,7 +1807,7 @@
   },
   {
     "Year": 2022,
-    "date": "2022-08-01T05:00:00.000Z",
+    "date": "2022-08-01T00:00:00.000Z",
     "quantity": 5000,
     "grantDate": "2019-11-01",
     "securityId": "equity_compensation_issuance_03",
@@ -1821,7 +1821,7 @@
   },
   {
     "Year": 2022,
-    "date": "2022-09-01T05:00:00.000Z",
+    "date": "2022-09-01T00:00:00.000Z",
     "quantity": 5000,
     "grantDate": "2019-11-01",
     "securityId": "equity_compensation_issuance_03",
@@ -1835,7 +1835,7 @@
   },
   {
     "Year": 2022,
-    "date": "2022-10-01T05:00:00.000Z",
+    "date": "2022-10-01T00:00:00.000Z",
     "quantity": 5000,
     "grantDate": "2019-11-01",
     "securityId": "equity_compensation_issuance_03",
@@ -1849,7 +1849,7 @@
   },
   {
     "Year": 2022,
-    "date": "2022-11-01T05:00:00.000Z",
+    "date": "2022-11-01T00:00:00.000Z",
     "quantity": 5000,
     "grantDate": "2019-11-01",
     "securityId": "equity_compensation_issuance_03",
@@ -1863,7 +1863,7 @@
   },
   {
     "Year": 2022,
-    "date": "2022-12-01T06:00:00.000Z",
+    "date": "2022-12-01T00:00:00.000Z",
     "quantity": 5000,
     "grantDate": "2019-11-01",
     "securityId": "equity_compensation_issuance_03",
@@ -1877,7 +1877,7 @@
   },
   {
     "Year": 2023,
-    "date": "2023-01-01T06:00:00.000Z",
+    "date": "2023-01-01T00:00:00.000Z",
     "quantity": 5000,
     "grantDate": "2019-11-01",
     "securityId": "equity_compensation_issuance_03",
@@ -1891,7 +1891,7 @@
   },
   {
     "Year": 2023,
-    "date": "2023-02-01T06:00:00.000Z",
+    "date": "2023-02-01T00:00:00.000Z",
     "quantity": 5000,
     "grantDate": "2019-11-01",
     "securityId": "equity_compensation_issuance_03",
@@ -1905,7 +1905,7 @@
   },
   {
     "Year": 2023,
-    "date": "2023-03-01T06:00:00.000Z",
+    "date": "2023-03-01T00:00:00.000Z",
     "quantity": 5000,
     "grantDate": "2019-11-01",
     "securityId": "equity_compensation_issuance_03",
@@ -1919,7 +1919,7 @@
   },
   {
     "Year": 2023,
-    "date": "2023-04-01T05:00:00.000Z",
+    "date": "2023-04-01T00:00:00.000Z",
     "quantity": 5000,
     "grantDate": "2019-11-01",
     "securityId": "equity_compensation_issuance_03",
@@ -1933,7 +1933,7 @@
   },
   {
     "Year": 2023,
-    "date": "2023-05-01T05:00:00.000Z",
+    "date": "2023-05-01T00:00:00.000Z",
     "quantity": 5000,
     "grantDate": "2019-11-01",
     "securityId": "equity_compensation_issuance_03",
@@ -1947,7 +1947,7 @@
   },
   {
     "Year": 2023,
-    "date": "2023-06-01T05:00:00.000Z",
+    "date": "2023-06-01T00:00:00.000Z",
     "quantity": 5000,
     "grantDate": "2019-11-01",
     "securityId": "equity_compensation_issuance_03",
@@ -1961,7 +1961,7 @@
   },
   {
     "Year": 2023,
-    "date": "2023-07-01T05:00:00.000Z",
+    "date": "2023-07-01T00:00:00.000Z",
     "quantity": 5000,
     "grantDate": "2019-11-01",
     "securityId": "equity_compensation_issuance_03",
@@ -1975,7 +1975,7 @@
   },
   {
     "Year": 2023,
-    "date": "2023-08-01T05:00:00.000Z",
+    "date": "2023-08-01T00:00:00.000Z",
     "quantity": 5000,
     "grantDate": "2019-11-01",
     "securityId": "equity_compensation_issuance_03",
@@ -1989,7 +1989,7 @@
   },
   {
     "Year": 2023,
-    "date": "2023-09-01T05:00:00.000Z",
+    "date": "2023-09-01T00:00:00.000Z",
     "quantity": 5000,
     "grantDate": "2019-11-01",
     "securityId": "equity_compensation_issuance_03",
@@ -2003,7 +2003,7 @@
   },
   {
     "Year": 2023,
-    "date": "2023-10-01T05:00:00.000Z",
+    "date": "2023-10-01T00:00:00.000Z",
     "quantity": 5000,
     "grantDate": "2019-11-01",
     "securityId": "equity_compensation_issuance_03",
@@ -2017,7 +2017,7 @@
   },
   {
     "Year": 2023,
-    "date": "2023-11-01T05:00:00.000Z",
+    "date": "2023-11-01T00:00:00.000Z",
     "quantity": 5000,
     "grantDate": "2019-11-01",
     "securityId": "equity_compensation_issuance_03",
