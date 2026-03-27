@@ -938,6 +938,39 @@ export const ocfMachine: any = {
             ],
           },
         ],
+        TX_PLAN_SECURITY_RETRACTION: [
+          {
+            guard: ({ context, event }: { context: OcfMachineContext; event: OcfMachineEvent }) => {
+              return validators.valid_tx_plan_security_retraction(context, event, true);
+            },
+            target: 'capTable',
+            actions: [
+              assign({
+                report: ({ context, event }: { context: OcfMachineContext; event: OcfMachineEvent }) =>
+                  [...context.report, validators.valid_tx_plan_security_retraction(context, event, false)]
+              }),
+              assign({
+                planSecurityIssuances: ({ context, event }: { context: OcfMachineContext; event: OcfMachineEvent }) =>
+                  context.planSecurityIssuances.filter((obj: any) => { return obj.security_id !== event.data.security_id; }
+                  ),
+              }),
+
+            ],
+          },
+          {
+            target: "validationError",
+            actions: [
+              assign({
+                report: ({ context, event }: { context: OcfMachineContext; event: OcfMachineEvent }) =>
+                  [...context.report, validators.valid_tx_plan_security_retraction(context, event, false)]
+              }),
+              assign({
+                result: ({ context, event }: { context: OcfMachineContext; event: OcfMachineEvent }) =>
+                  `The validation of the OCF package for ${context.ocfPackageContent.manifest.issuer.legal_name} failed on ${event.data.id}: ${JSON.stringify(validators.valid_tx_plan_security_retraction(context, event, false),null, 2)}`
+              }),
+            ],
+          },
+        ],
         INVALID_TX: [
           {
             target: "validationError",
