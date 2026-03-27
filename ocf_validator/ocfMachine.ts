@@ -8,6 +8,7 @@ export type OcfMachineContext = {
   equityCompensation: any[];
   convertibleIssuances: any[];
   warrantIssuances: any[];
+  planSecurityIssuances: any[];
   ocfPackageContent: OcfPackageContent;
   report: any[];
   snapshots: any[],
@@ -29,6 +30,7 @@ export const ocfMachine: any = {
     equityCompensation: [],
     convertibleIssuances: [],
     warrantIssuances: [],
+    planSecurityIssuances: [],
     ocfPackageContent: {},
     report: [],
     snapshots: [],
@@ -873,6 +875,38 @@ export const ocfMachine: any = {
               assign({
                 result: ({ context, event }: { context: OcfMachineContext; event: OcfMachineEvent }) =>
                   `The validation of the OCF package for ${context.ocfPackageContent.manifest.issuer.legal_name} failed on ${event.data.id}: ${JSON.stringify(validators.valid_tx_equity_compensation_exercise(context, event, false),null, 2)}`
+              }),
+            ],
+          },
+        ],
+        TX_PLAN_SECURITY_ISSUANCE: [
+          {
+            guard: ({ context, event }: { context: OcfMachineContext; event: OcfMachineEvent }) => {
+              return validators.valid_tx_plan_security_issuance(context, event, true);
+            },
+            actions: [
+              assign({
+                report: ({ context, event }: { context: OcfMachineContext; event: OcfMachineEvent }) =>
+                  [...context.report, validators.valid_tx_plan_security_issuance(context, event, false)]
+
+              }),
+              assign({
+                planSecurityIssuances: ({ context, event }: { context: OcfMachineContext; event: OcfMachineEvent }) =>
+                  [...context.planSecurityIssuances, event.data],
+              }),
+            ],
+            target: "capTable",
+          },
+          {
+            target: "validationError",
+            actions: [
+              assign({
+                report: ({ context, event }: { context: OcfMachineContext; event: OcfMachineEvent }) =>
+                  [...context.report, validators.valid_tx_plan_security_issuance(context, event, false)]
+              }),
+              assign({
+                result: ({ context, event }: { context: OcfMachineContext; event: OcfMachineEvent }) =>
+                  `The validation of the OCF package for ${context.ocfPackageContent.manifest.issuer.legal_name} failed on ${event.data.id}: ${JSON.stringify(validators.valid_tx_plan_security_issuance(context, event, false),null, 2)}`
               }),
             ],
           },

@@ -9,3 +9,4 @@ node_modules/
 dist/
 
 .vscode/launch.json
+CLAUDE.md
