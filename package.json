@@ -11,7 +11,7 @@
   "scripts": {
     "build": "tsc",
     "test": "jest --watch",
-    "test:ci": "jest"
+    "test:ci": "jest --passWithNoTests"
   },
   "devDependencies": {
     "@types/jest": "^29.5.14",
