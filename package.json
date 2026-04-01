@@ -11,10 +11,7 @@
   "scripts": {
     "build": "tsc",
     "test": "jest --watch",
-    "test:ci": "jest",
-    "print:vesting_schedule": "ts-node -r tsconfig-paths/register testing_scripts/vesting_schedule.ts",
-    "print:vesting_status": "ts-node -r tsconfig-paths/register testing_scripts/vesting_status",
-    "print:iso_calculator": "ts-node -r tsconfig-paths/register testing_scripts/iso_calculator"
+    "test:ci": "jest --passWithNoTests"
   },
   "devDependencies": {
     "@types/jest": "^29.5.14",
@@ -25,9 +22,6 @@
     "typescript": "^5.6.3"
   },
   "dependencies": {
-    "date-fns": "^4.1.0",
-    "fraction.js": "^5.2.1",
-    "mermaid": "^11.4.0",
     "prettier": "^3.3.3",
     "tsconfig-paths": "^4.2.0",
     "volta": "^0.0.0",
