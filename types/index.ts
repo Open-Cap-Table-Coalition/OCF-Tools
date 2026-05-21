@@ -134,7 +134,7 @@ export interface VestingTerms {
   vesting_conditions: VestingCondition[];
 }
 
-export interface vestingObject {
+export interface Vesting {
   date: string;
   amount: string;
 }
@@ -215,7 +215,7 @@ export interface TX_Equity_Compensation_Issuance {
   };
   early_exercisable?: boolean;
   vesting_terms_id?: string;
-  vestings?: vestingObject[];
+  vestings?: Vesting[];
   expiration_date: string | null;
   termination_exercise_windows: {
     reason:
