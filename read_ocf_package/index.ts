@@ -1,6 +1,7 @@
 import * as fs from "fs";
 import * as path from "path";
-import { Transaction, Valuation, VestingTerms } from "../types";
+import { Transaction, Valuation } from "../types";
+import { VestingScheduleTemplate } from "../types/canonical/vesting";
 
 export interface OcfPackageContent {
   manifest: any;
@@ -9,7 +10,7 @@ export interface OcfPackageContent {
   transactions: Transaction[];
   stockLegends: any;
   stockPlans: any;
-  vestingTerms: VestingTerms[];
+  vestingScheduleTemplates: VestingScheduleTemplate[];
   valuations: Valuation[];
 }
 
@@ -50,9 +51,9 @@ export const readOcfPackage = (packagePath: string): OcfPackageContent => {
     );
   });
 
-  const vestingTerms: VestingTerms[] = [];
-  manifest.vesting_terms_files.forEach((file: file) => {
-    vestingTerms.push(
+  const vestingScheduleTemplates: VestingScheduleTemplate[] = [];
+  manifest.vesting_schedule_templates_files.forEach((file: file) => {
+    vestingScheduleTemplates.push(
       ...JSON.parse(
         fs.readFileSync(path.join(packagePath, file.filepath), "utf8")
       ).items
@@ -85,13 +86,14 @@ export const readOcfPackage = (packagePath: string): OcfPackageContent => {
       ).items
     );
   });
+
   return {
     manifest,
     stakeholders,
     stockClasses,
     transactions,
     stockPlans,
-    vestingTerms,
+    vestingScheduleTemplates,
     stockLegends,
     valuations,
   };

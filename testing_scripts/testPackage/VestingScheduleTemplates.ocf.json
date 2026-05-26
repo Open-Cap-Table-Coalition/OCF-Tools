@@ -1,0 +1,22 @@
+{
+  "file_type": "OCF_VESTING_SCHEDULE_TEMPLATES_FILE",
+  "items": [
+    {
+      "id": "four_year_monthly_one_year_cliff_cumulative_round_down",
+      "statements": [
+        {
+          "order": 1,
+          "vesting_base": { "type": "DATE" },
+          "occurrences": 48,
+          "period": 1,
+          "period_type": "MONTHS",
+          "cliff": {
+            "occurrence": 12,
+            "percentage": { "numerator": 1, "denominator": 4 }
+          },
+          "percentage": { "numerator": 1, "denominator": 1 }
+        }
+      ]
+    }
+  ]
+}

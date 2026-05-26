@@ -10,7 +10,7 @@ const valid_tx_equity_compensation_retraction = (context: any, event: any, isGua
   context.equity_compensationIssuances.forEach((ele: any) => {
     if (
       ele.security_id === event.data.security_id &&
-      ele.object_type === 'TX_EQUITY_COMPENSATION_ISSUANCE'
+      ele.object_type === 'TX_CANONICAL_EQUITY_COMPENSATION_ISSUANCE'
     ) {
       incoming_equity_compensationIssuance_validity = true;
       report.incoming_equity_compensationIssuance_validity = true
@@ -26,7 +26,7 @@ const valid_tx_equity_compensation_retraction = (context: any, event: any, isGua
   transactions.forEach((ele: any) => {
     if (
       ele.security_id === event.data.security_id &&
-      ele.object_type === 'TX_EQUITY_COMPENSATION_ISSUANCE'
+      ele.object_type === 'TX_CANONICAL_EQUITY_COMPENSATION_ISSUANCE'
     ) {
       if (ele.date <= event.data.date) {
         incoming_date_validity = true;

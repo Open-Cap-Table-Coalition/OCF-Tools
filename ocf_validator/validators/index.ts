@@ -18,7 +18,7 @@ import valid_tx_warrant_acceptance from './warrant/tx_warrant_acceptance';
 import valid_tx_warrant_cancellation from './warrant/tx_warrant_cancellation';
 import valid_tx_warrant_transfer from './warrant/tx_warrant_transfer';
 import valid_tx_warrant_exercise from './warrant/tx_warrant_exercise';
-import valid_tx_equity_compensation_issuance from './equity_compensation/tx_equity_compensation_issuance';
+import valid_tx_canonical_equity_compensation_issuance from './equity_compensation/tx_canonical_equity_compensation_issuance';
 import valid_tx_equity_compensation_retraction from './equity_compensation/tx_equity_compensation_retraction';
 import valid_tx_equity_compensation_acceptance from './equity_compensation/tx_equity_compensation_acceptance';
 import valid_tx_equity_compensation_cancellation from './equity_compensation/tx_equity_compensation_cancellation';
@@ -38,8 +38,8 @@ import valid_tx_stock_class_split from './stock_class/tx_stock_class_split';
 import valid_tx_stock_plan_pool_adjustment from './stock_plan/tx_stock_plan_pool_adjustment';
 import valid_tx_stock_plan_return_to_pool from './stock_plan/tx_stock_plan_return_to_pool';
 import valid_tx_vesting_acceleration from './vesting/ts_vesting_acceleration';
-import valid_tx_vesting_start from './vesting/ts_vesting_start';
-import valid_tx_vesting_event from './vesting/ts_vesting_event';
+import valid_tx_canonical_vesting_start from './vesting/tx_canonical_vesting_start';
+import valid_tx_canonical_vesting_event from './vesting/tx_canonical_vesting_event';
 
 const validators = {
   valid_tx_stock_issuance,
@@ -62,7 +62,7 @@ const validators = {
   valid_tx_warrant_cancellation,
   valid_tx_warrant_transfer,
   valid_tx_warrant_exercise,
-  valid_tx_equity_compensation_issuance,
+  valid_tx_canonical_equity_compensation_issuance,
   valid_tx_equity_compensation_retraction,
   valid_tx_equity_compensation_acceptance,
   valid_tx_equity_compensation_cancellation,
@@ -82,8 +82,8 @@ const validators = {
   valid_tx_stock_plan_pool_adjustment,
   valid_tx_stock_plan_return_to_pool,
   valid_tx_vesting_acceleration,
-  valid_tx_vesting_start,
-  valid_tx_vesting_event,
+  valid_tx_canonical_vesting_start,
+  valid_tx_canonical_vesting_event,
 };
 
 export default validators;

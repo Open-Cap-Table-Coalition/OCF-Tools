@@ -3,7 +3,7 @@
   "items": [
     {
       "id": "eci_01",
-      "object_type": "TX_EQUITY_COMPENSATION_ISSUANCE",
+      "object_type": "TX_CANONICAL_EQUITY_COMPENSATION_ISSUANCE",
       "date": "2019-06-01",
       "security_id": "equity_compensation_issuance_01",
       "custom_id": "EC-1",
@@ -24,14 +24,13 @@
           "period_type": "MONTHS"
         }
       ],
-      "vesting_terms_id": "four_year_monthly_one_year_cliff_cumulative_round_down",
+      "vesting_template_id": "four_year_monthly_one_year_cliff_cumulative_round_down",
       "valuation_id": "valuation_01"
     },
     {
-      "object_type": "TX_VESTING_START",
+      "object_type": "TX_CANONICAL_VESTING_START",
       "id": "eci_vs_01",
       "security_id": "equity_compensation_issuance_01",
-      "vesting_condition_id": "start_condition",
       "date": "2019-06-01"
     }
   ]

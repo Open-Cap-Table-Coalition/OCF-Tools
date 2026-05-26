@@ -25,7 +25,7 @@ const valid_tx_equity_compensation_exercise = (context: OcfMachineContext, event
     console.log('ele.security_id', ele.security_id);
     console.log('event.data.security_id', event.data.security_id);
     console.log('ele.object_type', ele.object_type);
-    if (ele.security_id === event.data.security_id && ele.object_type === "TX_EQUITY_COMPENSATION_ISSUANCE") {
+    if (ele.security_id === event.data.security_id && ele.object_type === "TX_CANONICAL_EQUITY_COMPENSATION_ISSUANCE") {
       incoming_equity_compensationIssuance_validity = true;
       report.incoming_equity_compensationIssuance_validity = true;
     }
@@ -37,7 +37,7 @@ const valid_tx_equity_compensation_exercise = (context: OcfMachineContext, event
   // The date of the equity_compensation issuance referred to in the security_id must have a date equal to or earlier than the date of the equity_compensation exercise
   let incoming_date_validity = false;
   transactions.forEach((ele: any) => {
-    if (ele.security_id === event.data.security_id && ele.object_type === "TX_EQUITY_COMPENSATION_ISSUANCE") {
+    if (ele.security_id === event.data.security_id && ele.object_type === "TX_CANONICAL_EQUITY_COMPENSATION_ISSUANCE") {
       if (ele.date <= event.data.date) {
         incoming_date_validity = true;
         report.incoming_date_validity = true;

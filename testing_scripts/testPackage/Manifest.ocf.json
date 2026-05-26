@@ -31,10 +31,10 @@
       "md5": "12c14ee9ac8e71a120cee15d075ecea6"
     }
   ],
-  "vesting_terms_files": [
+  "vesting_schedule_templates_files": [
     {
-      "filepath": "./VestingTerms.ocf.json",
-      "md5": "12c14ee9ac8e71a120c1215d075ecea6"
+      "filepath": "./VestingScheduleTemplates.ocf.json",
+      "md5": "0000000000000000000000000000000a"
     }
   ],
   "valuations_files": [

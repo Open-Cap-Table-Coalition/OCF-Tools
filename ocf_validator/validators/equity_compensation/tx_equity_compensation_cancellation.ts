@@ -35,7 +35,7 @@ const valid_tx_equity_compensation_cancellation = (
   transactions.forEach((ele: any) => {
     if (
       ele.security_id === event.data.security_id &&
-      ele.object_type === 'TX_EQUITY_COMPENSATION_ISSUANCE'
+      ele.object_type === 'TX_CANONICAL_EQUITY_COMPENSATION_ISSUANCE'
     ) {
       if (ele.date <= event.data.date) {
         incoming_date_validity = true;
@@ -51,7 +51,7 @@ const valid_tx_equity_compensation_cancellation = (
   transactions.map((ele: any) => {
     if (
       ele.security_id === event.data.security_id &&
-      ele.object_type !== 'TX_EQUITY_COMPENSATION_ISSUANCE' &&
+      ele.object_type !== 'TX_CANONICAL_EQUITY_COMPENSATION_ISSUANCE' &&
       ele.object_type !== 'TX_EQUITY_COMPENSATION_ACCEPTANCE' &&
       !(ele.object_type === 'TX_EQUITY_COMPENSATION_CANCELLATION' && ele.id === event.data.id)
     ) {

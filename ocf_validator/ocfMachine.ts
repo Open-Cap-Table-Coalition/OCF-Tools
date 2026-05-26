@@ -686,19 +686,18 @@ export const ocfMachine: any = {
             ],
           },
         ],
-        TX_EQUITY_COMPENSATION_ISSUANCE: [
+        TX_CANONICAL_EQUITY_COMPENSATION_ISSUANCE: [
           {
             guard: ({ context, event }: { context: OcfMachineContext; event: OcfMachineEvent }) => {
-              return validators.valid_tx_equity_compensation_issuance(context, event, true);
+              return validators.valid_tx_canonical_equity_compensation_issuance(context, event, true);
             },
             actions: [
               assign({
-                report: ({ context, event }: { context: OcfMachineContext; event: OcfMachineEvent }) => 
-                  [...context.report, validators.valid_tx_equity_compensation_issuance(context, event, false)]
-
+                report: ({ context, event }: { context: OcfMachineContext; event: OcfMachineEvent }) =>
+                  [...context.report, validators.valid_tx_canonical_equity_compensation_issuance(context, event, false)]
               }),
               assign({
-                equityCompensation: ({ context, event }: { context: OcfMachineContext; event: OcfMachineEvent }) => 
+                equityCompensation: ({ context, event }: { context: OcfMachineContext; event: OcfMachineEvent }) =>
                   [...context.equityCompensation, event.data],
               }),
             ],
@@ -709,11 +708,65 @@ export const ocfMachine: any = {
             actions: [
               assign({
                 report: ({ context, event }: { context: OcfMachineContext; event: OcfMachineEvent }) =>
-                  [...context.report, validators.valid_tx_equity_compensation_issuance(context, event, false)]
+                  [...context.report, validators.valid_tx_canonical_equity_compensation_issuance(context, event, false)]
               }),
               assign({
                 result: ({ context, event }: { context: OcfMachineContext; event: OcfMachineEvent }) =>
-                  `The validation of the OCF package for ${context.ocfPackageContent.manifest.issuer.legal_name} failed on ${event.data.id}: ${JSON.stringify(validators.valid_tx_equity_compensation_issuance(context, event, false),null, 2)}`
+                  `The validation of the OCF package for ${context.ocfPackageContent.manifest.issuer.legal_name} failed on ${event.data.id}: ${JSON.stringify(validators.valid_tx_canonical_equity_compensation_issuance(context, event, false),null, 2)}`
+              }),
+            ],
+          },
+        ],
+        TX_CANONICAL_VESTING_START: [
+          {
+            guard: ({ context, event }: { context: OcfMachineContext; event: OcfMachineEvent }) => {
+              return validators.valid_tx_canonical_vesting_start(context, event, true);
+            },
+            target: "capTable",
+            actions: [
+              assign({
+                report: ({ context, event }: { context: OcfMachineContext; event: OcfMachineEvent }) =>
+                  [...context.report, validators.valid_tx_canonical_vesting_start(context, event, false)]
+              }),
+            ],
+          },
+          {
+            target: "validationError",
+            actions: [
+              assign({
+                report: ({ context, event }: { context: OcfMachineContext; event: OcfMachineEvent }) =>
+                  [...context.report, validators.valid_tx_canonical_vesting_start(context, event, false)]
+              }),
+              assign({
+                result: ({ context, event }: { context: OcfMachineContext; event: OcfMachineEvent }) =>
+                  `The validation of the OCF package for ${context.ocfPackageContent.manifest.issuer.legal_name} failed on ${event.data.id}: ${JSON.stringify(validators.valid_tx_canonical_vesting_start(context, event, false),null, 2)}`
+              }),
+            ],
+          },
+        ],
+        TX_CANONICAL_VESTING_EVENT: [
+          {
+            guard: ({ context, event }: { context: OcfMachineContext; event: OcfMachineEvent }) => {
+              return validators.valid_tx_canonical_vesting_event(context, event, true);
+            },
+            target: "capTable",
+            actions: [
+              assign({
+                report: ({ context, event }: { context: OcfMachineContext; event: OcfMachineEvent }) =>
+                  [...context.report, validators.valid_tx_canonical_vesting_event(context, event, false)]
+              }),
+            ],
+          },
+          {
+            target: "validationError",
+            actions: [
+              assign({
+                report: ({ context, event }: { context: OcfMachineContext; event: OcfMachineEvent }) =>
+                  [...context.report, validators.valid_tx_canonical_vesting_event(context, event, false)]
+              }),
+              assign({
+                result: ({ context, event }: { context: OcfMachineContext; event: OcfMachineEvent }) =>
+                  `The validation of the OCF package for ${context.ocfPackageContent.manifest.issuer.legal_name} failed on ${event.data.id}: ${JSON.stringify(validators.valid_tx_canonical_vesting_event(context, event, false),null, 2)}`
               }),
             ],
           },

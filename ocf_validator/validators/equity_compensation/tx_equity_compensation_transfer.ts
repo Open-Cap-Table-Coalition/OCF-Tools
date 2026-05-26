@@ -19,7 +19,7 @@ const valid_tx_equity_compensation_transfer = (context: OcfMachineContext, event
   context.equityCompensation.map((ele: any) => {
     if (
       ele.security_id === event.data.security_id &&
-      ele.object_type === 'TX_EQUITY_COMPENSATION_ISSUANCE'
+      ele.object_type === 'TX_CANONICAL_EQUITY_COMPENSATION_ISSUANCE'
     ) {
       incoming_equity_compensationIssuance_validity = true;
       report.incoming_equity_compensationIssuance_validity = true;
@@ -34,7 +34,7 @@ const valid_tx_equity_compensation_transfer = (context: OcfMachineContext, event
   transactions.map((ele: any) => {
     if (
       ele.security_id === event.data.security_id &&
-      ele.object_type === 'TX_EQUITY_COMPENSATION_ISSUANCE'
+      ele.object_type === 'TX_CANONICAL_EQUITY_COMPENSATION_ISSUANCE'
     ) {
       if (ele.date <= event.data.date) {
         incoming_date_validity = true;
