@@ -2,10 +2,10 @@ import type {
   Cliff,
   Fraction,
   PeriodType,
-  VestingSchedule,
   VestingScheduleTemplate,
   VestingStatement,
 } from "../types/canonical/vesting";
+import type { VestingRuntime } from "./compile";
 import { ISO_DATE_PATTERN } from "./dates";
 
 export interface ValidationError {
@@ -63,6 +63,40 @@ const validateCliff = (
   validateFraction(c.percentage, `${path}.percentage`, errors);
 };
 
+const validateVestingBase = (
+  base: VestingStatement["vesting_base"],
+  path: string,
+  errors: ValidationError[],
+): void => {
+  if (!base || typeof base !== "object") {
+    errors.push({ path, message: "is required and must be an object" });
+    return;
+  }
+  if (base.type !== "DATE" && base.type !== "EVENT") {
+    errors.push({
+      path: `${path}.type`,
+      message: 'must be "DATE" or "EVENT"',
+    });
+    return;
+  }
+  if (base.type === "EVENT") {
+    if (typeof base.event_id !== "string" || base.event_id.length === 0) {
+      errors.push({
+        path: `${path}.event_id`,
+        message: "must be a non-empty string",
+      });
+    }
+  } else {
+    // DATE — no extra fields permitted; specifically, stray event_id is wrong.
+    if ("event_id" in base) {
+      errors.push({
+        path: `${path}.event_id`,
+        message: 'must not be present on a vesting_base with type "DATE"',
+      });
+    }
+  }
+};
+
 const validateStatement = (
   s: VestingStatement,
   path: string,
@@ -71,6 +105,7 @@ const validateStatement = (
   if (!isPositiveInt(s.order)) {
     errors.push({ path: `${path}.order`, message: "must be an integer >= 1" });
   }
+  validateVestingBase(s.vesting_base, `${path}.vesting_base`, errors);
   if (!isPositiveInt(s.occurrences)) {
     errors.push({
       path: `${path}.occurrences`,
@@ -99,7 +134,7 @@ const validateStatement = (
  * Structural validation for a canonical VestingScheduleTemplate. Returns a
  * { valid, errors[] } result that consumers (the compiler, the OCF validator)
  * can use to either bail or map into their own report shape. Schema-only:
- * checks the spec's well-formedness, not compile-time inputs like totalShares.
+ * checks the spec's well-formedness, not runtime inputs.
  */
 export const validateVestingScheduleTemplate = (
   t: VestingScheduleTemplate,
@@ -138,28 +173,135 @@ export const validateVestingScheduleTemplate = (
   return { valid: errors.length === 0, errors };
 };
 
+const fractionInUnitInterval = (f: Fraction): boolean => {
+  // Valid fractions reach this point (denominator >= 1).
+  if (f.numerator < 0) return false;
+  // numerator/denominator <= 1 ⇔ numerator <= denominator
+  return f.numerator <= f.denominator;
+};
+
 /**
- * Structural validation for a canonical VestingSchedule. Returns a
- * { valid, errors[] } result. Does NOT verify that template_id resolves to an
- * existing template — that's a cross-reference check belonging to the consumer.
+ * Validates the per-grant runtime data passed to compileVesting against the
+ * template. Catches mismatches that the static template validator cannot:
+ *   - startDate required when any DATE-anchored statement exists
+ *   - eventFirings must reference event_ids that exist on EVENT statements
+ *   - no duplicate event_id in eventFirings (single firing per event_id)
+ *   - dates must be ISO format
+ *   - realized_fraction (if present) must be a valid Fraction in [0, 1]
  */
-export const validateVestingSchedule = (
-  s: VestingSchedule,
+export const validateVestingRuntime = (
+  runtime: VestingRuntime,
+  template: VestingScheduleTemplate,
 ): ValidationResult => {
   const errors: ValidationError[] = [];
 
-  if (typeof s.template_id !== "string" || s.template_id.length === 0) {
-    errors.push({ path: "template_id", message: "must be a non-empty string" });
-  }
+  const dateAnchoredExists = Array.isArray(template.statements)
+    ? template.statements.some((s) => s?.vesting_base?.type === "DATE")
+    : false;
 
-  if (
-    typeof s.start_date !== "string" ||
-    !ISO_DATE_PATTERN.test(s.start_date)
+  if (dateAnchoredExists) {
+    if (typeof runtime.startDate !== "string") {
+      errors.push({
+        path: "startDate",
+        message:
+          "is required when the template contains any DATE-anchored statement",
+      });
+    } else if (!ISO_DATE_PATTERN.test(runtime.startDate)) {
+      errors.push({
+        path: "startDate",
+        message: "must be an ISO 8601 date string (YYYY-MM-DD)",
+      });
+    }
+  } else if (
+    runtime.startDate !== undefined &&
+    !ISO_DATE_PATTERN.test(runtime.startDate)
   ) {
+    // Tolerated but format-checked.
     errors.push({
-      path: "start_date",
+      path: "startDate",
       message: "must be an ISO 8601 date string (YYYY-MM-DD)",
     });
+  }
+
+  if (runtime.grantDate !== undefined) {
+    if (
+      typeof runtime.grantDate !== "string" ||
+      !ISO_DATE_PATTERN.test(runtime.grantDate)
+    ) {
+      errors.push({
+        path: "grantDate",
+        message: "must be an ISO 8601 date string (YYYY-MM-DD)",
+      });
+    }
+  }
+
+  if (runtime.eventFirings !== undefined) {
+    if (!Array.isArray(runtime.eventFirings)) {
+      errors.push({ path: "eventFirings", message: "must be an array" });
+    } else {
+      const templateEventIds = new Set(
+        (template.statements ?? [])
+          .filter((s) => s?.vesting_base?.type === "EVENT")
+          .map((s) => (s.vesting_base as { event_id: string }).event_id),
+      );
+      const seen = new Map<string, number[]>();
+
+      runtime.eventFirings.forEach((firing, i) => {
+        const path = `eventFirings[${i}]`;
+        if (typeof firing?.event_id !== "string" || firing.event_id.length === 0) {
+          errors.push({
+            path: `${path}.event_id`,
+            message: "must be a non-empty string",
+          });
+        } else {
+          const indices = seen.get(firing.event_id) ?? [];
+          indices.push(i);
+          seen.set(firing.event_id, indices);
+          if (!templateEventIds.has(firing.event_id)) {
+            errors.push({
+              path: `${path}.event_id`,
+              message: `"${firing.event_id}" does not match any EVENT-anchored statement in the template`,
+            });
+          }
+        }
+        if (
+          typeof firing?.date !== "string" ||
+          !ISO_DATE_PATTERN.test(firing.date)
+        ) {
+          errors.push({
+            path: `${path}.date`,
+            message: "must be an ISO 8601 date string (YYYY-MM-DD)",
+          });
+        }
+        if (firing?.realized_fraction !== undefined) {
+          validateFraction(
+            firing.realized_fraction,
+            `${path}.realized_fraction`,
+            errors,
+          );
+          // Only check interval bounds if the fraction itself parsed OK.
+          if (
+            isInteger(firing.realized_fraction.numerator) &&
+            isPositiveInt(firing.realized_fraction.denominator) &&
+            !fractionInUnitInterval(firing.realized_fraction)
+          ) {
+            errors.push({
+              path: `${path}.realized_fraction`,
+              message: "must be in the closed interval [0, 1]",
+            });
+          }
+        }
+      });
+
+      for (const [eventId, indices] of seen) {
+        if (indices.length > 1) {
+          errors.push({
+            path: "eventFirings",
+            message: `duplicate event_id "${eventId}" at indices [${indices.join(", ")}]`,
+          });
+        }
+      }
+    }
   }
 
   return { valid: errors.length === 0, errors };
@@ -181,9 +323,14 @@ export const assertValidVestingScheduleTemplate = (
 };
 
 /** Throws a single Error with all validation messages on invalid input. */
-export const assertValidVestingSchedule = (s: VestingSchedule): void => {
-  const result = validateVestingSchedule(s);
+export const assertValidVestingRuntime = (
+  runtime: VestingRuntime,
+  template: VestingScheduleTemplate,
+): void => {
+  const result = validateVestingRuntime(runtime, template);
   if (!result.valid) {
-    throw new Error(`Invalid VestingSchedule:\n${formatErrors(result.errors)}`);
+    throw new Error(
+      `Invalid VestingRuntime:\n${formatErrors(result.errors)}`,
+    );
   }
 };

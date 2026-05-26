@@ -1,17 +1,20 @@
 import {
-  assertValidVestingSchedule,
+  assertValidVestingRuntime,
   assertValidVestingScheduleTemplate,
-  validateVestingSchedule,
+  validateVestingRuntime,
   validateVestingScheduleTemplate,
 } from "../validate";
+import type { VestingRuntime } from "../compile";
 import type {
-  VestingSchedule,
   VestingScheduleTemplate,
   VestingStatement,
 } from "../../types/canonical/vesting";
 
+const DATE_BASE = { type: "DATE" as const };
+
 const goodStatement: VestingStatement = {
   order: 1,
+  vesting_base: DATE_BASE,
   occurrences: 48,
   period: 1,
   period_type: "MONTHS",
@@ -22,11 +25,6 @@ const goodStatement: VestingStatement = {
 const goodTemplate: VestingScheduleTemplate = {
   id: "t1",
   statements: [goodStatement],
-};
-
-const goodSchedule: VestingSchedule = {
-  template_id: "t1",
-  start_date: "2025-01-01",
 };
 
 describe("validateVestingScheduleTemplate", () => {
@@ -120,6 +118,102 @@ describe("validateVestingScheduleTemplate", () => {
         statements: [{ ...goodStatement, order: 1.5 }],
       });
       expect(result.valid).toBe(false);
+    });
+  });
+
+  describe("statement.vesting_base", () => {
+    it("rejects missing vesting_base", () => {
+      const { vesting_base, ...stmtWithoutBase } = goodStatement;
+      void vesting_base;
+      const result = validateVestingScheduleTemplate({
+        id: "t1",
+        statements: [stmtWithoutBase as unknown as VestingStatement],
+      });
+      expect(result.errors).toContainEqual({
+        path: "statements[0].vesting_base",
+        message: "is required and must be an object",
+      });
+    });
+
+    it("rejects invalid type", () => {
+      const result = validateVestingScheduleTemplate({
+        id: "t1",
+        statements: [
+          {
+            ...goodStatement,
+            vesting_base: { type: "RELATIVE" } as unknown as VestingStatement["vesting_base"],
+          },
+        ],
+      });
+      expect(result.errors).toContainEqual({
+        path: "statements[0].vesting_base.type",
+        message: 'must be "DATE" or "EVENT"',
+      });
+    });
+
+    it("rejects EVENT without event_id", () => {
+      const result = validateVestingScheduleTemplate({
+        id: "t1",
+        statements: [
+          {
+            ...goodStatement,
+            vesting_base: { type: "EVENT" } as unknown as VestingStatement["vesting_base"],
+          },
+        ],
+      });
+      expect(result.errors).toContainEqual({
+        path: "statements[0].vesting_base.event_id",
+        message: "must be a non-empty string",
+      });
+    });
+
+    it("rejects EVENT with empty event_id", () => {
+      const result = validateVestingScheduleTemplate({
+        id: "t1",
+        statements: [
+          {
+            ...goodStatement,
+            vesting_base: { type: "EVENT", event_id: "" },
+          },
+        ],
+      });
+      expect(result.errors).toContainEqual({
+        path: "statements[0].vesting_base.event_id",
+        message: "must be a non-empty string",
+      });
+    });
+
+    it("rejects DATE with stray event_id", () => {
+      const result = validateVestingScheduleTemplate({
+        id: "t1",
+        statements: [
+          {
+            ...goodStatement,
+            vesting_base: {
+              type: "DATE",
+              event_id: "stray",
+            } as unknown as VestingStatement["vesting_base"],
+          },
+        ],
+      });
+      expect(result.errors).toContainEqual({
+        path: "statements[0].vesting_base.event_id",
+        message: 'must not be present on a vesting_base with type "DATE"',
+      });
+    });
+
+    it("accepts well-formed EVENT base", () => {
+      const result = validateVestingScheduleTemplate({
+        id: "t1",
+        statements: [
+          {
+            ...goodStatement,
+            cliff: undefined,
+            vesting_base: { type: "EVENT", event_id: "ipo" },
+          },
+        ],
+      });
+      expect(result.valid).toBe(true);
     });
   });
 
@@ -322,37 +416,154 @@ describe("validateVestingScheduleTemplate", () => {
   });
 });
 
-describe("validateVestingSchedule", () => {
-  it("accepts a well-formed schedule", () => {
-    expect(validateVestingSchedule(goodSchedule)).toEqual({
-      valid: true,
-      errors: [],
+describe("validateVestingRuntime", () => {
+  const eventTemplate: VestingScheduleTemplate = {
+    id: "t1",
+    statements: [
+      {
+        ...goodStatement,
+        cliff: undefined,
+        vesting_base: { type: "EVENT", event_id: "ipo" },
+      },
+    ],
+  };
+
+  it("accepts an empty runtime when template has only EVENT statements", () => {
+    const result = validateVestingRuntime({}, eventTemplate);
+    expect(result).toEqual({ valid: true, errors: [] });
+  });
+
+  it("requires startDate when any DATE-anchored statement exists", () => {
+    const result = validateVestingRuntime({}, goodTemplate);
+    expect(result.valid).toBe(false);
+    expect(result.errors).toContainEqual({
+      path: "startDate",
+      message:
+        "is required when the template contains any DATE-anchored statement",
     });
   });
 
-  describe("template_id", () => {
-    it("rejects empty string", () => {
-      const result = validateVestingSchedule({ ...goodSchedule, template_id: "" });
-      expect(result.errors).toContainEqual({
-        path: "template_id",
-        message: "must be a non-empty string",
-      });
+  it("accepts a valid startDate for a DATE template", () => {
+    const result = validateVestingRuntime(
+      { startDate: "2025-01-01" },
+      goodTemplate,
+    );
+    expect(result.valid).toBe(true);
+  });
+
+  it("rejects non-ISO startDate", () => {
+    const result = validateVestingRuntime(
+      { startDate: "2025/01/01" },
+      goodTemplate,
+    );
+    expect(result.errors).toContainEqual({
+      path: "startDate",
+      message: "must be an ISO 8601 date string (YYYY-MM-DD)",
     });
   });
 
-  describe("start_date", () => {
-    it("rejects non-ISO format", () => {
-      const result = validateVestingSchedule({ ...goodSchedule, start_date: "2025/01/01" });
-      expect(result.errors).toContainEqual({
-        path: "start_date",
-        message: "must be an ISO 8601 date string (YYYY-MM-DD)",
-      });
+  it("rejects non-ISO grantDate", () => {
+    const result = validateVestingRuntime(
+      { startDate: "2025-01-01", grantDate: "nope" },
+      goodTemplate,
+    );
+    expect(result.errors).toContainEqual({
+      path: "grantDate",
+      message: "must be an ISO 8601 date string (YYYY-MM-DD)",
     });
+  });
 
-    it("rejects garbage", () => {
-      const result = validateVestingSchedule({ ...goodSchedule, start_date: "not a date" });
-      expect(result.valid).toBe(false);
+  it("rejects duplicate event_id in eventFirings", () => {
+    const result = validateVestingRuntime(
+      {
+        eventFirings: [
+          { event_id: "ipo", date: "2026-04-01" },
+          { event_id: "ipo", date: "2026-05-01" },
+        ],
+      },
+      eventTemplate,
+    );
+    expect(result.errors).toContainEqual({
+      path: "eventFirings",
+      message: 'duplicate event_id "ipo" at indices [0, 1]',
     });
+  });
+
+  it("rejects event_id that doesn't match any EVENT statement", () => {
+    const result = validateVestingRuntime(
+      { eventFirings: [{ event_id: "stranger", date: "2026-04-01" }] },
+      eventTemplate,
+    );
+    expect(result.errors).toContainEqual({
+      path: "eventFirings[0].event_id",
+      message:
+        '"stranger" does not match any EVENT-anchored statement in the template',
+    });
+  });
+
+  it("rejects non-ISO firing date", () => {
+    const result = validateVestingRuntime(
+      { eventFirings: [{ event_id: "ipo", date: "not-a-date" }] },
+      eventTemplate,
+    );
+    expect(result.errors).toContainEqual({
+      path: "eventFirings[0].date",
+      message: "must be an ISO 8601 date string (YYYY-MM-DD)",
+    });
+  });
+
+  it("rejects realized_fraction > 1", () => {
+    const result = validateVestingRuntime(
+      {
+        eventFirings: [
+          {
+            event_id: "ipo",
+            date: "2026-04-01",
+            realized_fraction: { numerator: 3, denominator: 2 },
+          },
+        ],
+      },
+      eventTemplate,
+    );
+    expect(result.errors).toContainEqual({
+      path: "eventFirings[0].realized_fraction",
+      message: "must be in the closed interval [0, 1]",
+    });
+  });
+
+  it("rejects negative realized_fraction", () => {
+    const result = validateVestingRuntime(
+      {
+        eventFirings: [
+          {
+            event_id: "ipo",
+            date: "2026-04-01",
+            realized_fraction: { numerator: -1, denominator: 2 },
+          },
+        ],
+      },
+      eventTemplate,
+    );
+    expect(result.errors).toContainEqual({
+      path: "eventFirings[0].realized_fraction",
+      message: "must be in the closed interval [0, 1]",
+    });
+  });
+
+  it("accepts realized_fraction in [0, 1]", () => {
+    const result = validateVestingRuntime(
+      {
+        eventFirings: [
+          {
+            event_id: "ipo",
+            date: "2026-04-01",
+            realized_fraction: { numerator: 3, denominator: 10 },
+          },
+        ],
+      },
+      eventTemplate,
+    );
+    expect(result.valid).toBe(true);
   });
 });
 
@@ -371,14 +582,18 @@ describe("assertValidVestingScheduleTemplate", () => {
   });
 });
 
-describe("assertValidVestingSchedule", () => {
+describe("assertValidVestingRuntime", () => {
+  const goodRuntime: VestingRuntime = { startDate: "2025-01-01" };
+
   it("does not throw on valid input", () => {
-    expect(() => assertValidVestingSchedule(goodSchedule)).not.toThrow();
+    expect(() =>
+      assertValidVestingRuntime(goodRuntime, goodTemplate),
+    ).not.toThrow();
   });
 
   it("throws on invalid input", () => {
-    expect(() =>
-      assertValidVestingSchedule({ template_id: "", start_date: "bad" }),
-    ).toThrow(/Invalid VestingSchedule/);
+    expect(() => assertValidVestingRuntime({}, goodTemplate)).toThrow(
+      /Invalid VestingRuntime/,
+    );
   });
 });
