@@ -1,6 +1,6 @@
 import * as fs from "fs";
 import * as path from "path";
-import { Transaction, Valuation, VestingTerms } from "../vesting_schedule_generator_v1/types";
+import { Transaction, Valuation, VestingTerms } from "../types";
 
 export interface OcfPackageContent {
   manifest: any;

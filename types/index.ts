@@ -1,16 +1,5 @@
 // Ideally we'll eventually import these from OCF
 
-export interface OCFDataBySecurityId {
-  issuanceTransaction: TX_Equity_Compensation_Issuance;
-  vestingStartTransactions: TX_Vesting_Start[];
-  vestingEventTransactions: TX_Vesting_Event[];
-  exerciseTransactions: TX_Equity_Compensation_Exercise[];
-  cancellationTransactions: TX_Equity_Compensation_Cancellation[];
-  vestingObjects: vestingObject[] | undefined;
-  issuanceVestingTerms: VestingTerms | undefined;
-  valuations: Valuation[];
-}
-
 /******************************
  * Vesting Condition
  ******************************/
@@ -271,49 +260,3 @@ export type Transaction =
   | TX_Vesting_Event
   | TX_Equity_Compensation_Exercise
   | TX_Equity_Compensation_Cancellation;
-
-/******************************
- * Vesting Graph
- ******************************/
-
-export type GraphNode =
-  | StartGraphNode
-  | EventGraphNode
-  | AbsoluteGraphNode
-  | RelativeGraphNode;
-
-export interface GraphNodeBase extends VestingConditionBase {
-  triggeredDate?: Date;
-  prior_condition_ids: string[];
-}
-
-export interface StartGraphNode extends GraphNodeBase {
-  trigger: VestingStartTrigger;
-}
-
-export interface EventGraphNode extends GraphNodeBase {
-  trigger: VestingEventTrigger;
-}
-
-export interface AbsoluteGraphNode extends GraphNodeBase {
-  trigger: VestingAbsoluteTrigger;
-}
-
-export interface RelativeGraphNode extends GraphNodeBase {
-  trigger: VestingRelativeTrigger;
-}
-
-/******************************
- * Vesting Installment
- ******************************/
-
-export interface VestingInstallment {
-  date: Date;
-  quantity: number;
-}
-
-export interface VestingScheduleStatus extends VestingInstallment {
-  totalVested: number;
-  totalUnvested: number;
-  becameExercisable: number;
-}

@@ -11,7 +11,4 @@ module.exports = {
       },
     ],
   },
-  moduleNameMapper: {
-    "^vesting_schedule_generator$": "<rootDir>/vesting_schedule_generator_v1",
-  },
 };
