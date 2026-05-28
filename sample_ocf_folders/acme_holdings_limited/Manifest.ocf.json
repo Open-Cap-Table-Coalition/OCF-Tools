@@ -11,7 +11,12 @@
   },
   "as_of": "2023-06-29",
   "generated_at": "2023-06-29T09:57:16.793Z",
-  "stock_plans_files": [],
+  "stock_plans_files": [
+    {
+      "filepath": "./StockPlans.ocf.json",
+      "md5": "placeholder"
+    }
+  ],
   "stock_legend_templates_files": [],
   "stock_classes_files": [
     {

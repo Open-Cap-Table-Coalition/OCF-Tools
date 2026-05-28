@@ -468,6 +468,103 @@
       "security_id": "equity_compensation_issuance_01",
       "resulting_security_ids": ["share_issuance_04"],
       "quantity": "350"
+    },
+    {
+      "id": "spa_01",
+      "object_type": "TX_STOCK_PLAN_POOL_ADJUSTMENT",
+      "date": "2022-06-01",
+      "stock_plan_id": "stock_plan_01",
+      "board_approval_date": "2022-06-01",
+      "shares_reserved": "2500000",
+      "comments": ["Increased plan 1 pool from 2,000,000 to 2,500,000"]
+    },
+    {
+      "id": "spa_02",
+      "object_type": "TX_STOCK_PLAN_POOL_ADJUSTMENT",
+      "date": "2023-06-01",
+      "stock_plan_id": "stock_plan_02",
+      "board_approval_date": "2023-06-01",
+      "shares_reserved": "400000",
+      "comments": ["Decreased plan 2 pool from 500,000 to 400,000"]
+    },
+    {
+      "id": "psi_01",
+      "object_type": "TX_PLAN_SECURITY_ISSUANCE",
+      "date": "2023-03-01",
+      "security_id": "plan_security_01",
+      "custom_id": "PS-1",
+      "stakeholder_id": "janeCTO",
+      "security_law_exemptions": [],
+      "stock_plan_id": "stock_plan_02",
+      "stock_class_id": "ordinaryB",
+      "quantity": "100000",
+      "compensation_type": "RSU",
+      "option_grant_type": "NSO",
+      "expiration_date": null,
+      "termination_exercise_windows": []
+    },
+    {
+      "id": "psa_01",
+      "object_type": "TX_PLAN_SECURITY_ACCEPTANCE",
+      "date": "2023-03-15",
+      "security_id": "plan_security_01"
+    },
+    {
+      "id": "psi_02",
+      "object_type": "TX_PLAN_SECURITY_ISSUANCE",
+      "date": "2023-04-01",
+      "security_id": "plan_security_02",
+      "custom_id": "PS-2",
+      "stakeholder_id": "emilyEmployee",
+      "security_law_exemptions": [],
+      "stock_plan_id": "stock_plan_02",
+      "stock_class_id": "ordinaryB",
+      "quantity": "50000",
+      "compensation_type": "RSU",
+      "option_grant_type": "NSO",
+      "expiration_date": null,
+      "termination_exercise_windows": []
+    },
+    {
+      "id": "psc_01",
+      "object_type": "TX_PLAN_SECURITY_CANCELLATION",
+      "date": "2023-06-01",
+      "security_id": "plan_security_02",
+      "balance_security_id": "",
+      "reason_text": "Employee departed before vesting",
+      "quantity": "50000"
+    },
+    {
+      "id": "sprtp_01",
+      "object_type": "TX_STOCK_PLAN_RETURN_TO_POOL",
+      "date": "2023-06-01",
+      "security_id": "plan_security_02",
+      "stock_plan_id": "stock_plan_02",
+      "reason_text": "Cancelled RSUs returned to 2023 plan pool",
+      "quantity": "50000"
+    },
+    {
+      "id": "psi_03",
+      "object_type": "TX_PLAN_SECURITY_ISSUANCE",
+      "date": "2023-07-01",
+      "security_id": "plan_security_03",
+      "custom_id": "PS-3",
+      "stakeholder_id": "emilyEmployee",
+      "security_law_exemptions": [],
+      "stock_plan_id": "stock_plan_02",
+      "stock_class_id": "ordinaryB",
+      "quantity": "30000",
+      "compensation_type": "RSU",
+      "option_grant_type": "NSO",
+      "expiration_date": null,
+      "termination_exercise_windows": []
+    },
+    {
+      "id": "psr_01",
+      "object_type": "TX_PLAN_SECURITY_RETRACTION",
+      "date": "2023-07-02",
+      "security_id": "plan_security_03",
+      "reason_text": "Grant issued in error"
     }
   ]
 }
