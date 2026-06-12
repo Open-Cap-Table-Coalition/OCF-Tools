@@ -11,7 +11,8 @@
   "scripts": {
     "build": "tsc",
     "test": "jest --watch",
-    "test:ci": "jest --passWithNoTests"
+    "test:ci": "jest --passWithNoTests",
+    "ocf:refresh-types": "node scripts/refresh-ocf-types.mjs"
   },
   "devDependencies": {
     "@types/jest": "~29.5.14",
@@ -26,5 +27,9 @@
     "tsconfig-paths": "~4.2.0",
     "volta": "~0.0.0",
     "xstate": "~5.18.2"
+  },
+  "ocfSchema": {
+    "repo": "MattCantor/Open-Cap-Format-OCF",
+    "ref": "642da8f2d96238e76b07f512b21d163f901071e8"
   }
 }
