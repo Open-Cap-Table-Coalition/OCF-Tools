@@ -1,0 +1,66 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`ocfValidator over testPackage > produces a stable validation result and report 1`] = `
+{
+  "convertibleIssuances": [],
+  "equityCompensation": [
+    {
+      "compensation_type": "OPTION",
+      "custom_id": "EC-1",
+      "date": "2019-06-01",
+      "early_exercisable": false,
+      "exercise_price": {
+        "amount": "1.0",
+        "currency": "USD",
+      },
+      "expiration_date": "2030-05-31",
+      "id": "eci_01",
+      "object_type": "TX_EQUITY_COMPENSATION_ISSUANCE",
+      "option_grant_type": "ISO",
+      "quantity": "360000",
+      "security_id": "equity_compensation_issuance_01",
+      "security_law_exemptions": [],
+      "stakeholder_id": "emilyEmployee",
+      "stock_class_id": "ordinaryB",
+      "stock_plan_id": "stock_plan_01",
+      "termination_exercise_windows": [
+        {
+          "period": 3,
+          "period_type": "MONTHS",
+          "reason": "VOLUNTARY_GOOD_CAUSE",
+        },
+      ],
+      "valuation_id": "valuation_01",
+      "vesting_terms_id": "four_year_monthly_one_year_cliff_cumulative_round_down",
+    },
+  ],
+  "report": [
+    {
+      "stakeholder_validity": true,
+      "transaction_date": "2019-06-01",
+      "transaction_id": "eci_01",
+      "transaction_type": "TX_EQUITY_COMPENSATION_ISSUANCE",
+    },
+  ],
+  "result": "The validation of the OCF package for Acme Holdings Limited is complete and the package appears valid.",
+  "snapshots": [
+    {
+      "convertibles": [],
+      "date": "2019-06-01",
+      "equityCompensation": [
+        {
+          "availableToExercise": undefined,
+          "custom_id": "EC-1",
+          "date": "2019-06-01",
+          "quantity": "360000",
+          "stakeholder": "emilyEmployee",
+        },
+      ],
+      "stockIssuances": [],
+      "warrants": [],
+    },
+  ],
+  "stockIssuances": [],
+  "warrantIssuances": [],
+}
+`;
