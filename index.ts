@@ -1,9 +1,3 @@
-import { readOcfPackage } from "./read_ocf_package";
-import { ocfValidator } from "./ocf_validator";
-import { ocfSnapshot } from "./ocf_snapshot";
-
-module.exports = {
-  readOcfPackage,
-  ocfValidator,
-  ocfSnapshot,
-};
+export { readOcfPackage } from "./read_ocf_package";
+export { ocfValidator } from "./ocf_validator";
+export { ocfSnapshot } from "./ocf_snapshot";
