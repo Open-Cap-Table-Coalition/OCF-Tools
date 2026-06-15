@@ -1,10 +1,10 @@
 // Refresh the vendored OCF TypeScript types from the pinned schema-repo commit.
 //
 // Reads the `ocfSchema` pin from package.json, fetches the generated
-// `types/ocf.ts` from the pinned 40-char commit SHA, prepends a provenance
-// header, and writes it to `types/ocf.ts`. Pure Node ESM, no dependencies,
-// uses global fetch (Node >= 18). Output is byte-idempotent for an unchanged
-// pin (no timestamps).
+// `types/ocf.ts` from the pinned 40-char commit SHA, strips the upstream
+// generation header, prepends this repo's provenance header, and writes it to
+// `types/ocf.ts`. Pure Node ESM, no dependencies, uses global fetch
+// (Node >= 18). Output is byte-idempotent for an unchanged pin (no timestamps).
 
 import { readFile, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
@@ -59,11 +59,30 @@ if (!response.ok) {
 
 const upstream = await response.text();
 
+// Drop the upstream generation header (leading `//` line comments and any blank
+// lines that follow) so the vendored file carries only this repo's provenance
+// header. Matching on line-comment prefix rather than the exact upstream
+// wording keeps this robust if that header's text changes; it stops at the
+// first real line of content (e.g. a `/** */` JSDoc block or an `export`).
+function stripUpstreamHeader(source) {
+  const lines = source.split("\n");
+  let start = 0;
+  while (start < lines.length && /^\s*\/\//.test(lines[start])) {
+    start += 1;
+  }
+  while (start < lines.length && lines[start].trim() === "") {
+    start += 1;
+  }
+  return lines.slice(start).join("\n");
+}
+
+const body = stripUpstreamHeader(upstream);
+
 const header =
   "// GENERATED FILE — DO NOT EDIT.\n" +
   `// Vendored from ${repo}@${ref}\n` +
-  "// Refresh: npm run ocf:refresh-types\n";
+  "// Refresh: npm run ocf:refresh-types\n\n";
 
-await writeFile(outputPath, header + upstream);
+await writeFile(outputPath, header + body);
 
 console.log(`Wrote ${outputPath} from ${url}`);
