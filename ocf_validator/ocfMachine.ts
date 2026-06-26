@@ -1,17 +1,24 @@
 import { assign } from "xstate";
-import { OcfPackageContent } from "../read_ocf_package";
+import type {
+  OCFStockIssuance,
+  OCFConvertibleIssuance,
+  OCFWarrantIssuance,
+  OCFEquityCompensationIssuance,
+} from "@opencaptablecoalition/ocf-types";
+import type { OcfPackageContent } from "../read_ocf_package";
+import type { Snapshot } from "../types/snapshot";
 import validators from "./validators";
 import run_EOD from "./eod";
 
 export type OcfMachineContext = {
-  stockIssuances: any[];
-  equityCompensation: any[];
-  convertibleIssuances: any[];
-  warrantIssuances: any[];
+  stockIssuances: OCFStockIssuance[];
+  equityCompensation: OCFEquityCompensationIssuance[];
+  convertibleIssuances: OCFConvertibleIssuance[];
+  warrantIssuances: OCFWarrantIssuance[];
   ocfPackageContent: OcfPackageContent;
   report: any[];
-  snapshots: any[],
-  result : any
+  snapshots: Snapshot[];
+  result: string;
 };
 
 export type OcfMachineEvent = {
