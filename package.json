@@ -12,7 +12,8 @@
     "build": "tsc",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:ci": "vitest run"
+    "test:ci": "vitest run",
+    "ocf:refresh-types": "bash scripts/refresh-ocf-types.sh"
   },
   "devDependencies": {
     "@types/node": "~22.7.7",
