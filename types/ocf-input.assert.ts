@@ -11,12 +11,7 @@ import type {
   OCFEquityCompensationIssuance,
   OCFStockIssuance,
 } from "@opencaptablecoalition/ocf-types";
-
-type Expect<T extends true> = T;
-type Equal<A, B> =
-  (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2
-    ? true
-    : false;
+import type { Expect, Equal } from "./type-assert";
 
 // B2: InputManifest widens ocf_version to a free string...
 type _WidensVersion = Expect<Equal<InputManifest["ocf_version"], string>>;
