@@ -1,15 +1,13 @@
 /**
- * Compile-time assertions for the public API return shapes (#154). No runtime —
+ * Compile-time assertions for the public API return shapes. No runtime —
  * type-checked by `tsc` (the build) because it is not a `*.test.ts` file.
  *
- * Scope of what these pin: the *resolved* return type of each public entry point.
- * They are a regression guard against the return drifting to `any` — NOT a proof
- * that the type matches the real machine. For `ocfValidator` in particular the
- * value side is reached through an `as OcfMachineContext` cast (the machine config
- * is still `any`), so this assert cannot see past the cast; the genuine check lands
- * with #157 when the cast is removed. The internal `Snapshot`-typed callbacks in
- * `ocfSnapshot` are NOT pinned here (callback params don't affect a return type) —
- * those are a reviewer check.
+ * These pin the *resolved* return type of each public entry point, guarding
+ * against a return drifting to `any`. The machine is typed via `setup()`, so
+ * `ocfValidator` returns `getSnapshot().context` with no cast and this assert
+ * sees the machine's real context type end-to-end. The internal `Snapshot`-typed
+ * callbacks in `ocfSnapshot` are not pinned here (callback params don't affect a
+ * return type).
  */
 import { readOcfPackage } from "../read_ocf_package";
 import { ocfValidator } from "../ocf_validator";
