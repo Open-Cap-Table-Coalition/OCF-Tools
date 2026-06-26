@@ -7,6 +7,7 @@ import type {
 } from "@opencaptablecoalition/ocf-types";
 import type { OcfPackageContent } from "../read_ocf_package";
 import type { Snapshot } from "../types/snapshot";
+import type { Finding } from "../types/finding";
 import validators from "./validators";
 import run_EOD from "./eod";
 
@@ -17,6 +18,7 @@ export type OcfMachineContext = {
   warrantIssuances: OCFWarrantIssuance[];
   ocfPackageContent: OcfPackageContent;
   report: any[];
+  findings: Finding[];
   snapshots: Snapshot[];
   result: string;
 };
@@ -38,6 +40,7 @@ export const ocfMachine: any = {
     warrantIssuances: [],
     ocfPackageContent: {},
     report: [],
+    findings: [],
     snapshots: [],
     result: 'Incomplete'
   },
