@@ -26,3 +26,11 @@ export type InputManifest = Omit<OCFManifestFile, "ocf_version"> & {
  * handler table key on `object_type` and receive the correctly-typed payload.
  */
 export type TransactionFor<K extends keyof ObjectTypeMap> = ObjectTypeMap[K];
+
+/**
+ * Any transaction as it appears in an inbound package — the union of every
+ * `TX_*` payload in `ObjectTypeMap`. Used at the read boundary where the parser
+ * does not yet know which transaction kind each record is.
+ */
+export type OcfTransaction =
+  ObjectTypeMap[Extract<keyof ObjectTypeMap, `TX_${string}`>];
