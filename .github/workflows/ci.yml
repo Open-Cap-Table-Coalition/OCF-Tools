@@ -3,8 +3,10 @@ name: CI
 on:
   push:
     branches: [main]
+  # Run on every PR regardless of base branch, so stacked PRs (whose base is an
+  # intermediate stack branch, not main) get CI too — not only when they retarget
+  # to main. For pull_request, this workflow is read from the PR's head branch.
   pull_request:
-    branches: [main]
 
 permissions:
   contents: read
