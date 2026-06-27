@@ -32,7 +32,6 @@ export interface SnapshotEquityCompensation {
   custom_id: string;
   stakeholder: string;
   quantity: string;
-  availableToExercise: unknown;
 }
 
 export interface Snapshot {

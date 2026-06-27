@@ -39,7 +39,6 @@ const RUN_EOD = (context: OcfMachineContext, event: any): Snapshot => {
       custom_id: issuance.custom_id,
       stakeholder: issuance.stakeholder_id,
       quantity: issuance.quantity,
-      availableToExercise: issuance.availableToExercise,
     });
   });
 

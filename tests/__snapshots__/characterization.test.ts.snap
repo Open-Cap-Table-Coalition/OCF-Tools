@@ -50,7 +50,6 @@ exports[`ocfValidator over testPackage > produces a stable validation result and
       "date": "2019-06-01",
       "equityCompensation": [
         {
-          "availableToExercise": undefined,
           "custom_id": "EC-1",
           "date": "2019-06-01",
           "quantity": "360000",
