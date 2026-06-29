@@ -2,10 +2,13 @@
 // VENDORED — temporary transport for OCF types (#153; roadmap #145, Phase 2).
 //
 // Source  : Open-Cap-Table-Coalition/Open-Cap-Format-OCF
-// Branch  : schema-toolkit-aggregates  (Open-Cap-Format-OCF PR #585, stacked
-//           on PR #581 / JSv4/schema-toolkit — NEITHER merged yet)
-// Commit  : afde4ebf
-// Built by: npm run schema:gen-types   (150 types + 5 aggregates)
+// Ref     : main (d5226fb5)
+// Built by: npm run schema:gen-types -- --experimental compatibility
+//           (regenerate: npm run ocf:refresh-types)
+//
+// --experimental compatibility: keeps version dispatchers as V1 | V2 | … unions
+// (back-compat behaviour). Pinned explicitly so a future default change never
+// silently alters the vendored shape. See scripts/refresh-ocf-types.sh for detail.
 //
 // DO NOT EDIT BY HAND. Stop-gap until these types ship as the
 // `@opencaptablecoalition/ocf-types` package. Consumers already import the
@@ -13,9 +16,9 @@
 //   import type { AnyTransaction, ObjectTypeMap } from "@opencaptablecoalition/ocf-types";
 //
 // Replacement path (local to this file + the tsconfig alias):
-//   1. PRs merge to main      -> npm run ocf:refresh-types   (restamps the SHA)
-//   2. Release tarball exists  -> npm i -D <tarball-url>; delete this file + alias
-//   3. npm publish             -> npm i -D @opencaptablecoalition/ocf-types
+//   1. Snapshot tracks main    -> npm run ocf:refresh-types   (restamps the SHA)
+//   2. Release tarball exists   -> npm i -D <tarball-url>; delete this file + alias
+//   3. npm publish              -> npm i -D @opencaptablecoalition/ocf-types
 // ============================================================================
 
 /**
