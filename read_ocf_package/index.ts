@@ -1,16 +1,20 @@
 import * as fs from "fs";
 import * as path from "path";
-import { Transaction, Valuation, VestingTerms } from "../types";
+import type {
+  OCFValuation,
+  OCFVestingTerms,
+} from "@opencaptablecoalition/ocf-types";
+import type { OcfTransaction } from "../types/ocf-input";
 
 export interface OcfPackageContent {
   manifest: any;
   stakeholders: any;
   stockClasses: any;
-  transactions: Transaction[];
+  transactions: OcfTransaction[];
   stockLegends: any;
   stockPlans: any;
-  vestingTerms: VestingTerms[];
-  valuations: Valuation[];
+  vestingTerms: OCFVestingTerms[];
+  valuations: OCFValuation[];
 }
 
 interface file {
@@ -41,7 +45,7 @@ export const readOcfPackage = (packagePath: string): OcfPackageContent => {
     );
   });
 
-  const transactions: Transaction[] = [];
+  const transactions: OcfTransaction[] = [];
   manifest.transactions_files.forEach((file: file) => {
     transactions.push(
       ...JSON.parse(
@@ -50,7 +54,7 @@ export const readOcfPackage = (packagePath: string): OcfPackageContent => {
     );
   });
 
-  const vestingTerms: VestingTerms[] = [];
+  const vestingTerms: OCFVestingTerms[] = [];
   manifest.vesting_terms_files.forEach((file: file) => {
     vestingTerms.push(
       ...JSON.parse(
@@ -77,7 +81,7 @@ export const readOcfPackage = (packagePath: string): OcfPackageContent => {
     );
   });
 
-  const valuations: Valuation[] = [];
+  const valuations: OCFValuation[] = [];
   manifest.valuations_files.forEach((file: file) => {
     valuations.push(
       ...JSON.parse(
