@@ -3,10 +3,11 @@ import { createActor } from "xstate";
 import {
   ocfMachine,
   collectionUpdate,
-  collectionKeyFor,
+  TX_DESCRIPTORS,
   type OcfMachineContext,
   type OcfMachineEvent,
   type TxKey,
+  type CollectionKey,
 } from "../ocf_validator/ocfMachine";
 
 // ---------------------------------------------------------------------------
@@ -176,67 +177,101 @@ describe("warrant issuance lands in its own family collection", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Per-type collection operation
+// Per-type collection placement
 // ---------------------------------------------------------------------------
 
-const OP_CASES: Array<[TxKey, "append" | "none" | "remove"]> = [
-  // append
-  ["TX_STOCK_ISSUANCE", "append"],
-  ["TX_CONVERTIBLE_ISSUANCE", "append"],
-  ["TX_WARRANT_ISSUANCE", "append"],
-  ["TX_EQUITY_COMPENSATION_ISSUANCE", "append"],
-  // none
-  ["TX_STOCK_ACCEPTANCE", "none"],
-  ["TX_CONVERTIBLE_ACCEPTANCE", "none"],
-  ["TX_WARRANT_ACCEPTANCE", "none"],
-  ["TX_EQUITY_COMPENSATION_ACCEPTANCE", "none"],
-  ["TX_EQUITY_COMPENSATION_EXERCISE", "none"],
-  // remove
-  ["TX_STOCK_RETRACTION", "remove"],
-  ["TX_STOCK_CANCELLATION", "remove"],
-  ["TX_STOCK_CONVERSION", "remove"],
-  ["TX_STOCK_REISSUANCE", "remove"],
-  ["TX_STOCK_REPURCHASE", "remove"],
-  ["TX_STOCK_TRANSFER", "remove"],
-  ["TX_CONVERTIBLE_RETRACTION", "remove"],
-  ["TX_CONVERTIBLE_CANCELLATION", "remove"],
-  ["TX_CONVERTIBLE_TRANSFER", "remove"],
-  ["TX_CONVERTIBLE_CONVERSION", "remove"],
-  ["TX_WARRANT_RETRACTION", "remove"],
-  ["TX_WARRANT_CANCELLATION", "remove"],
-  ["TX_WARRANT_TRANSFER", "remove"],
-  ["TX_WARRANT_EXERCISE", "remove"],
-  ["TX_EQUITY_COMPENSATION_RETRACTION", "remove"],
-  ["TX_EQUITY_COMPENSATION_CANCELLATION", "remove"],
-  ["TX_EQUITY_COMPENSATION_TRANSFER", "remove"],
-];
+// Every key the machine acts on (everything but passthrough), derived from the
+// descriptors so an added active descriptor is exercised here automatically.
+const ACTIVE_KEYS = (Object.keys(TX_DESCRIPTORS) as TxKey[]).filter(
+  (key) => TX_DESCRIPTORS[key].effect !== "passthrough",
+);
 
-describe("per-type collection operation", () => {
-  it("covers all 26 active handlers", () => {
-    expect(OP_CASES).toHaveLength(26);
+// The active keys that name a collection (append/remove), derived the same way.
+const COLLECTION_KEYS = (Object.keys(TX_DESCRIPTORS) as TxKey[]).filter(
+  (key) => "collection" in TX_DESCRIPTORS[key],
+);
+
+// Independent oracle: the collection each append/remove key must declare, written
+// out by hand — no prefix logic, no mapping helper imported from the interpreter.
+// The `remove` path trusts `descriptor.collection` verbatim, so this oracle is the
+// independent check that each declaration is right.
+const EXPECTED_COLLECTION: Record<string, CollectionKey> = {
+  // append
+  TX_STOCK_ISSUANCE: "stockIssuances",
+  TX_CONVERTIBLE_ISSUANCE: "convertibleIssuances",
+  TX_WARRANT_ISSUANCE: "warrantIssuances",
+  TX_EQUITY_COMPENSATION_ISSUANCE: "equityCompensation",
+  // remove
+  TX_STOCK_RETRACTION: "stockIssuances",
+  TX_STOCK_CANCELLATION: "stockIssuances",
+  TX_STOCK_CONVERSION: "stockIssuances",
+  TX_STOCK_REISSUANCE: "stockIssuances",
+  TX_STOCK_REPURCHASE: "stockIssuances",
+  TX_STOCK_TRANSFER: "stockIssuances",
+  TX_CONVERTIBLE_RETRACTION: "convertibleIssuances",
+  TX_CONVERTIBLE_CANCELLATION: "convertibleIssuances",
+  TX_CONVERTIBLE_TRANSFER: "convertibleIssuances",
+  TX_CONVERTIBLE_CONVERSION: "convertibleIssuances",
+  TX_WARRANT_RETRACTION: "warrantIssuances",
+  TX_WARRANT_CANCELLATION: "warrantIssuances",
+  TX_WARRANT_TRANSFER: "warrantIssuances",
+  TX_WARRANT_EXERCISE: "warrantIssuances",
+  TX_EQUITY_COMPENSATION_RETRACTION: "equityCompensation",
+  TX_EQUITY_COMPENSATION_CANCELLATION: "equityCompensation",
+  TX_EQUITY_COMPENSATION_TRANSFER: "equityCompensation",
+};
+
+describe("per-type collection placement", () => {
+  it("handles every active descriptor: each is an append/remove or a none", () => {
+    // The parametrized cases below are the active set itself; assert every member
+    // is one of the two shapes that case body handles, so a new effect that is
+    // neither fails here loudly.
+    for (const key of ACTIVE_KEYS) {
+      const descriptor = TX_DESCRIPTORS[key];
+      expect("collection" in descriptor || descriptor.effect === "none").toBe(true);
+    }
   });
 
-  it.each(OP_CASES)("%s performs op '%s' on its family collection", (type, op) => {
-    const fam = collectionKeyFor(type);
+  it.each(ACTIVE_KEYS)("%s mutates only the collection its descriptor declares", (key) => {
+    const descriptor = TX_DESCRIPTORS[key];
+    const data = { id: "incoming", security_id: "SEC", object_type: key };
+
+    if (!("collection" in descriptor)) {
+      // none: validate + report, but mutate nothing.
+      expect(descriptor.effect).toBe("none");
+      const result = collectionUpdate(baseContext(), ev(key, data));
+      expect(Object.keys(result)).toHaveLength(0);
+      return;
+    }
+
+    const fam = descriptor.collection;
     const matching = { id: "match", security_id: "SEC", object_type: "seed" };
     const other = { id: "other", security_id: "OTHER", object_type: "seed" };
     const ctx = baseContext({ [fam]: [matching, other] } as Partial<OcfMachineContext>);
-    const data = { id: "incoming", security_id: "SEC", object_type: type };
 
-    const result = collectionUpdate(ctx, ev(type, data)) as Record<string, any[]>;
+    const result = collectionUpdate(ctx, ev(key, data)) as Record<string, any[]>;
 
-    if (op === "append") {
-      expect(Object.keys(result)).toEqual([fam]);
+    // The mutation lands in exactly the collection the descriptor names.
+    expect(Object.keys(result)).toEqual([fam]);
+
+    if (descriptor.effect === "append") {
       expect(result[fam]).toHaveLength(3);
       expect(result[fam].at(-1)).toEqual(data);
-    } else if (op === "none") {
-      expect(Object.keys(result)).toHaveLength(0);
     } else {
-      // remove: the matching security_id is filtered out, others retained.
-      expect(Object.keys(result)).toEqual([fam]);
+      // remove: the matching security_id is filtered out, the rest retained.
       expect(result[fam].some((x) => x.security_id === "SEC")).toBe(false);
       expect(result[fam].some((x) => x.security_id === "OTHER")).toBe(true);
     }
+  });
+
+  it("declares a collection for exactly the append/remove descriptors", () => {
+    expect(new Set(COLLECTION_KEYS)).toEqual(new Set(Object.keys(EXPECTED_COLLECTION)));
+  });
+
+  it.each(COLLECTION_KEYS)("%s declares the collection the oracle expects", (key) => {
+    const descriptor = TX_DESCRIPTORS[key];
+    const collection = "collection" in descriptor ? descriptor.collection : undefined;
+    expect(collection).toBe(EXPECTED_COLLECTION[key]);
   });
 
   it("a passthrough type mutates no collection", () => {

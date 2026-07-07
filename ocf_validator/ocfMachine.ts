@@ -87,77 +87,82 @@ function removeFromCollection<E extends { security_id: string }>(
   return current.filter((obj) => obj.security_id !== securityId);
 }
 
+// ---------------------------------------------------------------------------
+// Per-transaction descriptors
+// ---------------------------------------------------------------------------
+
 /**
- * The family collection a transaction belongs to, derived from its `TX_<FAMILY>_*`
- * prefix. Single source of truth for the family→collection mapping, shared by the
- * machine's `remove` path and the per-type tests.
+ * A validator for a transaction whose payload is `T`. The payload sits in a
+ * contravariant position and is optional, so control events (which carry no
+ * `data`) and the untyped `event: any` validators all satisfy it.
  */
-export const collectionKeyFor = (type: TxKey): CollectionKey => {
-  if (type.startsWith("TX_STOCK_")) return "stockIssuances";
-  if (type.startsWith("TX_CONVERTIBLE_")) return "convertibleIssuances";
-  if (type.startsWith("TX_WARRANT_")) return "warrantIssuances";
-  return "equityCompensation";
-};
-
-// ---------------------------------------------------------------------------
-// The data-driven transaction table
-// ---------------------------------------------------------------------------
-
-type Validator = (
+type Validator<T> = (
   context: OcfMachineContext,
-  event: OcfMachineEvent,
+  event: { data?: T },
   isGuard: boolean,
 ) => any;
 
 /**
- * One row per `TxKey`. An active row carries the *operation* and the *validator*
- * for that key, referenced once so the guard and the report always use the same
- * validator. A `passthrough` row is a type the machine receives and silently
- * ignores.
+ * Everything the machine needs to know about one transaction type, keyed on its
+ * `effect`. The validator is referenced once so the guard and the report always
+ * use the same one.
  *
- *  - `append`: validate, report, and append the issuance to its family collection.
- *  - `none`:   validate and report, but mutate no collection.
- *  - `remove`: validate, report, and filter the family collection by `security_id`.
+ *  - `passthrough`: received and silently ignored — no validator, report, or mutation.
+ *  - `none`:        validate and report, but mutate no collection.
+ *  - `remove`:      validate, report, and filter `collection` by `security_id`.
+ *  - `append`:      validate, report, and append the issuance to `collection`.
+ *
+ * The `append` variant distributes over `CollectionKey`, tying `collection` to the
+ * payload family of its `validate`, so a family-typed validator cannot be declared
+ * under a mismatched collection (demonstrated in `types/ocf-machine-table.assert.ts`).
  */
-type TxRow =
-  | { op: "append" | "none" | "remove"; validator: Validator }
-  | { op: "passthrough" };
+type Descriptor =
+  | { effect: "passthrough" }
+  | { effect: "none"; validate: Validator<unknown> }
+  | { effect: "remove"; validate: Validator<unknown>; collection: CollectionKey }
+  | {
+      [C in CollectionKey]: {
+        effect: "append";
+        collection: C;
+        validate: Validator<CollectionElement[C]>;
+      };
+    }[CollectionKey];
 
-const TX_TABLE = {
+export const TX_DESCRIPTORS = {
   // --- append: issuance appended to its family collection -----------------
-  TX_STOCK_ISSUANCE: { op: "append", validator: validators.valid_tx_stock_issuance },
-  TX_CONVERTIBLE_ISSUANCE: { op: "append", validator: validators.valid_tx_convertible_issuance },
-  TX_WARRANT_ISSUANCE: { op: "append", validator: validators.valid_tx_warrant_issuance },
-  TX_EQUITY_COMPENSATION_ISSUANCE: { op: "append", validator: validators.valid_tx_equity_compensation_issuance },
+  TX_STOCK_ISSUANCE: { effect: "append", collection: "stockIssuances", validate: validators.valid_tx_stock_issuance },
+  TX_CONVERTIBLE_ISSUANCE: { effect: "append", collection: "convertibleIssuances", validate: validators.valid_tx_convertible_issuance },
+  TX_WARRANT_ISSUANCE: { effect: "append", collection: "warrantIssuances", validate: validators.valid_tx_warrant_issuance },
+  TX_EQUITY_COMPENSATION_ISSUANCE: { effect: "append", collection: "equityCompensation", validate: validators.valid_tx_equity_compensation_issuance },
 
   // --- none: validate + report, no collection mutation --------------------
-  TX_STOCK_ACCEPTANCE: { op: "none", validator: validators.valid_tx_stock_acceptance },
-  TX_CONVERTIBLE_ACCEPTANCE: { op: "none", validator: validators.valid_tx_convertible_acceptance },
-  TX_WARRANT_ACCEPTANCE: { op: "none", validator: validators.valid_tx_warrant_acceptance },
-  TX_EQUITY_COMPENSATION_ACCEPTANCE: { op: "none", validator: validators.valid_tx_equity_compensation_acceptance },
+  TX_STOCK_ACCEPTANCE: { effect: "none", validate: validators.valid_tx_stock_acceptance },
+  TX_CONVERTIBLE_ACCEPTANCE: { effect: "none", validate: validators.valid_tx_convertible_acceptance },
+  TX_WARRANT_ACCEPTANCE: { effect: "none", validate: validators.valid_tx_warrant_acceptance },
+  TX_EQUITY_COMPENSATION_ACCEPTANCE: { effect: "none", validate: validators.valid_tx_equity_compensation_acceptance },
   // TX_EQUITY_COMPENSATION_EXERCISE removes nothing today (its collection filter
   // is commented out in the legacy machine), asymmetric with TX_WARRANT_EXERCISE
   // which removes. That asymmetry is PRESERVED pending investigation, not endorsed.
-  TX_EQUITY_COMPENSATION_EXERCISE: { op: "none", validator: validators.valid_tx_equity_compensation_exercise },
+  TX_EQUITY_COMPENSATION_EXERCISE: { effect: "none", validate: validators.valid_tx_equity_compensation_exercise },
 
   // --- remove: filter the family collection by security_id ---------------
-  TX_STOCK_RETRACTION: { op: "remove", validator: validators.valid_tx_stock_retraction },
-  TX_STOCK_CANCELLATION: { op: "remove", validator: validators.valid_tx_stock_cancellation },
-  TX_STOCK_CONVERSION: { op: "remove", validator: validators.valid_tx_stock_conversion },
-  TX_STOCK_REISSUANCE: { op: "remove", validator: validators.valid_tx_stock_reissuance },
-  TX_STOCK_REPURCHASE: { op: "remove", validator: validators.valid_tx_stock_repurchase },
-  TX_STOCK_TRANSFER: { op: "remove", validator: validators.valid_tx_stock_transfer },
-  TX_CONVERTIBLE_RETRACTION: { op: "remove", validator: validators.valid_tx_convertible_retraction },
-  TX_CONVERTIBLE_CANCELLATION: { op: "remove", validator: validators.valid_tx_convertible_cancellation },
-  TX_CONVERTIBLE_TRANSFER: { op: "remove", validator: validators.valid_tx_convertible_transfer },
-  TX_CONVERTIBLE_CONVERSION: { op: "remove", validator: validators.valid_tx_convertible_conversion },
-  TX_WARRANT_RETRACTION: { op: "remove", validator: validators.valid_tx_warrant_retraction },
-  TX_WARRANT_CANCELLATION: { op: "remove", validator: validators.valid_tx_warrant_cancellation },
-  TX_WARRANT_TRANSFER: { op: "remove", validator: validators.valid_tx_warrant_transfer },
-  TX_WARRANT_EXERCISE: { op: "remove", validator: validators.valid_tx_warrant_exercise },
-  TX_EQUITY_COMPENSATION_RETRACTION: { op: "remove", validator: validators.valid_tx_equity_compensation_retraction },
-  TX_EQUITY_COMPENSATION_CANCELLATION: { op: "remove", validator: validators.valid_tx_equity_compensation_cancellation },
-  TX_EQUITY_COMPENSATION_TRANSFER: { op: "remove", validator: validators.valid_tx_equity_compensation_transfer },
+  TX_STOCK_RETRACTION: { effect: "remove", collection: "stockIssuances", validate: validators.valid_tx_stock_retraction },
+  TX_STOCK_CANCELLATION: { effect: "remove", collection: "stockIssuances", validate: validators.valid_tx_stock_cancellation },
+  TX_STOCK_CONVERSION: { effect: "remove", collection: "stockIssuances", validate: validators.valid_tx_stock_conversion },
+  TX_STOCK_REISSUANCE: { effect: "remove", collection: "stockIssuances", validate: validators.valid_tx_stock_reissuance },
+  TX_STOCK_REPURCHASE: { effect: "remove", collection: "stockIssuances", validate: validators.valid_tx_stock_repurchase },
+  TX_STOCK_TRANSFER: { effect: "remove", collection: "stockIssuances", validate: validators.valid_tx_stock_transfer },
+  TX_CONVERTIBLE_RETRACTION: { effect: "remove", collection: "convertibleIssuances", validate: validators.valid_tx_convertible_retraction },
+  TX_CONVERTIBLE_CANCELLATION: { effect: "remove", collection: "convertibleIssuances", validate: validators.valid_tx_convertible_cancellation },
+  TX_CONVERTIBLE_TRANSFER: { effect: "remove", collection: "convertibleIssuances", validate: validators.valid_tx_convertible_transfer },
+  TX_CONVERTIBLE_CONVERSION: { effect: "remove", collection: "convertibleIssuances", validate: validators.valid_tx_convertible_conversion },
+  TX_WARRANT_RETRACTION: { effect: "remove", collection: "warrantIssuances", validate: validators.valid_tx_warrant_retraction },
+  TX_WARRANT_CANCELLATION: { effect: "remove", collection: "warrantIssuances", validate: validators.valid_tx_warrant_cancellation },
+  TX_WARRANT_TRANSFER: { effect: "remove", collection: "warrantIssuances", validate: validators.valid_tx_warrant_transfer },
+  TX_WARRANT_EXERCISE: { effect: "remove", collection: "warrantIssuances", validate: validators.valid_tx_warrant_exercise },
+  TX_EQUITY_COMPENSATION_RETRACTION: { effect: "remove", collection: "equityCompensation", validate: validators.valid_tx_equity_compensation_retraction },
+  TX_EQUITY_COMPENSATION_CANCELLATION: { effect: "remove", collection: "equityCompensation", validate: validators.valid_tx_equity_compensation_cancellation },
+  TX_EQUITY_COMPENSATION_TRANSFER: { effect: "remove", collection: "equityCompensation", validate: validators.valid_tx_equity_compensation_transfer },
 
   // --- passthrough: received and silently ignored today ------------------
   //   No validator, no report entry, no collection mutation. They stay in
@@ -165,29 +170,28 @@ const TX_TABLE = {
   //   contains TX_VESTING_START) is byte-identical. `satisfies Record<TxKey, …>`
   //   below forces any future OCF transaction type to be classified here — a
   //   compile error until it is.
-  TX_EQUITY_COMPENSATION_RELEASE: { op: "passthrough" },
-  TX_EQUITY_COMPENSATION_REPRICING: { op: "passthrough" },
-  TX_ISSUER_AUTHORIZED_SHARES_ADJUSTMENT: { op: "passthrough" },
-  TX_PLAN_SECURITY_ACCEPTANCE: { op: "passthrough" },
-  TX_PLAN_SECURITY_CANCELLATION: { op: "passthrough" },
-  TX_PLAN_SECURITY_EXERCISE: { op: "passthrough" },
-  TX_PLAN_SECURITY_ISSUANCE: { op: "passthrough" },
-  TX_PLAN_SECURITY_RELEASE: { op: "passthrough" },
-  TX_PLAN_SECURITY_RETRACTION: { op: "passthrough" },
-  TX_PLAN_SECURITY_TRANSFER: { op: "passthrough" },
-  TX_STOCK_CLASS_AUTHORIZED_SHARES_ADJUSTMENT: { op: "passthrough" },
-  TX_STOCK_CLASS_CONVERSION_RATIO_ADJUSTMENT: { op: "passthrough" },
-  TX_STOCK_CLASS_SPLIT: { op: "passthrough" },
-  TX_STOCK_CONSOLIDATION: { op: "passthrough" },
-  TX_STOCK_PLAN_POOL_ADJUSTMENT: { op: "passthrough" },
-  TX_STOCK_PLAN_RETURN_TO_POOL: { op: "passthrough" },
-  TX_VESTING_ACCELERATION: { op: "passthrough" },
-  TX_VESTING_EVENT: { op: "passthrough" },
-  TX_VESTING_START: { op: "passthrough" },
-} satisfies Record<TxKey, TxRow>;
+  TX_EQUITY_COMPENSATION_RELEASE: { effect: "passthrough" },
+  TX_EQUITY_COMPENSATION_REPRICING: { effect: "passthrough" },
+  TX_ISSUER_AUTHORIZED_SHARES_ADJUSTMENT: { effect: "passthrough" },
+  TX_PLAN_SECURITY_ACCEPTANCE: { effect: "passthrough" },
+  TX_PLAN_SECURITY_CANCELLATION: { effect: "passthrough" },
+  TX_PLAN_SECURITY_EXERCISE: { effect: "passthrough" },
+  TX_PLAN_SECURITY_ISSUANCE: { effect: "passthrough" },
+  TX_PLAN_SECURITY_RELEASE: { effect: "passthrough" },
+  TX_PLAN_SECURITY_RETRACTION: { effect: "passthrough" },
+  TX_PLAN_SECURITY_TRANSFER: { effect: "passthrough" },
+  TX_STOCK_CLASS_AUTHORIZED_SHARES_ADJUSTMENT: { effect: "passthrough" },
+  TX_STOCK_CLASS_CONVERSION_RATIO_ADJUSTMENT: { effect: "passthrough" },
+  TX_STOCK_CLASS_SPLIT: { effect: "passthrough" },
+  TX_STOCK_CONSOLIDATION: { effect: "passthrough" },
+  TX_STOCK_PLAN_POOL_ADJUSTMENT: { effect: "passthrough" },
+  TX_STOCK_PLAN_RETURN_TO_POOL: { effect: "passthrough" },
+  TX_VESTING_ACCELERATION: { effect: "passthrough" },
+  TX_VESTING_EVENT: { effect: "passthrough" },
+  TX_VESTING_START: { effect: "passthrough" },
+} satisfies Record<TxKey, Descriptor>;
 
-export type TxTable = typeof TX_TABLE;
-export type { TxRow };
+export type { Descriptor };
 
 const CONTROL_EVENTS = ["START", "RUN_EOD", "RUN_END"] as const;
 type ControlEvent = (typeof CONTROL_EVENTS)[number];
@@ -195,11 +199,10 @@ type ControlEvent = (typeof CONTROL_EVENTS)[number];
 const isControlEvent = (event: OcfMachineEvent): event is Extract<OcfMachineEvent, { type: ControlEvent }> =>
   (CONTROL_EVENTS as readonly string[]).includes(event.type);
 
-/** The derived validator for an event, or `undefined` for control/passthrough events. */
-const validatorForEvent = (event: OcfMachineEvent): Validator | undefined => {
-  if (isControlEvent(event)) return undefined;
-  const row = TX_TABLE[event.type];
-  return "validator" in row ? row.validator : undefined;
+/** The descriptor's validator for a transaction type, or `undefined` for passthrough types. */
+const validatorFor = (type: TxKey): Validator<any> | undefined => {
+  const descriptor = TX_DESCRIPTORS[type];
+  return "validate" in descriptor ? descriptor.validate : undefined;
 };
 
 // ---------------------------------------------------------------------------
@@ -210,20 +213,23 @@ const failureMessage = (context: OcfMachineContext, subject: string, detail: str
   `The validation of the OCF package for ${context.ocfPackageContent.manifest.issuer.legal_name} failed on ${subject}: ${detail}`;
 
 /**
- * Valid-branch collection mutation, derived from the table `op` and the TX family
- * prefix. `append` rows push the issuance onto their family collection; `remove`
- * rows filter it by `security_id`; `none` rows (and control events) mutate nothing.
+ * Valid-branch collection mutation, driven by the descriptor's `effect` and
+ * `collection`. `append` descriptors push the issuance onto their family
+ * collection; `remove` descriptors filter it by `security_id`; `none` descriptors
+ * (and control events) mutate nothing.
  */
 export function collectionUpdate(
   context: OcfMachineContext,
   event: OcfMachineEvent,
 ): Partial<OcfMachineContext> {
   if (isControlEvent(event)) return {};
-  const row = TX_TABLE[event.type];
+  const descriptor = TX_DESCRIPTORS[event.type];
 
-  if (row.op === "append") {
+  if (descriptor.effect === "append") {
     // The per-key narrowing makes `event.data` the matching family payload, so a
-    // wrong-family append is a compile error (see appendToCollection).
+    // wrong-family append is a compile error (see appendToCollection). TypeScript
+    // cannot pair a runtime `descriptor.collection` with the narrowed payload, so
+    // the collection literal comes from the per-type case, not the descriptor.
     switch (event.type) {
       case "TX_STOCK_ISSUANCE":
         return { stockIssuances: appendToCollection("stockIssuances", context.stockIssuances, event.data) };
@@ -238,11 +244,11 @@ export function collectionUpdate(
     }
   }
 
-  if (row.op === "remove") {
+  if (descriptor.effect === "remove") {
     const securityId = "security_id" in event.data ? event.data.security_id : undefined;
     // `removeFromCollection` is family-agnostic (it only needs security_id); the
-    // concrete field per case keeps the assign cast-free.
-    switch (collectionKeyFor(event.type)) {
+    // descriptor's own `collection` picks the field, retiring the name-prefix guess.
+    switch (descriptor.collection) {
       case "stockIssuances":
         return { stockIssuances: removeFromCollection(context.stockIssuances, securityId) };
       case "convertibleIssuances":
@@ -258,7 +264,7 @@ export function collectionUpdate(
 }
 
 /**
- * Build the `on` map for every key in `TX_TABLE`: active keys share the
+ * Build the `on` map for every key in `TX_DESCRIPTORS`: active keys share the
  * two-branch transition; passthrough keys are an explicit no-op (`{}`).
  */
 function buildTransactionHandlers() {
@@ -275,9 +281,9 @@ function buildTransactionHandlers() {
   ] as const;
   const passthrough = {} as const;
 
-  return (Object.keys(TX_TABLE) as TxKey[]).reduce(
+  return (Object.keys(TX_DESCRIPTORS) as TxKey[]).reduce(
     (handlers, type) => {
-      handlers[type] = TX_TABLE[type].op === "passthrough" ? passthrough : activeTransitions;
+      handlers[type] = TX_DESCRIPTORS[type].effect === "passthrough" ? passthrough : activeTransitions;
       return handlers;
     },
     {} as Record<TxKey, typeof activeTransitions | typeof passthrough>,
@@ -291,8 +297,11 @@ export const ocfMachine = setup({
   },
   guards: {
     // Guard the valid branch via the type's own validator in `true` (boolean) mode.
+    // Control events never reach this guard (they have their own handlers); the
+    // narrow drops them so `event` carries the `data` the validator reads.
     isValidTx: ({ context, event }) => {
-      const validator = validatorForEvent(event);
+      if (isControlEvent(event)) return false;
+      const validator = validatorFor(event.type);
       return validator ? validator(context, event, true) : false;
     },
   },
@@ -301,7 +310,8 @@ export const ocfMachine = setup({
     // so the guard and the report can never diverge.
     appendReport: assign({
       report: ({ context, event }) => {
-        const validator = validatorForEvent(event);
+        if (isControlEvent(event)) return context.report;
+        const validator = validatorFor(event.type);
         return validator ? [...context.report, validator(context, event, false)] : context.report;
       },
     }),
@@ -319,8 +329,8 @@ export const ocfMachine = setup({
       },
     }),
 
-    // Valid branch collection mutation, derived from the table `op` and the TX
-    // family prefix. `none` rows (and control events) mutate nothing.
+    // Valid branch collection mutation, driven by the descriptor's `effect` and
+    // `collection`. `none` descriptors (and control events) mutate nothing.
     mutateCollection: assign(({ context, event }) => collectionUpdate(context, event)),
   },
 }).createMachine({
@@ -349,8 +359,8 @@ export const ocfMachine = setup({
   states: {
     capTable: {
       on: {
-        // Active handlers all share this two-branch shape; the table-driven
-        // actions resolve the per-type validator/op. Passthrough handlers
+        // Active handlers all share this two-branch shape; the descriptor-driven
+        // actions resolve the per-type validator and effect. Passthrough handlers
         // are explicit no-ops so the `'*'` wildcard never catches a known type.
         ...buildTransactionHandlers(),
         START: {
