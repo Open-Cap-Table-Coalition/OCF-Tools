@@ -1,10 +1,11 @@
 import { OcfMachineContext } from "./ocfMachine";
+import type { Snapshot } from "../types/snapshot";
 
-const RUN_EOD = (context: OcfMachineContext, event: any): any => {
-  let snapshot: any = {date: event.date, stockIssuances: [], convertibles: [], warrants: [], equityCompensation: []};
+const RUN_EOD = (context: OcfMachineContext, event: any): Snapshot => {
+  let snapshot: Snapshot = {date: event.date, stockIssuances: [], convertibles: [], warrants: [], equityCompensation: []};
 
   
-  context.stockIssuances.forEach((issuance: any) => {
+  context.stockIssuances.forEach((issuance) => {
     snapshot.stockIssuances.push({
             date: issuance.date,
       custom_id: issuance.custom_id,
