@@ -1,19 +1,23 @@
-import { createMachine, createActor } from "xstate";
+import { createActor } from "xstate";
 import { OcfPackageContent, readOcfPackage } from "../read_ocf_package";
 import constants from "./constants/constants";
-import { ocfMachine, type OcfMachineContext } from "./ocfMachine";
+import { ocfMachine, type OcfMachineContext, type OcfMachineEvent } from "./ocfMachine";
 
 export const ocfValidator = (packagePath: string): OcfMachineContext => {
   const ocfPackage: OcfPackageContent = readOcfPackage(packagePath);
   const { manifest, transactions } = ocfPackage;
 
+  // `constants.transaction_types` is a sort-only keyspace, intentionally narrower
+  // than the machine's TX_TABLE — it doesn't list every transaction type, and
+  // reconciling the two is out of scope here. Unknown object_types sort to the
+  // front via indexOf === -1.
   const transactionTypes = constants.transaction_types;
 
   const sortedTransactions = transactions.sort((a: { date: string; object_type: string }, b: { date: string; object_type: string }) => a.date.localeCompare(b.date) || transactionTypes.indexOf(a.object_type) - transactionTypes.indexOf(b.object_type));
 
-  const ocfXstateMachine = createMachine(ocfMachine);
-
-  const ocfXstateActor = createActor(ocfXstateMachine).start();
+  // `ocfMachine` is already a configured machine (built with setup()), so it is
+  // passed straight to createActor — no createMachine() wrapping.
+  const ocfXstateActor = createActor(ocfMachine).start();
 
   let currentDate: any = null;
 
@@ -30,7 +34,11 @@ export const ocfValidator = (packagePath: string): OcfMachineContext => {
         }
       }
       currentDate = ele.date;
-      ocfXstateActor.send({ type: ele.object_type, data: ele });
+      // Boundary cast: `ele.object_type` and `ele` are read from disk, so TS
+      // cannot correlate the runtime `type` with its matching payload in the
+      // per-key event union. This single declared cast bridges parsed input to
+      // the typed event; the machine's `'*'` handler rejects any unknown type.
+      ocfXstateActor.send({ type: ele.object_type, data: ele } as OcfMachineEvent);
     }
   }
 
@@ -39,9 +47,7 @@ export const ocfValidator = (packagePath: string): OcfMachineContext => {
     ocfXstateActor.send({ type: "RUN_END", date: currentDate });
   }
 
-  // xstate types getSnapshot().context as Record<string, any> (the machine config is
-  // still annotated `any`), so cast to the real context shape at this boundary. #157
-  // types the machine via setup() and MUST drop this cast — left in place, it would
-  // suppress a genuine mismatch between the declared and actual context.
-  return ocfXstateActor.getSnapshot().context as OcfMachineContext;
+  // The machine is typed via setup(), so getSnapshot().context is OcfMachineContext
+  // with no cast needed.
+  return ocfXstateActor.getSnapshot().context;
 };
