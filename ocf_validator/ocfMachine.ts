@@ -28,7 +28,6 @@ export type OcfMachineEvent = {
 };
 
 export const ocfMachine: any = {
-  predictableActionArguments: true,
   id: "OCF-xstate",
   initial: "capTable",
   context: {
@@ -894,14 +893,14 @@ export const ocfMachine: any = {
           },
         ],
         RUN_EOD: {
-          taget: "capTable",
+          target: "capTable",
           actions: assign({
             snapshots: ({ context, event }: { context: OcfMachineContext; event: OcfMachineEvent }) => 
               [...context.snapshots, run_EOD(context, event)]
           }),
         },
         RUN_END: {
-          taget: "capTable",
+          target: "capTable",
           actions: [
           assign ({
             result: ({ context, event }: { context: OcfMachineContext; event: OcfMachineEvent }) => `The validation of the OCF package for ${context.ocfPackageContent.manifest.issuer.legal_name} is complete and the package appears valid.`
