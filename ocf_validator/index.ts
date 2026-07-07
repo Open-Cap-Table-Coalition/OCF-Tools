@@ -1,9 +1,9 @@
 import { createMachine, createActor } from "xstate";
 import { OcfPackageContent, readOcfPackage } from "../read_ocf_package";
 import constants from "./constants/constants";
-import { ocfMachine } from "./ocfMachine";
+import { ocfMachine, type OcfMachineContext } from "./ocfMachine";
 
-export const ocfValidator = (packagePath: string): any => {
+export const ocfValidator = (packagePath: string): OcfMachineContext => {
   const ocfPackage: OcfPackageContent = readOcfPackage(packagePath);
   const { manifest, transactions } = ocfPackage;
 
@@ -39,5 +39,9 @@ export const ocfValidator = (packagePath: string): any => {
     ocfXstateActor.send({ type: "RUN_END", date: currentDate });
   }
 
-  return (ocfXstateActor.getSnapshot().context);
+  // xstate types getSnapshot().context as Record<string, any> (the machine config is
+  // still annotated `any`), so cast to the real context shape at this boundary. #157
+  // types the machine via setup() and MUST drop this cast — left in place, it would
+  // suppress a genuine mismatch between the declared and actual context.
+  return ocfXstateActor.getSnapshot().context as OcfMachineContext;
 };
