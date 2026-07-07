@@ -1,10 +1,8 @@
-import { OcfPackageContent, readOcfPackage } from "../read_ocf_package";
 import { ocfValidator } from "../ocf_validator";
 import type { Snapshot } from "../types/snapshot";
 
 export const ocfSnapshot = (packagePath: string, inputDateStr: string): Snapshot | null => {
-    
-    const ocfPackage: OcfPackageContent = readOcfPackage(packagePath);
+
     const snapshots = ocfValidator(packagePath).snapshots;
     const inputDate = new Date(inputDateStr);
 

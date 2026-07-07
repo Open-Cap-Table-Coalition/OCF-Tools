@@ -7,11 +7,12 @@ export const ocfValidator = (packagePath: string): OcfMachineContext => {
   const ocfPackage: OcfPackageContent = readOcfPackage(packagePath);
   const { manifest, transactions } = ocfPackage;
 
-  // `constants.transaction_types` is a sort-only keyspace, intentionally narrower
-  // than the machine's TX_TABLE — it doesn't list every transaction type, and
-  // reconciling the two is out of scope here. Unknown object_types sort to the
-  // front via indexOf === -1.
-  const transactionTypes = constants.transaction_types;
+  // Same-day sort tiebreaker. `transaction_types` is pinned to cover every
+  // transaction type (see types/transaction-types.assert.ts), so an added OCF
+  // type forces an explicit sort position rather than silently sorting to the
+  // front via `indexOf === -1`. Widened to `readonly string[]` so `indexOf`
+  // accepts the parsed `object_type`, which is a plain string.
+  const transactionTypes: readonly string[] = constants.transaction_types;
 
   const sortedTransactions = transactions.sort((a: { date: string; object_type: string }, b: { date: string; object_type: string }) => a.date.localeCompare(b.date) || transactionTypes.indexOf(a.object_type) - transactionTypes.indexOf(b.object_type));
 
