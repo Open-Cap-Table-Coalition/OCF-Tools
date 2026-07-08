@@ -1,72 +1,90 @@
-const valid_tx_warrant_acceptance = (context: any, event: any, isGuard: Boolean) => {
-  const {transactions} = context.ocfPackageContent;
+import type { TransactionFor } from "../../../types/ocf-input";
+import type { Check, GradedValidator } from "../../../types/validator";
+import type { Finding } from "../../../types/finding";
+import type { Descriptor } from "../../ocfMachine";
 
-  let validity = false;
-  let report: any = {transaction_type: "TX_WARRANT_ACCEPTANCE", transaction_id: event.data.id, transaction_date: event.data.date};
+type Acceptance = TransactionFor<"TX_WARRANT_ACCEPTANCE">;
 
-  // Check that warrant issuance in incoming security_id referenced by transaction exists in current state.
-  let incoming_warrantIssuance_validity = false;
-  context.warrantIssuances.forEach((ele: any) => {
-    if (
-      ele.security_id === event.data.security_id &&
-      ele.object_type === 'TX_WARRANT_ISSUANCE'
-    ) {
-      incoming_warrantIssuance_validity = true;
-      report.incoming_warrantIssuance_validity = true;
+const checks: readonly Check[] = [
+  {
+    id: "issuance-exists",
+    severity: "error",
+    description:
+      "The warrant issuance referenced by the transaction's security_id exists in the current cap-table state.",
+  },
+  {
+    id: "date-order",
+    severity: "error",
+    description:
+      "The transaction is dated on or after the warrant issuance it references.",
+  },
+  {
+    id: "no-retraction",
+    severity: "error",
+    description: "No warrant retraction references the transaction's security_id.",
+  },
+];
+
+const validate: GradedValidator<Acceptance> = (context, data) => {
+  const findings: Finding[] = [];
+  const subject = { object_type: data.object_type, id: data.id };
+  const { transactions } = context.ocfPackageContent;
+
+  // issuance-exists scans the live warrant collection.
+  let issuanceExists = false;
+  context.warrantIssuances.forEach((ele) => {
+    if (ele.security_id === data.security_id && ele.object_type === "TX_WARRANT_ISSUANCE") {
+      issuanceExists = true;
     }
   });
-  if (!incoming_warrantIssuance_validity) {
-    report.incoming_warrantIssuance_validity = false;
+  if (!issuanceExists) {
+    findings.push({
+      severity: "error",
+      check: "issuance-exists",
+      message: `No warrant issuance with security_id ${data.security_id} exists in the current cap-table state.`,
+      subject,
+    });
   }
 
-  // Check to ensure that the date of transaction is the same day or after the date of the incoming warrant issuance.
-  let incoming_date_validity = false;
-  transactions.forEach((ele: any) => {
+  // date-order scans the full package transaction history for the issuance.
+  // The object_type test leads so it narrows the transaction union to a
+  // security_id-bearing member before the other reads.
+  let dateOrdered = false;
+  transactions.forEach((ele) => {
     if (
-      ele.security_id === event.data.security_id &&
-      ele.object_type === 'TX_WARRANT_ISSUANCE'
+      ele.object_type === "TX_WARRANT_ISSUANCE" &&
+      ele.security_id === data.security_id &&
+      ele.date <= data.date
     ) {
-      if (ele.date <= event.data.date) {
-        incoming_date_validity = true;
-        report.incoming_date_validity = true;
-      }
+      dateOrdered = true;
     }
   });
-  if (!incoming_date_validity) {
-    report.incoming_date_validity = false;
+  if (!dateOrdered) {
+    findings.push({
+      severity: "error",
+      check: "date-order",
+      message: `The transaction is dated before the warrant issuance it references (security_id ${data.security_id}).`,
+      subject,
+    });
   }
 
-  // Check that warrant issuance in incoming security_id does not have a warrant retraction transaction associated with it.
-  let no_warrant_retraction_validity = false;
-  let warrant_retraction_exists = false;
-  transactions.forEach((ele: any) => {
-    if (
-      ele.security_id === event.data.security_id &&
-      ele.object_type === 'TX_WARRANT_RETRACTION'
-    ) {
-      warrant_retraction_exists = true;
+  // no-retraction emits one finding per warrant retraction on this security_id.
+  transactions.forEach((ele) => {
+    if (ele.object_type === "TX_WARRANT_RETRACTION" && ele.security_id === data.security_id) {
+      findings.push({
+        severity: "error",
+        check: "no-retraction",
+        message: `A warrant retraction (${ele.id}) references the transaction's security_id.`,
+        subject,
+      });
     }
   });
 
-  if (!warrant_retraction_exists) {
-    no_warrant_retraction_validity = true;
-    report.no_warrant_retraction_validity = true;
-  }
-  if (!no_warrant_retraction_validity) {
-    report.no_warrant_retraction_validity = false;
-  }
-
-  if (
-    incoming_warrantIssuance_validity &&
-    incoming_date_validity &&
-    no_warrant_retraction_validity
-  ) {
-    validity = true;
-  }
-
-  const result = isGuard ? validity : report;
-  
-  return result;
+  return findings;
 };
 
-export default valid_tx_warrant_acceptance;
+export const TX_WARRANT_ACCEPTANCE = {
+  effect: "none",
+  validate,
+  checks,
+} satisfies Descriptor;

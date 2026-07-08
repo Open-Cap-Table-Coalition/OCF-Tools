@@ -1,27 +1,40 @@
-const valid_tx_warrant_issuance = (context: any, event: any, isGuard: any) => {
-  let validity = false;
+import type { OCFWarrantIssuance } from "@opencaptablecoalition/ocf-types";
+import type { Check, GradedValidator } from "../../../types/validator";
+import type { Finding } from "../../../types/finding";
+import type { Descriptor } from "../../ocfMachine";
+
+const checks: readonly Check[] = [
+  {
+    id: "stakeholder-exists",
+    severity: "error",
+    description:
+      "The stakeholder referenced by the transaction exists in the stakeholder file.",
+  },
+];
+
+const validate: GradedValidator<OCFWarrantIssuance> = (context, data) => {
+  const findings: Finding[] = [];
   const { stakeholders } = context.ocfPackageContent;
-  let report: any = {transaction_type: "TX_WARRANT_ISSUANCE", transaction_id: event.data.id, transaction_date: event.data.date};
-  
-  // Check if the stakeholder referenced by the transaction exists in the stakeholder file.
-  let stakeholder_validity = false;
+
+  let stakeholderExists = false;
   stakeholders.forEach((ele: any) => {
-    if (ele.id === event.data.stakeholder_id) {
-      stakeholder_validity = true;
-      report.stakeholder_validity = true
-    }
+    if (ele.id === data.stakeholder_id) stakeholderExists = true;
   });
-  if (!stakeholder_validity) {
-    report.stakeholder_validity = false
+  if (!stakeholderExists) {
+    findings.push({
+      severity: "error",
+      check: "stakeholder-exists",
+      message: `The stakeholder ${data.stakeholder_id} referenced by the transaction was not found in the stakeholder file.`,
+      subject: { object_type: data.object_type, id: data.id },
+    });
   }
 
-  if (stakeholder_validity) {
-    validity = true;
-  }
-
-  const result = isGuard ? validity : report;
-  
-  return result;
+  return findings;
 };
 
-export default valid_tx_warrant_issuance;
+export const TX_WARRANT_ISSUANCE = {
+  effect: "append",
+  collection: "warrantIssuances",
+  validate,
+  checks,
+} satisfies Descriptor;

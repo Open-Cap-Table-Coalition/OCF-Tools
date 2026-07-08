@@ -371,14 +371,14 @@ describe("legacy validators through the machine", () => {
 
   it("records a validated transaction's report entry and leaves findings empty", () => {
     const actor = startSeeded(seededWithStakeholder());
-    actor.send(ev("TX_WARRANT_ISSUANCE", { id: "wi1", security_id: "war1", stakeholder_id: "sh1" }));
+    actor.send(ev("TX_EQUITY_COMPENSATION_ISSUANCE", { id: "ec1", security_id: "ec-sec1", stakeholder_id: "sh1" }));
 
     const snapshot = actor.getSnapshot();
     expect(snapshot.value).toBe("capTable");
     expect(snapshot.context.report).toHaveLength(1);
     expect(snapshot.context.report[0]).toMatchObject({
-      transaction_type: "TX_WARRANT_ISSUANCE",
-      transaction_id: "wi1",
+      transaction_type: "TX_EQUITY_COMPENSATION_ISSUANCE",
+      transaction_id: "ec1",
       stakeholder_validity: true,
     });
     expect(snapshot.context.findings).toEqual([]);
@@ -386,14 +386,14 @@ describe("legacy validators through the machine", () => {
 
   it("fails an invalid transaction with the report entry serialized in the result and findings still empty", () => {
     const actor = startSeeded(seededWithStakeholder());
-    // No such stakeholder — the warrant issuance validator rejects it.
-    actor.send(ev("TX_WARRANT_ISSUANCE", { id: "wi1", security_id: "war1", stakeholder_id: "nobody" }));
+    // No such stakeholder — the equity compensation issuance validator rejects it.
+    actor.send(ev("TX_EQUITY_COMPENSATION_ISSUANCE", { id: "ec1", security_id: "ec-sec1", stakeholder_id: "nobody" }));
 
     const snapshot = actor.getSnapshot();
     expect(snapshot.value).toBe("validationError");
     expect(snapshot.context.report).toHaveLength(1);
     expect(snapshot.context.result).toBe(
-      `The validation of the OCF package for Test Co failed on wi1: ${JSON.stringify(snapshot.context.report[0], null, 2)}`,
+      `The validation of the OCF package for Test Co failed on ec1: ${JSON.stringify(snapshot.context.report[0], null, 2)}`,
     );
     expect(snapshot.context.findings).toEqual([]);
   });
