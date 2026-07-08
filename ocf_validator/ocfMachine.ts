@@ -11,6 +11,11 @@ import type { OcfPackageContent } from "../read_ocf_package";
 import type { Finding } from "../types/finding";
 import type { Check, GradedValidator, OcfMachineContext } from "../types/validator";
 import validators from "./validators";
+import { TX_CONVERTIBLE_ISSUANCE } from "./validators/convertible/tx_convertible_issuance";
+import { TX_CONVERTIBLE_ACCEPTANCE } from "./validators/convertible/tx_convertible_acceptance";
+import { TX_CONVERTIBLE_RETRACTION } from "./validators/convertible/tx_convertible_retraction";
+import { TX_CONVERTIBLE_CANCELLATION } from "./validators/convertible/tx_convertible_cancellation";
+import { TX_CONVERTIBLE_TRANSFER } from "./validators/convertible/tx_convertible_transfer";
 import run_EOD from "./eod";
 
 // The validator contract types are defined in types/validator.ts; re-exported
@@ -162,13 +167,13 @@ export type ActiveDescriptor = Exclude<Descriptor, { effect: "passthrough" }>;
 export const TX_DESCRIPTORS = {
   // --- append: issuance appended to its family collection -----------------
   TX_STOCK_ISSUANCE: { effect: "append", collection: "stockIssuances", legacyValidate: validators.valid_tx_stock_issuance },
-  TX_CONVERTIBLE_ISSUANCE: { effect: "append", collection: "convertibleIssuances", legacyValidate: validators.valid_tx_convertible_issuance },
+  TX_CONVERTIBLE_ISSUANCE,
   TX_WARRANT_ISSUANCE: { effect: "append", collection: "warrantIssuances", legacyValidate: validators.valid_tx_warrant_issuance },
   TX_EQUITY_COMPENSATION_ISSUANCE: { effect: "append", collection: "equityCompensation", legacyValidate: validators.valid_tx_equity_compensation_issuance },
 
   // --- none: validate + report, no collection mutation --------------------
   TX_STOCK_ACCEPTANCE: { effect: "none", legacyValidate: validators.valid_tx_stock_acceptance },
-  TX_CONVERTIBLE_ACCEPTANCE: { effect: "none", legacyValidate: validators.valid_tx_convertible_acceptance },
+  TX_CONVERTIBLE_ACCEPTANCE,
   TX_WARRANT_ACCEPTANCE: { effect: "none", legacyValidate: validators.valid_tx_warrant_acceptance },
   TX_EQUITY_COMPENSATION_ACCEPTANCE: { effect: "none", legacyValidate: validators.valid_tx_equity_compensation_acceptance },
   // TX_EQUITY_COMPENSATION_EXERCISE removes nothing today (its collection filter
@@ -183,9 +188,9 @@ export const TX_DESCRIPTORS = {
   TX_STOCK_REISSUANCE: { effect: "remove", collection: "stockIssuances", legacyValidate: validators.valid_tx_stock_reissuance },
   TX_STOCK_REPURCHASE: { effect: "remove", collection: "stockIssuances", legacyValidate: validators.valid_tx_stock_repurchase },
   TX_STOCK_TRANSFER: { effect: "remove", collection: "stockIssuances", legacyValidate: validators.valid_tx_stock_transfer },
-  TX_CONVERTIBLE_RETRACTION: { effect: "remove", collection: "convertibleIssuances", legacyValidate: validators.valid_tx_convertible_retraction },
-  TX_CONVERTIBLE_CANCELLATION: { effect: "remove", collection: "convertibleIssuances", legacyValidate: validators.valid_tx_convertible_cancellation },
-  TX_CONVERTIBLE_TRANSFER: { effect: "remove", collection: "convertibleIssuances", legacyValidate: validators.valid_tx_convertible_transfer },
+  TX_CONVERTIBLE_RETRACTION,
+  TX_CONVERTIBLE_CANCELLATION,
+  TX_CONVERTIBLE_TRANSFER,
   TX_CONVERTIBLE_CONVERSION: { effect: "remove", collection: "convertibleIssuances", legacyValidate: validators.valid_tx_convertible_conversion },
   TX_WARRANT_RETRACTION: { effect: "remove", collection: "warrantIssuances", legacyValidate: validators.valid_tx_warrant_retraction },
   TX_WARRANT_CANCELLATION: { effect: "remove", collection: "warrantIssuances", legacyValidate: validators.valid_tx_warrant_cancellation },

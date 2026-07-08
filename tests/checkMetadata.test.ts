@@ -11,7 +11,8 @@ import { TX_DESCRIPTORS } from "../ocf_validator/ocfMachine";
 // therefore only a duplicate within one descriptor's own `checks`. The detector
 // below scans a descriptor map and returns structured diagnostics rather than
 // throwing, so the guard test can assert on its return value — and so synthetic
-// maps can exercise it while the real table declares no graded checks yet.
+// maps can exercise it directly. The real table now declares graded checks (the
+// convertible family), which the final case guards for duplicate ids.
 
 /** A single check id a descriptor declares more than once. */
 type DuplicateCheckId = { key: string; id: string };

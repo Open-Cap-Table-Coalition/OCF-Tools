@@ -6,11 +6,6 @@ import valid_tx_stock_conversion from './stock/tx_stock_conversion';
 import valid_tx_stock_reissuance from './stock/tx_stock_reissuance';
 import valid_tx_stock_repurchase from './stock/tx_stock_repurchase';
 import valid_tx_stock_transfer from './stock/tx_stock_transfer';
-import valid_tx_convertible_issuance from './convertible/tx_convertible_issuance';
-import valid_tx_convertible_retraction from './convertible/tx_convertible_retraction';
-import valid_tx_convertible_acceptance from './convertible/tx_convertible_acceptance';
-import valid_tx_convertible_cancellation from './convertible/tx_convertible_cancellation';
-import valid_tx_convertible_transfer from './convertible/tx_convertible_transfer';
 import valid_tx_convertible_conversion from './convertible/tx_convertible_conversion';
 import valid_tx_warrant_issuance from './warrant/tx_warrant_issuance';
 import valid_tx_warrant_retraction from './warrant/tx_warrant_retraction';
@@ -50,11 +45,6 @@ const validators = {
   valid_tx_stock_reissuance,
   valid_tx_stock_repurchase,
   valid_tx_stock_transfer,
-  valid_tx_convertible_issuance,
-  valid_tx_convertible_retraction,
-  valid_tx_convertible_acceptance,
-  valid_tx_convertible_cancellation,
-  valid_tx_convertible_transfer,
   valid_tx_convertible_conversion,
   valid_tx_warrant_issuance,
   valid_tx_warrant_retraction,

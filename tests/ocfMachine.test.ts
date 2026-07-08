@@ -1,7 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { createActor } from "xstate";
 import {
-  ocfMachine,
   collectionUpdate,
   isValidOutcome,
   outcomeUpdate,
@@ -13,44 +11,7 @@ import {
 } from "../ocf_validator/ocfMachine";
 import type { Finding } from "../types/finding";
 import type { GradedValidator, OcfMachineContext } from "../types/validator";
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-/** A full, mostly-empty machine context; `overrides` replace top-level fields. */
-const baseContext = (overrides: Partial<OcfMachineContext> = {}): OcfMachineContext => ({
-  stockIssuances: [],
-  convertibleIssuances: [],
-  warrantIssuances: [],
-  equityCompensation: [],
-  ocfPackageContent: {
-    manifest: { issuer: { legal_name: "Test Co" } },
-    stakeholders: [],
-    stockClasses: [],
-    transactions: [],
-    stockLegends: [],
-    stockPlans: [],
-    vestingTerms: [],
-    valuations: [],
-  } as OcfMachineContext["ocfPackageContent"],
-  report: [],
-  findings: [],
-  lastErrorFindings: [],
-  snapshots: [],
-  result: "Incomplete",
-  ...overrides,
-});
-
-/** Start an actor seeded into `capTable` with the given context. */
-const startSeeded = (context: OcfMachineContext) =>
-  createActor(ocfMachine, {
-    snapshot: ocfMachine.resolveState({ value: "capTable", context }),
-  }).start();
-
-/** Cast a hand-built event to the typed event union (test-only boundary). */
-const ev = (type: string, data: Record<string, unknown> = {}): OcfMachineEvent =>
-  ({ type, data } as unknown as OcfMachineEvent);
+import { baseContext, startSeeded, ev } from "./helpers";
 
 // ---------------------------------------------------------------------------
 // Unknown transaction types
@@ -289,9 +250,11 @@ describe("per-type collection placement", () => {
 // Graded validators through the dispatch helpers
 // ---------------------------------------------------------------------------
 
-// No table entry carries a graded `validate` yet, so these drive the exported
-// dispatch helpers directly with synthetic descriptors. The machine-actor
-// route stays legacy-only (next describe) until a validator family migrates.
+// These drive the exported dispatch helpers directly with synthetic descriptors,
+// isolating the graded dispatch shape from any single family's validator. The
+// convertible family now carries graded `validate` in the real table, with its
+// own machine-actor coverage; the legacy describe below still pins the report
+// convention the unmigrated families use.
 
 /** A synthetic `none` descriptor carrying a graded validator and (empty) checks. */
 const gradedDescriptor = (validate: GradedValidator<any>) =>
