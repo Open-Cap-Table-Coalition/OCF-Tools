@@ -9,7 +9,7 @@ import type {
 import type { TransactionFor } from "../types/ocf-input";
 import type { OcfPackageContent } from "../read_ocf_package";
 import type { Finding } from "../types/finding";
-import type { GradedValidator, OcfMachineContext } from "../types/validator";
+import type { Check, GradedValidator, OcfMachineContext } from "../types/validator";
 import validators from "./validators";
 import run_EOD from "./eod";
 
@@ -127,13 +127,19 @@ type Validator<T> = (
  * the payload family of the validator — under either field — so a family-typed
  * validator cannot be declared under a mismatched collection (demonstrated in
  * `types/ocf-machine-table.assert.ts`).
+ *
+ * Each graded arm also carries `checks`: the module's declared validation
+ * coverage as structured `Check` data (see `types/validator.ts`). The machine
+ * never reads it — it is documentation-grade metadata for the coverage-report
+ * generator — but requiring it on the graded arms makes declaring the checks
+ * inseparable from migrating a family to the graded shape. Legacy arms carry none.
  */
 type Descriptor =
   | { effect: "passthrough" }
   | { effect: "none"; legacyValidate: Validator<unknown> }
-  | { effect: "none"; validate: GradedValidator<any> }
+  | { effect: "none"; validate: GradedValidator<any>; checks: readonly Check[] }
   | { effect: "remove"; legacyValidate: Validator<unknown>; collection: CollectionKey }
-  | { effect: "remove"; validate: GradedValidator<any>; collection: CollectionKey }
+  | { effect: "remove"; validate: GradedValidator<any>; collection: CollectionKey; checks: readonly Check[] }
   | {
       [C in CollectionKey]: {
         effect: "append";
@@ -146,6 +152,7 @@ type Descriptor =
         effect: "append";
         collection: C;
         validate: GradedValidator<CollectionElement[C]>;
+        checks: readonly Check[];
       };
     }[CollectionKey];
 
