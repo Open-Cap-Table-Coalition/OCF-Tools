@@ -33,12 +33,12 @@ export const stakeholderExists = {
 
 /**
  * What the shared checks need to know about a family: its name as used in
- * messages ("convertible"), its collection, and its issuance, acceptance, and
- * cancellation transaction types.
+ * messages ("convertible"), its collection, and its issuance and acceptance
+ * transaction types.
  *
  * The types catch mix-ups: `issuance` must be the transaction type that
- * `collection` actually holds, and `acceptance` and `cancellation` must be real
- * transaction types, so a typo won't compile.
+ * `collection` actually holds, and `acceptance` must be a real transaction
+ * type, so a typo won't compile.
  */
 type Family = {
   [C in CollectionKey]: {
@@ -46,7 +46,6 @@ type Family = {
     collection: C;
     issuance: OcfMachineContext[C][number]["object_type"];
     acceptance: Extract<TxKey, `TX_${string}_ACCEPTANCE`>;
-    cancellation: Extract<TxKey, `TX_${string}_CANCELLATION`>;
   };
 }[CollectionKey];
 
@@ -55,7 +54,7 @@ type Family = {
  * given family. Each family's `checks.ts` calls this once, and that family's
  * validators import the checks from there.
  */
-export function familyChecksFor({ name, collection, issuance, acceptance, cancellation }: Family) {
+export function familyChecksFor({ name, collection, issuance, acceptance }: Family) {
   /**
    * The issuance named by the transaction's `security_id` is outstanding as of
    * the transaction's date. Passes if the family's collection holds a record
@@ -119,9 +118,10 @@ export function familyChecksFor({ name, collection, issuance, acceptance, cancel
 
   /**
    * Nothing dated on or before this transaction refers to this security except
-   * its issuance, acceptances, and the cancellation being validated. A later
-   * transaction can't make this one invalid. The cancellation validator runs
-   * this check; the transfer validator only declares it, as a gap (see `asGap`).
+   * its issuance, acceptances, and the transaction being validated. A later
+   * transaction can't make this one invalid. The cancellation and conversion
+   * validators run this check; the transfer validator only declares it, as a
+   * gap (see `asGap`).
    */
   const noOtherTransactions = {
     id: "no-other-transactions",
@@ -134,7 +134,8 @@ export function familyChecksFor({ name, collection, issuance, acceptance, cancel
       // One finding for each other transaction on this security_id dated on or
       // before this one. Many transaction types have no security_id field at
       // all, so it checks for the field first; a transaction without one can't
-      // refer to this security.
+      // refer to this security. The transaction being validated is in the
+      // package history too, so it's skipped by id, whatever its type.
       transactions.forEach((ele) => {
         if (
           "security_id" in ele &&
@@ -142,7 +143,7 @@ export function familyChecksFor({ name, collection, issuance, acceptance, cancel
           ele.date <= data.date &&
           ele.object_type !== issuance &&
           ele.object_type !== acceptance &&
-          !(ele.object_type === cancellation && ele.id === data.id)
+          ele.id !== data.id
         ) {
           messages.push(
             `Another transaction (${ele.id}) references the transaction's security_id.`,
