@@ -1,22 +1,15 @@
 import { describe, it, expect } from "vitest";
 import { TX_DESCRIPTORS } from "../ocf_validator/ocfMachine";
-import type { Finding } from "../types/finding";
-import type { GradedValidator, OcfMachineContext } from "../types/validator";
-import { baseContext, startSeeded, ev } from "./helpers";
-
-/** A context whose package `transactions` list is `transactions`. */
-const contextWith = (
-  overrides: Partial<OcfMachineContext> & { transactions?: any[] } = {},
-): OcfMachineContext => {
-  const { transactions = [], ...rest } = overrides;
-  return baseContext({
-    ...rest,
-    ocfPackageContent: {
-      ...baseContext().ocfPackageContent,
-      transactions,
-    } as OcfMachineContext["ocfPackageContent"],
-  });
-};
+import type { OcfMachineContext } from "../types/validator";
+import {
+  baseContext,
+  startSeeded,
+  ev,
+  contextWith,
+  runValidator,
+  implementedCheckIds,
+  expectFindingShape,
+} from "./helpers";
 
 const MIGRATED_KEYS = [
   "TX_CONVERTIBLE_ISSUANCE",
@@ -27,37 +20,10 @@ const MIGRATED_KEYS = [
 ] as const;
 type MigratedKey = (typeof MIGRATED_KEYS)[number];
 
-/** Invoke the graded validator a migrated descriptor carries. */
-const runValidator = (
-  key: MigratedKey,
-  context: OcfMachineContext,
-  data: Record<string, unknown>,
-): Finding[] => {
-  const descriptor = TX_DESCRIPTORS[key] as { validate?: GradedValidator<any> };
-  if (!descriptor.validate) throw new Error(`${key} carries no graded validate`);
-  return descriptor.validate(context, data);
-};
-
-/** The check ids a descriptor declares as implemented (drops `implemented: false`). */
-const implementedCheckIds = (key: MigratedKey): string[] => {
-  const descriptor = TX_DESCRIPTORS[key] as { checks?: readonly { id: string; implemented?: false }[] };
-  return (descriptor.checks ?? []).filter((c) => c.implemented !== false).map((c) => c.id);
-};
-
-/** Assert a finding carries the declared id, error severity, and the transaction as subject. */
-const expectFindingShape = (
-  finding: Finding,
-  check: string,
-  subject: { object_type: string; id: string },
-) => {
-  expect(finding.check).toBe(check);
-  expect(finding.severity).toBe("error");
-  expect(finding.subject).toEqual(subject);
-};
-
 // A single convertible issuance, in the shape both the live collection and the
-// package transaction history hold it. `date` lets a scenario push the issuance
-// after the transaction under validation to trip the date-order check.
+// package transaction history hold it. `date` lets a scenario place the issuance
+// before or after the transaction under validation to exercise the existence
+// check's layered diagnostics.
 const issuanceRecord = (security_id: string, date = "2020-01-01") => ({
   id: `ci-${security_id}`,
   object_type: "TX_CONVERTIBLE_ISSUANCE",
@@ -127,7 +93,7 @@ describe("convertible issuance validity", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Acceptance: issuance-exists, date-order, no-retraction
+// Acceptance: issuance-exists, no-retraction
 // ---------------------------------------------------------------------------
 
 describe("convertible acceptance validity", () => {
@@ -140,7 +106,7 @@ describe("convertible acceptance validity", () => {
   });
   const subject = { object_type: "TX_CONVERTIBLE_ACCEPTANCE", id: "acc1" };
 
-  it("returns no findings when the issuance exists, dates order, and no retraction references it", () => {
+  it("returns no findings when the issuance is outstanding and no retraction references it", () => {
     const context = contextWith({
       convertibleIssuances: [issuanceRecord("sec1")] as any,
       transactions: [issuanceRecord("sec1")],
@@ -164,34 +130,13 @@ describe("convertible acceptance validity", () => {
     expect(snapshot.context.findings).toEqual([]);
   });
 
-  it("flags a missing issuance with an error naming the security_id", () => {
-    // In the package history (date-order passes) but not the live collection.
-    const context = contextWith({ transactions: [issuanceRecord("sec1")] });
-    const findings = runValidator("TX_CONVERTIBLE_ACCEPTANCE", context, acceptance());
-    expect(findings).toHaveLength(1);
-    expectFindingShape(findings[0], "issuance-exists", subject);
-    expect(findings[0].message).toContain("sec1");
-  });
-
-  it("flags an out-of-order date with an error naming the security_id", () => {
-    // Issuance is live (issuance-exists passes) but dated after the acceptance.
-    const context = contextWith({
-      convertibleIssuances: [issuanceRecord("sec1", "2022-01-01")] as any,
-      transactions: [issuanceRecord("sec1", "2022-01-01")],
-    });
-    const findings = runValidator("TX_CONVERTIBLE_ACCEPTANCE", context, acceptance());
-    expect(findings).toHaveLength(1);
-    expectFindingShape(findings[0], "date-order", subject);
-    expect(findings[0].message).toContain("sec1");
-  });
-
-  it("emits one no-retraction finding per offending retraction, each naming that retraction", () => {
+  it("emits one no-retraction finding per past offending retraction, each naming that retraction", () => {
     const context = contextWith({
       convertibleIssuances: [issuanceRecord("sec1")] as any,
       transactions: [
         issuanceRecord("sec1"),
-        { id: "ret-a", object_type: "TX_CONVERTIBLE_RETRACTION", security_id: "sec1", date: "2021-06-01" },
-        { id: "ret-b", object_type: "TX_CONVERTIBLE_RETRACTION", security_id: "sec1", date: "2021-07-01" },
+        { id: "ret-a", object_type: "TX_CONVERTIBLE_RETRACTION", security_id: "sec1", date: "2020-06-01" },
+        { id: "ret-b", object_type: "TX_CONVERTIBLE_RETRACTION", security_id: "sec1", date: "2020-07-01" },
       ],
     });
     const findings = runValidator("TX_CONVERTIBLE_ACCEPTANCE", context, acceptance());
@@ -203,7 +148,7 @@ describe("convertible acceptance validity", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Retraction: issuance-exists, date-order, no-acceptance
+// Retraction: issuance-exists, no-acceptance
 // ---------------------------------------------------------------------------
 
 describe("convertible retraction validity", () => {
@@ -216,7 +161,7 @@ describe("convertible retraction validity", () => {
   });
   const subject = { object_type: "TX_CONVERTIBLE_RETRACTION", id: "ret1" };
 
-  it("returns no findings when the issuance exists, dates order, and no acceptance references it", () => {
+  it("returns no findings when the issuance is outstanding and no acceptance references it", () => {
     const context = contextWith({
       convertibleIssuances: [issuanceRecord("sec1")] as any,
       transactions: [issuanceRecord("sec1")],
@@ -239,32 +184,13 @@ describe("convertible retraction validity", () => {
     expect(snapshot.context.findings).toEqual([]);
   });
 
-  it("flags a missing issuance with an error naming the security_id", () => {
-    const context = contextWith({ transactions: [issuanceRecord("sec1")] });
-    const findings = runValidator("TX_CONVERTIBLE_RETRACTION", context, retraction());
-    expect(findings).toHaveLength(1);
-    expectFindingShape(findings[0], "issuance-exists", subject);
-    expect(findings[0].message).toContain("sec1");
-  });
-
-  it("flags an out-of-order date with an error naming the security_id", () => {
-    const context = contextWith({
-      convertibleIssuances: [issuanceRecord("sec1", "2022-01-01")] as any,
-      transactions: [issuanceRecord("sec1", "2022-01-01")],
-    });
-    const findings = runValidator("TX_CONVERTIBLE_RETRACTION", context, retraction());
-    expect(findings).toHaveLength(1);
-    expectFindingShape(findings[0], "date-order", subject);
-    expect(findings[0].message).toContain("sec1");
-  });
-
-  it("emits one no-acceptance finding per offending acceptance, each naming that acceptance", () => {
+  it("emits one no-acceptance finding per past offending acceptance, each naming that acceptance", () => {
     const context = contextWith({
       convertibleIssuances: [issuanceRecord("sec1")] as any,
       transactions: [
         issuanceRecord("sec1"),
-        { id: "acc-a", object_type: "TX_CONVERTIBLE_ACCEPTANCE", security_id: "sec1", date: "2021-06-01" },
-        { id: "acc-b", object_type: "TX_CONVERTIBLE_ACCEPTANCE", security_id: "sec1", date: "2021-07-01" },
+        { id: "acc-a", object_type: "TX_CONVERTIBLE_ACCEPTANCE", security_id: "sec1", date: "2020-06-01" },
+        { id: "acc-b", object_type: "TX_CONVERTIBLE_ACCEPTANCE", security_id: "sec1", date: "2020-07-01" },
       ],
     });
     const findings = runValidator("TX_CONVERTIBLE_RETRACTION", context, retraction());
@@ -276,7 +202,7 @@ describe("convertible retraction validity", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Cancellation: issuance-exists, date-order, no-other-transactions
+// Cancellation: issuance-exists, no-other-transactions
 // ---------------------------------------------------------------------------
 
 describe("convertible cancellation validity", () => {
@@ -288,7 +214,7 @@ describe("convertible cancellation validity", () => {
     ...overrides,
   });
   const cancellationRecord = { id: "can1", object_type: "TX_CONVERTIBLE_CANCELLATION", security_id: "sec1", date: "2021-01-01" };
-  const acceptanceRecord = { id: "acc-x", object_type: "TX_CONVERTIBLE_ACCEPTANCE", security_id: "sec1", date: "2021-02-01" };
+  const acceptanceRecord = { id: "acc-x", object_type: "TX_CONVERTIBLE_ACCEPTANCE", security_id: "sec1", date: "2020-02-01" };
   const subject = { object_type: "TX_CONVERTIBLE_CANCELLATION", id: "can1" };
 
   it("returns no findings when only an issuance, a convertible acceptance, and the cancellation itself reference the security", () => {
@@ -323,34 +249,15 @@ describe("convertible cancellation validity", () => {
     expect(snapshot.context.convertibleIssuances.some((c: any) => c.security_id === "sec2")).toBe(true);
   });
 
-  it("flags a missing issuance with an error naming the security_id", () => {
-    const context = contextWith({ transactions: [issuanceRecord("sec1")] });
-    const findings = runValidator("TX_CONVERTIBLE_CANCELLATION", context, cancellation());
-    expect(findings).toHaveLength(1);
-    expectFindingShape(findings[0], "issuance-exists", subject);
-    expect(findings[0].message).toContain("sec1");
-  });
-
-  it("flags an out-of-order date with an error naming the security_id", () => {
-    const context = contextWith({
-      convertibleIssuances: [issuanceRecord("sec1", "2022-01-01")] as any,
-      transactions: [issuanceRecord("sec1", "2022-01-01")],
-    });
-    const findings = runValidator("TX_CONVERTIBLE_CANCELLATION", context, cancellation());
-    expect(findings).toHaveLength(1);
-    expectFindingShape(findings[0], "date-order", subject);
-    expect(findings[0].message).toContain("sec1");
-  });
-
-  it("emits one no-other-transactions finding per offender, exempting acceptances and itself", () => {
+  it("emits one no-other-transactions finding per past offender, exempting acceptances and itself", () => {
     const context = contextWith({
       convertibleIssuances: [issuanceRecord("sec1")] as any,
       transactions: [
         issuanceRecord("sec1"),
         acceptanceRecord,
         cancellationRecord,
-        { id: "xfer-a", object_type: "TX_CONVERTIBLE_TRANSFER", security_id: "sec1", date: "2021-06-01" },
-        { id: "xfer-b", object_type: "TX_CONVERTIBLE_TRANSFER", security_id: "sec1", date: "2021-07-01" },
+        { id: "xfer-a", object_type: "TX_CONVERTIBLE_TRANSFER", security_id: "sec1", date: "2020-06-01" },
+        { id: "xfer-b", object_type: "TX_CONVERTIBLE_TRANSFER", security_id: "sec1", date: "2020-07-01" },
       ],
     });
     const findings = runValidator("TX_CONVERTIBLE_CANCELLATION", context, cancellation());
@@ -365,7 +272,7 @@ describe("convertible cancellation validity", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Transfer: issuance-exists, date-order (no-other-transactions is a declared gap)
+// Transfer: issuance-exists (no-other-transactions is a declared gap)
 // ---------------------------------------------------------------------------
 
 describe("convertible transfer validity", () => {
@@ -376,9 +283,8 @@ describe("convertible transfer validity", () => {
     date: "2021-01-01",
     ...overrides,
   });
-  const subject = { object_type: "TX_CONVERTIBLE_TRANSFER", id: "xfer1" };
 
-  it("returns no findings when the issuance exists and dates order", () => {
+  it("returns no findings when the issuance is outstanding", () => {
     const context = contextWith({
       convertibleIssuances: [issuanceRecord("sec1")] as any,
       transactions: [issuanceRecord("sec1")],
@@ -400,38 +306,170 @@ describe("convertible transfer validity", () => {
     expect(snapshot.context.convertibleIssuances.some((c: any) => c.security_id === "sec2")).toBe(true);
   });
 
-  it("flags a missing issuance with an error naming the security_id", () => {
-    const context = contextWith({ transactions: [issuanceRecord("sec1")] });
-    const findings = runValidator("TX_CONVERTIBLE_TRANSFER", context, transfer());
-    expect(findings).toHaveLength(1);
-    expectFindingShape(findings[0], "issuance-exists", subject);
-    expect(findings[0].message).toContain("sec1");
-  });
-
-  it("flags an out-of-order date with an error naming the security_id", () => {
-    const context = contextWith({
-      convertibleIssuances: [issuanceRecord("sec1", "2022-01-01")] as any,
-      transactions: [issuanceRecord("sec1", "2022-01-01")],
-    });
-    const findings = runValidator("TX_CONVERTIBLE_TRANSFER", context, transfer());
-    expect(findings).toHaveLength(1);
-    expectFindingShape(findings[0], "date-order", subject);
-    expect(findings[0].message).toContain("sec1");
-  });
-
-  it("never emits no-other-transactions, even when other transactions reference the security", () => {
+  it("never emits no-other-transactions, even when a past transaction references the security", () => {
     const context = contextWith({
       convertibleIssuances: [issuanceRecord("sec1")] as any,
       transactions: [
         issuanceRecord("sec1"),
-        { id: "ret-x", object_type: "TX_CONVERTIBLE_RETRACTION", security_id: "sec1", date: "2021-06-01" },
-        { id: "can-x", object_type: "TX_CONVERTIBLE_CANCELLATION", security_id: "sec1", date: "2021-07-01" },
+        { id: "ret-x", object_type: "TX_CONVERTIBLE_RETRACTION", security_id: "sec1", date: "2020-06-01" },
+        { id: "can-x", object_type: "TX_CONVERTIBLE_CANCELLATION", security_id: "sec1", date: "2020-07-01" },
       ],
     });
     const findings = runValidator("TX_CONVERTIBLE_TRANSFER", context, transfer());
     // The declared gap is never checked, so the transaction stays valid here.
     expect(findings).toEqual([]);
     expect(findings.some((f) => f.check === "no-other-transactions")).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Existence check: layered failure diagnostics
+// ---------------------------------------------------------------------------
+
+describe("issuance-exists reports why the referenced issuance is unavailable", () => {
+  const acceptance = { id: "acc1", object_type: "TX_CONVERTIBLE_ACCEPTANCE", security_id: "sec1", date: "2021-01-01" };
+  const subject = { object_type: "TX_CONVERTIBLE_ACCEPTANCE", id: "acc1" };
+
+  // Every scenario keeps the live collection empty so the existence check fails and
+  // takes the history-scanning path; the message names one of the three causes.
+  const expectSoleCause = (context: OcfMachineContext, message: string) => {
+    const findings = runValidator("TX_CONVERTIBLE_ACCEPTANCE", context, acceptance);
+    expect(findings).toHaveLength(1);
+    expectFindingShape(findings[0], "issuance-exists", subject);
+    expect(findings[0].message).toBe(message);
+    expect(findings.some((f) => f.check === "date-order")).toBe(false);
+  };
+
+  it("names a security that was never issued in the package", () => {
+    expectSoleCause(
+      contextWith({ transactions: [] }),
+      "No convertible issuance with security_id sec1 appears in the package.",
+    );
+  });
+
+  it("names an issuance dated after the transaction", () => {
+    expectSoleCause(
+      contextWith({ transactions: [issuanceRecord("sec1", "2022-01-01")] }),
+      "The convertible issuance referenced by security_id sec1 is dated 2022-01-01, after this transaction (2021-01-01).",
+    );
+  });
+
+  it("reports an issuance issued on or before the transaction but no longer outstanding", () => {
+    expectSoleCause(
+      contextWith({ transactions: [issuanceRecord("sec1", "2020-01-01")] }),
+      "The convertible issuance referenced by security_id sec1 (dated 2020-01-01) is not outstanding as of this transaction's date.",
+    );
+  });
+
+  it("displays the on-or-before issuance's date when the history holds both an earlier and a later match", () => {
+    expectSoleCause(
+      contextWith({ transactions: [issuanceRecord("sec1", "2020-01-01"), issuanceRecord("sec1", "2022-01-01")] }),
+      "The convertible issuance referenced by security_id sec1 (dated 2020-01-01) is not outstanding as of this transaction's date.",
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Offender scans: past-only
+// ---------------------------------------------------------------------------
+
+describe("offender scans consider only offenders dated on or before the transaction", () => {
+  // Each implemented scan judged at the date boundary: the transaction under
+  // validation is dated 2021-06-01, with the referenced issuance already live so
+  // the existence check passes and only the scan under test can emit.
+  const TX_DATE = "2021-06-01";
+  const scans = [
+    { scan: "no-retraction", txType: "TX_CONVERTIBLE_ACCEPTANCE", txId: "acc1", offenderType: "TX_CONVERTIBLE_RETRACTION", offenderId: "ret1" },
+    { scan: "no-acceptance", txType: "TX_CONVERTIBLE_RETRACTION", txId: "ret1", offenderType: "TX_CONVERTIBLE_ACCEPTANCE", offenderId: "acc1" },
+    { scan: "no-other-transactions", txType: "TX_CONVERTIBLE_CANCELLATION", txId: "can1", offenderType: "TX_CONVERTIBLE_TRANSFER", offenderId: "xfer1" },
+  ] as const;
+
+  it.each(scans)("$scan flags a same-day or earlier offender but ignores a later one", ({ scan, txType, txId, offenderType, offenderId }) => {
+    const tx = { id: txId, object_type: txType, security_id: "sec1", date: TX_DATE };
+    const emitsAt = (offenderDate: string) => {
+      const context = contextWith({
+        convertibleIssuances: [issuanceRecord("sec1")] as any,
+        transactions: [
+          issuanceRecord("sec1"),
+          { id: offenderId, object_type: offenderType, security_id: "sec1", date: offenderDate },
+        ],
+      });
+      return runValidator(txType, context, tx).some((f) => f.check === scan);
+    };
+
+    expect(emitsAt("2021-12-01")).toBe(false);
+    expect(emitsAt(TX_DATE)).toBe(true);
+    expect(emitsAt("2021-01-01")).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Conflicting transactions: the later one carries the error
+// ---------------------------------------------------------------------------
+
+describe("a conflicting transaction pair flags the later transaction, not the earlier", () => {
+  const issuance = { id: "ci1", object_type: "TX_CONVERTIBLE_ISSUANCE", security_id: "sec1", date: "2020-01-01" };
+
+  it("clears an acceptance and flags a later retraction by its backward scan", () => {
+    const acceptance = { id: "acc1", object_type: "TX_CONVERTIBLE_ACCEPTANCE", security_id: "sec1", date: "2020-02-01" };
+    const retraction = { id: "ret1", object_type: "TX_CONVERTIBLE_RETRACTION", security_id: "sec1", date: "2020-03-01" };
+
+    const actor = startSeeded(
+      contextWith({
+        convertibleIssuances: [issuance] as any,
+        transactions: [issuance, acceptance, retraction],
+      }),
+    );
+
+    actor.send(ev("TX_CONVERTIBLE_ACCEPTANCE", acceptance));
+    expect(actor.getSnapshot().value).toBe("capTable");
+    expect(actor.getSnapshot().context.findings).toEqual([]);
+
+    actor.send(ev("TX_CONVERTIBLE_RETRACTION", retraction));
+    const { context, value } = actor.getSnapshot();
+    expect(value).toBe("validationError");
+
+    const errors = context.findings.filter((f) => f.severity === "error");
+    expect(errors).toHaveLength(1);
+    expect(errors[0].check).toBe("no-acceptance");
+    for (const finding of context.findings) {
+      expect(finding.subject).toEqual({ object_type: "TX_CONVERTIBLE_RETRACTION", id: "ret1" });
+    }
+    expect(context.findings.some((f) => f.subject.id === "acc1")).toBe(false);
+  });
+
+  it("clears a retraction that removes the issuance and then flags the later acceptance by both checks", () => {
+    const retraction = { id: "ret1", object_type: "TX_CONVERTIBLE_RETRACTION", security_id: "sec1", date: "2020-02-01" };
+    const acceptance = { id: "acc1", object_type: "TX_CONVERTIBLE_ACCEPTANCE", security_id: "sec1", date: "2020-03-01" };
+
+    const actor = startSeeded(
+      contextWith({
+        convertibleIssuances: [issuance] as any,
+        transactions: [issuance, retraction, acceptance],
+      }),
+    );
+
+    actor.send(ev("TX_CONVERTIBLE_RETRACTION", retraction));
+    const afterRetraction = actor.getSnapshot();
+    expect(afterRetraction.value).toBe("capTable");
+    expect(afterRetraction.context.findings).toEqual([]);
+    // The retraction removed the issuance from the live collection.
+    expect(afterRetraction.context.convertibleIssuances.some((c: any) => c.security_id === "sec1")).toBe(false);
+
+    actor.send(ev("TX_CONVERTIBLE_ACCEPTANCE", acceptance));
+    const { context, value } = actor.getSnapshot();
+    expect(value).toBe("validationError");
+
+    const errors = context.findings.filter((f) => f.severity === "error");
+    expect(errors.map((f) => f.check).sort()).toEqual(["issuance-exists", "no-retraction"]);
+    const existence = errors.find((f) => f.check === "issuance-exists");
+    expect(existence?.message).toBe(
+      "The convertible issuance referenced by security_id sec1 (dated 2020-01-01) is not outstanding as of this transaction's date.",
+    );
+    for (const finding of context.findings) {
+      expect(finding.subject).toEqual({ object_type: "TX_CONVERTIBLE_ACCEPTANCE", id: "acc1" });
+    }
+    expect(context.findings.some((f) => f.subject.id === "ret1")).toBe(false);
   });
 });
 
@@ -461,22 +499,18 @@ const failingScenarios: Record<MigratedKey, { context: OcfMachineContext; data: 
   ],
   TX_CONVERTIBLE_ACCEPTANCE: [
     { context: contextWith({ transactions: [issuanceRecord("sec1")] }), data: txRecord("TX_CONVERTIBLE_ACCEPTANCE", "a1", "sec1", "2021-01-01") },
-    { context: contextWith({ convertibleIssuances: [issuanceRecord("sec1", "2022-01-01")] as any, transactions: [issuanceRecord("sec1", "2022-01-01")] }), data: txRecord("TX_CONVERTIBLE_ACCEPTANCE", "a1", "sec1", "2021-01-01") },
-    { context: contextWith({ convertibleIssuances: [issuanceRecord("sec1")] as any, transactions: [issuanceRecord("sec1"), txRecord("TX_CONVERTIBLE_RETRACTION", "r1")] }), data: txRecord("TX_CONVERTIBLE_ACCEPTANCE", "a1", "sec1", "2021-01-01") },
+    { context: contextWith({ convertibleIssuances: [issuanceRecord("sec1")] as any, transactions: [issuanceRecord("sec1"), txRecord("TX_CONVERTIBLE_RETRACTION", "r1", "sec1", "2020-06-01")] }), data: txRecord("TX_CONVERTIBLE_ACCEPTANCE", "a1", "sec1", "2021-01-01") },
   ],
   TX_CONVERTIBLE_RETRACTION: [
     { context: contextWith({ transactions: [issuanceRecord("sec1")] }), data: txRecord("TX_CONVERTIBLE_RETRACTION", "r1", "sec1", "2021-01-01") },
-    { context: contextWith({ convertibleIssuances: [issuanceRecord("sec1", "2022-01-01")] as any, transactions: [issuanceRecord("sec1", "2022-01-01")] }), data: txRecord("TX_CONVERTIBLE_RETRACTION", "r1", "sec1", "2021-01-01") },
-    { context: contextWith({ convertibleIssuances: [issuanceRecord("sec1")] as any, transactions: [issuanceRecord("sec1"), txRecord("TX_CONVERTIBLE_ACCEPTANCE", "a1")] }), data: txRecord("TX_CONVERTIBLE_RETRACTION", "r1", "sec1", "2021-01-01") },
+    { context: contextWith({ convertibleIssuances: [issuanceRecord("sec1")] as any, transactions: [issuanceRecord("sec1"), txRecord("TX_CONVERTIBLE_ACCEPTANCE", "a1", "sec1", "2020-06-01")] }), data: txRecord("TX_CONVERTIBLE_RETRACTION", "r1", "sec1", "2021-01-01") },
   ],
   TX_CONVERTIBLE_CANCELLATION: [
     { context: contextWith({ transactions: [issuanceRecord("sec1")] }), data: txRecord("TX_CONVERTIBLE_CANCELLATION", "c1", "sec1", "2021-01-01") },
-    { context: contextWith({ convertibleIssuances: [issuanceRecord("sec1", "2022-01-01")] as any, transactions: [issuanceRecord("sec1", "2022-01-01")] }), data: txRecord("TX_CONVERTIBLE_CANCELLATION", "c1", "sec1", "2021-01-01") },
-    { context: contextWith({ convertibleIssuances: [issuanceRecord("sec1")] as any, transactions: [issuanceRecord("sec1"), txRecord("TX_CONVERTIBLE_TRANSFER", "x1")] }), data: txRecord("TX_CONVERTIBLE_CANCELLATION", "c1", "sec1", "2021-01-01") },
+    { context: contextWith({ convertibleIssuances: [issuanceRecord("sec1")] as any, transactions: [issuanceRecord("sec1"), txRecord("TX_CONVERTIBLE_TRANSFER", "x1", "sec1", "2020-06-01")] }), data: txRecord("TX_CONVERTIBLE_CANCELLATION", "c1", "sec1", "2021-01-01") },
   ],
   TX_CONVERTIBLE_TRANSFER: [
     { context: contextWith({ transactions: [issuanceRecord("sec1")] }), data: txRecord("TX_CONVERTIBLE_TRANSFER", "x1", "sec1", "2021-01-01") },
-    { context: contextWith({ convertibleIssuances: [issuanceRecord("sec1", "2022-01-01")] as any, transactions: [issuanceRecord("sec1", "2022-01-01")] }), data: txRecord("TX_CONVERTIBLE_TRANSFER", "x1", "sec1", "2021-01-01") },
   ],
 };
 
