@@ -22,6 +22,7 @@ import { TX_WARRANT_ACCEPTANCE } from "./validators/warrant/tx_warrant_acceptanc
 import { TX_WARRANT_RETRACTION } from "./validators/warrant/tx_warrant_retraction";
 import { TX_WARRANT_CANCELLATION } from "./validators/warrant/tx_warrant_cancellation";
 import { TX_WARRANT_TRANSFER } from "./validators/warrant/tx_warrant_transfer";
+import { TX_WARRANT_EXERCISE } from "./validators/warrant/tx_warrant_exercise";
 import run_EOD from "./eod";
 
 // The validator contract types are defined in types/validator.ts; re-exported
@@ -201,7 +202,7 @@ export const TX_DESCRIPTORS = {
   TX_WARRANT_RETRACTION,
   TX_WARRANT_CANCELLATION,
   TX_WARRANT_TRANSFER,
-  TX_WARRANT_EXERCISE: { effect: "remove", collection: "warrantIssuances", legacyValidate: validators.valid_tx_warrant_exercise },
+  TX_WARRANT_EXERCISE,
   TX_EQUITY_COMPENSATION_RETRACTION: { effect: "remove", collection: "equityCompensation", legacyValidate: validators.valid_tx_equity_compensation_retraction },
   TX_EQUITY_COMPENSATION_CANCELLATION: { effect: "remove", collection: "equityCompensation", legacyValidate: validators.valid_tx_equity_compensation_cancellation },
   TX_EQUITY_COMPENSATION_TRANSFER: { effect: "remove", collection: "equityCompensation", legacyValidate: validators.valid_tx_equity_compensation_transfer },
