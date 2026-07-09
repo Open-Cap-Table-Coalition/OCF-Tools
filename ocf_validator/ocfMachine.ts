@@ -23,6 +23,20 @@ import { TX_WARRANT_RETRACTION } from "./validators/warrant/tx_warrant_retractio
 import { TX_WARRANT_CANCELLATION } from "./validators/warrant/tx_warrant_cancellation";
 import { TX_WARRANT_TRANSFER } from "./validators/warrant/tx_warrant_transfer";
 import { TX_WARRANT_EXERCISE } from "./validators/warrant/tx_warrant_exercise";
+import { TX_PLAN_SECURITY_ACCEPTANCE } from "./validators/plan_security/tx_plan_security_acceptance";
+import { TX_PLAN_SECURITY_CANCELLATION } from "./validators/plan_security/tx_plan_security_cancellation";
+import { TX_PLAN_SECURITY_EXERCISE } from "./validators/plan_security/tx_plan_security_exercise";
+import { TX_PLAN_SECURITY_ISSUANCE } from "./validators/plan_security/tx_plan_security_issuance";
+import { TX_PLAN_SECURITY_RELEASE } from "./validators/plan_security/tx_plan_security_release";
+import { TX_PLAN_SECURITY_RETRACTION } from "./validators/plan_security/tx_plan_security_retraction";
+import { TX_PLAN_SECURITY_TRANSFER } from "./validators/plan_security/tx_plan_security_transfer";
+import { TX_STOCK_CLASS_AUTHORIZED_SHARES_ADJUSTMENT } from "./validators/stock_class/tx_stock_class_authorized_shares_adjustment";
+import { TX_STOCK_CLASS_CONVERSION_RATIO_ADJUSTMENT } from "./validators/stock_class/tx_stock_class_conversion_ratio_adjustment";
+import { TX_STOCK_PLAN_POOL_ADJUSTMENT } from "./validators/stock_plan/tx_stock_plan_pool_adjustment";
+import { TX_STOCK_PLAN_RETURN_TO_POOL } from "./validators/stock_plan/tx_stock_plan_return_to_pool";
+import { TX_VESTING_ACCELERATION } from "./validators/vesting/tx_vesting_acceleration";
+import { TX_VESTING_EVENT } from "./validators/vesting/tx_vesting_event";
+import { TX_VESTING_START } from "./validators/vesting/tx_vesting_start";
 import run_EOD from "./eod";
 
 // The validator contract types are defined in types/validator.ts; re-exported
@@ -125,7 +139,9 @@ type Validator<T> = (
  * `legacyValidate` arms exist only while families migrate; the union collapses
  * to the graded arms when the last one does.
  *
- *  - `passthrough`: received and silently ignored — no validator, record, or mutation.
+ *  - `passthrough`: received and silently ignored — never dispatched, no record
+ *    or mutation. May carry a declaration-only validator (empty `checks`)
+ *    awaiting its first check; the machine never reads it.
  *  - `none`:        validate and record, but mutate no collection.
  *  - `remove`:      validate, record, and filter `collection` by `security_id`.
  *  - `append`:      validate, record, and append the issuance to `collection`.
@@ -147,7 +163,7 @@ type Validator<T> = (
  * inseparable from migrating a family to the graded shape. Legacy arms carry none.
  */
 type Descriptor =
-  | { effect: "passthrough" }
+  | { effect: "passthrough"; validate?: GradedValidator<any>; checks?: readonly Check[] }
   | { effect: "none"; legacyValidate: Validator<unknown> }
   | { effect: "none"; validate: GradedValidator<any>; checks: readonly Check[] }
   | { effect: "remove"; legacyValidate: Validator<unknown>; collection: CollectionKey }
@@ -208,30 +224,35 @@ export const TX_DESCRIPTORS = {
   TX_EQUITY_COMPENSATION_TRANSFER: { effect: "remove", collection: "equityCompensation", legacyValidate: validators.valid_tx_equity_compensation_transfer },
 
   // --- passthrough: received and silently ignored today ------------------
-  //   No validator, no report entry, no collection mutation. They stay in
-  //   `capTable` so today's behavior (and the characterization snapshot, which
-  //   contains TX_VESTING_START) is byte-identical. `satisfies Record<TxKey, …>`
-  //   below forces any future OCF transaction type to be classified here — a
-  //   compile error until it is.
+  //   Never dispatched: no record, no findings, no collection mutation. Most
+  //   carry a declaration-only validator with an empty check list, putting the
+  //   type on the graded convention; writing its first check means flipping
+  //   the effect, a deliberate behavior change. The inline markers are the
+  //   undeclared types: the equity compensation release and the stock class
+  //   split have validator code that was never wired up, so even declaring
+  //   them means deciding what to do with that code; the other three have no
+  //   validator written at all. `satisfies Record<TxKey, …>` below forces any
+  //   future OCF transaction type to be classified here — a compile error
+  //   until it is.
   TX_EQUITY_COMPENSATION_RELEASE: { effect: "passthrough" },
   TX_EQUITY_COMPENSATION_REPRICING: { effect: "passthrough" },
   TX_ISSUER_AUTHORIZED_SHARES_ADJUSTMENT: { effect: "passthrough" },
-  TX_PLAN_SECURITY_ACCEPTANCE: { effect: "passthrough" },
-  TX_PLAN_SECURITY_CANCELLATION: { effect: "passthrough" },
-  TX_PLAN_SECURITY_EXERCISE: { effect: "passthrough" },
-  TX_PLAN_SECURITY_ISSUANCE: { effect: "passthrough" },
-  TX_PLAN_SECURITY_RELEASE: { effect: "passthrough" },
-  TX_PLAN_SECURITY_RETRACTION: { effect: "passthrough" },
-  TX_PLAN_SECURITY_TRANSFER: { effect: "passthrough" },
-  TX_STOCK_CLASS_AUTHORIZED_SHARES_ADJUSTMENT: { effect: "passthrough" },
-  TX_STOCK_CLASS_CONVERSION_RATIO_ADJUSTMENT: { effect: "passthrough" },
+  TX_PLAN_SECURITY_ACCEPTANCE,
+  TX_PLAN_SECURITY_CANCELLATION,
+  TX_PLAN_SECURITY_EXERCISE,
+  TX_PLAN_SECURITY_ISSUANCE,
+  TX_PLAN_SECURITY_RELEASE,
+  TX_PLAN_SECURITY_RETRACTION,
+  TX_PLAN_SECURITY_TRANSFER,
+  TX_STOCK_CLASS_AUTHORIZED_SHARES_ADJUSTMENT,
+  TX_STOCK_CLASS_CONVERSION_RATIO_ADJUSTMENT,
   TX_STOCK_CLASS_SPLIT: { effect: "passthrough" },
   TX_STOCK_CONSOLIDATION: { effect: "passthrough" },
-  TX_STOCK_PLAN_POOL_ADJUSTMENT: { effect: "passthrough" },
-  TX_STOCK_PLAN_RETURN_TO_POOL: { effect: "passthrough" },
-  TX_VESTING_ACCELERATION: { effect: "passthrough" },
-  TX_VESTING_EVENT: { effect: "passthrough" },
-  TX_VESTING_START: { effect: "passthrough" },
+  TX_STOCK_PLAN_POOL_ADJUSTMENT,
+  TX_STOCK_PLAN_RETURN_TO_POOL,
+  TX_VESTING_ACCELERATION,
+  TX_VESTING_EVENT,
+  TX_VESTING_START,
 } satisfies Record<TxKey, Descriptor>;
 
 export type { Descriptor };

@@ -1,13 +1,8 @@
-const valid_tx_stock_plan_return_to_pool = (context: any, event: any) => {
-  let valid = false;
-  valid = true;
-  // TBC: validation of tx_stock_plan_return_to_pool
+import { defineValidator } from "../checkKit";
 
-  if (valid) {
-    return true;
-  } else {
-    return false;
-  }
-};
-
-export default valid_tx_stock_plan_return_to_pool;
+// Declaration only: no checks yet.
+export const TX_STOCK_PLAN_RETURN_TO_POOL = defineValidator({
+  transaction: "TX_STOCK_PLAN_RETURN_TO_POOL",
+  effect: "passthrough",
+  checks: [],
+});

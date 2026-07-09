@@ -1,16 +1,8 @@
-const valid_tx_stock_class_conversion_ratio_adjustment = (
-  context: any,
-  event: any
-) => {
-  let valid = false;
-  valid = true;
-  // TBC: validation of tx_stock_class_conversion_ratio_adjustment
+import { defineValidator } from "../checkKit";
 
-  if (valid) {
-    return true;
-  } else {
-    return false;
-  }
-};
-
-export default valid_tx_stock_class_conversion_ratio_adjustment;
+// Declaration only: no checks yet.
+export const TX_STOCK_CLASS_CONVERSION_RATIO_ADJUSTMENT = defineValidator({
+  transaction: "TX_STOCK_CLASS_CONVERSION_RATIO_ADJUSTMENT",
+  effect: "passthrough",
+  checks: [],
+});

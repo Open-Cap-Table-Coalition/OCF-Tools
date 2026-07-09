@@ -1,13 +1,8 @@
-const valid_tx_plan_security_issuance = (context: any, event: any) => {
-  let valid = false;
-  valid = true;
-  // TBC: validation of tx_plan_security_issuance
+import { defineValidator } from "../checkKit";
 
-  if (valid) {
-    return true;
-  } else {
-    return false;
-  }
-};
-
-export default valid_tx_plan_security_issuance;
+// Declaration only: no checks yet.
+export const TX_PLAN_SECURITY_ISSUANCE = defineValidator({
+  transaction: "TX_PLAN_SECURITY_ISSUANCE",
+  effect: "passthrough",
+  checks: [],
+});

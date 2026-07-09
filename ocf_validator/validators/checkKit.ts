@@ -25,12 +25,13 @@ export type CheckObject = Pick<Check, "id" | "severity" | "description"> & {
 
 /**
  * A validator declaration: the transaction key (which fixes the payload type of
- * the derived validator), the collection effect, and the check objects. An
- * effect-none transaction mutates no collection, so it carries no `collection`;
- * an append or remove transaction names the family collection it touches.
+ * the derived validator), the collection effect, and the check objects. A
+ * passthrough transaction is declared but never dispatched, and an effect-none
+ * transaction mutates no collection, so neither carries a `collection`; an
+ * append or remove transaction names the family collection it touches.
  */
 type Spec =
-  | { transaction: TxKey; effect: "none"; collection?: never; checks: readonly CheckObject[] }
+  | { transaction: TxKey; effect: "passthrough" | "none"; collection?: never; checks: readonly CheckObject[] }
   | { transaction: TxKey; effect: "append" | "remove"; collection: CollectionKey; checks: readonly CheckObject[] };
 
 /**
