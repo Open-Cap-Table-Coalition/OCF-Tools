@@ -21,6 +21,13 @@ import { TX_WARRANT_ACCEPTANCE } from "./validators/warrant/tx_warrant_acceptanc
 import { TX_WARRANT_RETRACTION } from "./validators/warrant/tx_warrant_retraction";
 import { TX_WARRANT_CANCELLATION } from "./validators/warrant/tx_warrant_cancellation";
 import { TX_WARRANT_TRANSFER } from "./validators/warrant/tx_warrant_transfer";
+import { TX_EQUITY_COMPENSATION_ISSUANCE } from "./validators/equity_compensation/tx_equity_compensation_issuance";
+import { TX_EQUITY_COMPENSATION_ACCEPTANCE } from "./validators/equity_compensation/tx_equity_compensation_acceptance";
+import { TX_EQUITY_COMPENSATION_EXERCISE } from "./validators/equity_compensation/tx_equity_compensation_exercise";
+import { TX_EQUITY_COMPENSATION_RELEASE } from "./validators/equity_compensation/tx_equity_compensation_release";
+import { TX_EQUITY_COMPENSATION_RETRACTION } from "./validators/equity_compensation/tx_equity_compensation_retraction";
+import { TX_EQUITY_COMPENSATION_CANCELLATION } from "./validators/equity_compensation/tx_equity_compensation_cancellation";
+import { TX_EQUITY_COMPENSATION_TRANSFER } from "./validators/equity_compensation/tx_equity_compensation_transfer";
 import run_EOD from "./eod";
 
 // The validator contract types are defined in types/validator.ts; re-exported
@@ -174,17 +181,18 @@ export const TX_DESCRIPTORS = {
   TX_STOCK_ISSUANCE: { effect: "append", collection: "stockIssuances", legacyValidate: validators.valid_tx_stock_issuance },
   TX_CONVERTIBLE_ISSUANCE,
   TX_WARRANT_ISSUANCE,
-  TX_EQUITY_COMPENSATION_ISSUANCE: { effect: "append", collection: "equityCompensation", legacyValidate: validators.valid_tx_equity_compensation_issuance },
+  TX_EQUITY_COMPENSATION_ISSUANCE,
 
   // --- none: validate + report, no collection mutation --------------------
   TX_STOCK_ACCEPTANCE: { effect: "none", legacyValidate: validators.valid_tx_stock_acceptance },
   TX_CONVERTIBLE_ACCEPTANCE,
   TX_WARRANT_ACCEPTANCE,
-  TX_EQUITY_COMPENSATION_ACCEPTANCE: { effect: "none", legacyValidate: validators.valid_tx_equity_compensation_acceptance },
-  // TX_EQUITY_COMPENSATION_EXERCISE removes nothing today (its collection filter
-  // is commented out in the legacy machine), asymmetric with TX_WARRANT_EXERCISE
-  // which removes. That asymmetry is PRESERVED pending investigation, not endorsed.
-  TX_EQUITY_COMPENSATION_EXERCISE: { effect: "none", legacyValidate: validators.valid_tx_equity_compensation_exercise },
+  TX_EQUITY_COMPENSATION_ACCEPTANCE,
+  // TX_EQUITY_COMPENSATION_EXERCISE removes nothing today, asymmetric with
+  // TX_WARRANT_EXERCISE which removes. That asymmetry is preserved pending
+  // investigation, not endorsed.
+  TX_EQUITY_COMPENSATION_EXERCISE,
+  TX_EQUITY_COMPENSATION_RELEASE,
 
   // --- remove: filter the family collection by security_id ---------------
   TX_STOCK_RETRACTION: { effect: "remove", collection: "stockIssuances", legacyValidate: validators.valid_tx_stock_retraction },
@@ -201,9 +209,9 @@ export const TX_DESCRIPTORS = {
   TX_WARRANT_CANCELLATION,
   TX_WARRANT_TRANSFER,
   TX_WARRANT_EXERCISE: { effect: "remove", collection: "warrantIssuances", legacyValidate: validators.valid_tx_warrant_exercise },
-  TX_EQUITY_COMPENSATION_RETRACTION: { effect: "remove", collection: "equityCompensation", legacyValidate: validators.valid_tx_equity_compensation_retraction },
-  TX_EQUITY_COMPENSATION_CANCELLATION: { effect: "remove", collection: "equityCompensation", legacyValidate: validators.valid_tx_equity_compensation_cancellation },
-  TX_EQUITY_COMPENSATION_TRANSFER: { effect: "remove", collection: "equityCompensation", legacyValidate: validators.valid_tx_equity_compensation_transfer },
+  TX_EQUITY_COMPENSATION_RETRACTION,
+  TX_EQUITY_COMPENSATION_CANCELLATION,
+  TX_EQUITY_COMPENSATION_TRANSFER,
 
   // --- passthrough: received and silently ignored today ------------------
   //   No validator, no report entry, no collection mutation. They stay in
@@ -211,7 +219,6 @@ export const TX_DESCRIPTORS = {
   //   contains TX_VESTING_START) is byte-identical. `satisfies Record<TxKey, …>`
   //   below forces any future OCF transaction type to be classified here — a
   //   compile error until it is.
-  TX_EQUITY_COMPENSATION_RELEASE: { effect: "passthrough" },
   TX_EQUITY_COMPENSATION_REPRICING: { effect: "passthrough" },
   TX_ISSUER_AUTHORIZED_SHARES_ADJUSTMENT: { effect: "passthrough" },
   TX_PLAN_SECURITY_ACCEPTANCE: { effect: "passthrough" },

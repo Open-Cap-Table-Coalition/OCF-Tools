@@ -1,53 +1,73 @@
-const valid_tx_equity_compensation_release = (context: any, event: any, isGuard: Boolean) => {
-  const {transactions} = context.ocfPackageContent;
+import type { TransactionFor } from "../../../types/ocf-input";
+import type { Check, GradedValidator } from "../../../types/validator";
+import type { Finding } from "../../../types/finding";
+import type { Descriptor } from "../../ocfMachine";
 
-  let validity = false;
-  let report: any = {transaction_type: "TX_EQUITY_COMPENSATION_RELEASE", transaction_id: event.data.id, transaction_date: event.data.date};
+type Release = TransactionFor<"TX_EQUITY_COMPENSATION_RELEASE">;
 
-  // Check that equity_compensation issuance in incoming security_id referenced by transaction exists in current state.
-  let incoming_equity_compensationIssuance_validity = false;
-  context.equity_compensationIssuances.forEach((ele: any) => {
-    if (
-      ele.security_id === event.data.security_id &&
-      ele.object_type === 'TX_EQUITY_COMPENSATION_ISSUANCE'
-    ) {
-      incoming_equity_compensationIssuance_validity = true;
-      report.incoming_equity_compensationIssuance_validity = true;
+const checks: readonly Check[] = [
+  {
+    id: "issuance-exists",
+    severity: "error",
+    description:
+      "The equity compensation issuance referenced by the transaction's security_id exists in the current cap-table state.",
+  },
+  {
+    id: "date-order",
+    severity: "error",
+    description:
+      "The transaction is dated on or after the equity compensation issuance it references.",
+  },
+];
+
+const validate: GradedValidator<Release> = (context, data) => {
+  const findings: Finding[] = [];
+  const subject = { object_type: data.object_type, id: data.id };
+  const { transactions } = context.ocfPackageContent;
+
+  // issuance-exists scans the live equity compensation collection.
+  let issuanceExists = false;
+  context.equityCompensation.forEach((ele) => {
+    if (ele.security_id === data.security_id && ele.object_type === "TX_EQUITY_COMPENSATION_ISSUANCE") {
+      issuanceExists = true;
     }
   });
-  if (!incoming_equity_compensationIssuance_validity) {
-    report.incoming_equity_compensationIssuance_validity = false;
+  if (!issuanceExists) {
+    findings.push({
+      severity: "error",
+      check: "issuance-exists",
+      message: `No equity compensation issuance with security_id ${data.security_id} exists in the current cap-table state.`,
+      subject,
+    });
   }
 
-  // Check to ensure that the date of transaction is the same day or after the date of the incoming equity_compensation issuance.
-  let incoming_date_validity = false;
-  transactions.forEach((ele: any) => {
+  // date-order scans the full package transaction history for the issuance.
+  // The object_type test leads so it narrows the transaction union to a
+  // security_id-bearing member before the other reads.
+  let dateOrdered = false;
+  transactions.forEach((ele) => {
     if (
-      ele.security_id === event.data.security_id &&
-      ele.object_type === 'TX_EQUITY_COMPENSATION_ISSUANCE'
+      ele.object_type === "TX_EQUITY_COMPENSATION_ISSUANCE" &&
+      ele.security_id === data.security_id &&
+      ele.date <= data.date
     ) {
-      if (ele.date <= event.data.date) {
-        incoming_date_validity = true;
-        report.incoming_date_validity = true;
-      }
+      dateOrdered = true;
     }
   });
-  if (!incoming_date_validity) {
-    report.incoming_date_validity = false;
+  if (!dateOrdered) {
+    findings.push({
+      severity: "error",
+      check: "date-order",
+      message: `The transaction is not dated on or after an equity compensation issuance with security_id ${data.security_id}.`,
+      subject,
+    });
   }
 
- 
-
-  if (
-    incoming_equity_compensationIssuance_validity &&
-    incoming_date_validity
-  ) {
-    validity = true;
-  }
-
-  const result = isGuard ? validity : report;
-  
-  return result;
+  return findings;
 };
 
-export default valid_tx_equity_compensation_release;
+export const TX_EQUITY_COMPENSATION_RELEASE = {
+  effect: "none",
+  validate,
+  checks,
+} satisfies Descriptor;

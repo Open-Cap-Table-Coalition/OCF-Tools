@@ -1,64 +1,108 @@
-import { OcfMachineContext } from "../../ocfMachine";
+import type { TransactionFor } from "../../../types/ocf-input";
+import type { Check, GradedValidator } from "../../../types/validator";
+import type { Finding } from "../../../types/finding";
+import type { Descriptor } from "../../ocfMachine";
 
-/*
-CURRENT CHECKS:
-Check that equity_compensation issuance in incoming security_id referenced by transaction exists in current state.
-The date of the equity_compensation issuance referred to in the security_id must have a date equal to or earlier than the date of the equity_compensation exercise
-Any stock issuances with corresponding security IDs referred to in the resulting_security_ids array must exist
-The security_id of the equity_compensation issuance referred to in the security_id variable must not be the security_id related to any other transactions with the exception of a equity_compensation acceptance transaction.
-The dates of any equity_compensation issuances referred to in the resulting_security_ids variables must have a date equal to the date of the equity_compensation exercise
-The stakeholder_id of the equity_compensation issuance referred to in the security_id variable must equal the stakeholder_id of any stock issuances referred to in the resulting_security_ids variable
+type Exercise = TransactionFor<"TX_EQUITY_COMPENSATION_EXERCISE">;
 
-NOT IMPLEMENTED:
-The quantity_converted variable must equal the sum of any equity_compensation issuances referred to in the resulting_security_ids variable
-*/
+const checks: readonly Check[] = [
+  {
+    id: "issuance-exists",
+    severity: "error",
+    description:
+      "The equity compensation issuance referenced by the transaction's security_id exists in the current cap-table state.",
+  },
+  {
+    id: "date-order",
+    severity: "error",
+    description:
+      "The transaction is dated on or after the equity compensation issuance it references.",
+  },
+  {
+    id: "resulting-issuances-exist",
+    severity: "error",
+    description:
+      "The stock issuances named in resulting_security_ids exist in the package transaction history.",
+    implemented: false,
+  },
+  {
+    id: "no-other-transactions",
+    severity: "error",
+    description:
+      "No other transaction references the transaction's security_id, other than an equity compensation acceptance.",
+    implemented: false,
+  },
+  {
+    id: "resulting-dates-match",
+    severity: "error",
+    description:
+      "Each resulting issuance is dated on the same day as the exercise.",
+    implemented: false,
+  },
+  {
+    id: "resulting-stakeholder-matches",
+    severity: "error",
+    description:
+      "Each resulting issuance's stakeholder_id equals the exercised issuance's stakeholder_id.",
+    implemented: false,
+  },
+  {
+    id: "quantity-consistent",
+    severity: "error",
+    description:
+      "The exercised quantity equals the sum of the resulting issuances' quantities.",
+    implemented: false,
+  },
+];
 
-const valid_tx_equity_compensation_exercise = (context: OcfMachineContext, event: any, isGuard: Boolean) => {
-  let validity = false;
+const validate: GradedValidator<Exercise> = (context, data) => {
+  const findings: Finding[] = [];
+  const subject = { object_type: data.object_type, id: data.id };
   const { transactions } = context.ocfPackageContent;
-  let report: any = { transaction_type: "TX_EQUITY_COMPENSATION_EXERCISE", transaction_id: event.data.id, transaction_date: event.data.date };
 
-  // Check that equity_compensation issuance in incoming security_id referenced by transaction exists in current state.
-  let incoming_equity_compensationIssuance_validity = false;
-  
-  context.equityCompensation.forEach((ele: any) => {
-    console.log('ele.security_id', ele.security_id);
-    console.log('event.data.security_id', event.data.security_id);
-    console.log('ele.object_type', ele.object_type);
-    if (ele.security_id === event.data.security_id && ele.object_type === "TX_EQUITY_COMPENSATION_ISSUANCE") {
-      incoming_equity_compensationIssuance_validity = true;
-      report.incoming_equity_compensationIssuance_validity = true;
+  // issuance-exists scans the live equity compensation collection.
+  let issuanceExists = false;
+  context.equityCompensation.forEach((ele) => {
+    if (ele.security_id === data.security_id && ele.object_type === "TX_EQUITY_COMPENSATION_ISSUANCE") {
+      issuanceExists = true;
     }
   });
-  if (!incoming_equity_compensationIssuance_validity) {
-    report.incoming_equity_compensationIssuance_validity = false;
+  if (!issuanceExists) {
+    findings.push({
+      severity: "error",
+      check: "issuance-exists",
+      message: `No equity compensation issuance with security_id ${data.security_id} exists in the current cap-table state.`,
+      subject,
+    });
   }
 
-  // The date of the equity_compensation issuance referred to in the security_id must have a date equal to or earlier than the date of the equity_compensation exercise
-  let incoming_date_validity = false;
-  transactions.forEach((ele: any) => {
-    if (ele.security_id === event.data.security_id && ele.object_type === "TX_EQUITY_COMPENSATION_ISSUANCE") {
-      if (ele.date <= event.data.date) {
-        incoming_date_validity = true;
-        report.incoming_date_validity = true;
-      }
+  // date-order scans the full package transaction history for the issuance.
+  // The object_type test leads so it narrows the transaction union to a
+  // security_id-bearing member before the other reads.
+  let dateOrdered = false;
+  transactions.forEach((ele) => {
+    if (
+      ele.object_type === "TX_EQUITY_COMPENSATION_ISSUANCE" &&
+      ele.security_id === data.security_id &&
+      ele.date <= data.date
+    ) {
+      dateOrdered = true;
     }
   });
-  if (!incoming_date_validity) {
-    report.incoming_date_validity = false;
+  if (!dateOrdered) {
+    findings.push({
+      severity: "error",
+      check: "date-order",
+      message: `The transaction is not dated on or after an equity compensation issuance with security_id ${data.security_id}.`,
+      subject,
+    });
   }
 
-
-  if (
-    incoming_equity_compensationIssuance_validity &&
-    incoming_date_validity
-  ) {
-    validity = true;
-  }
-
-  const result = isGuard ? validity : report;
-
-  return result;
+  return findings;
 };
 
-export default valid_tx_equity_compensation_exercise;
+export const TX_EQUITY_COMPENSATION_EXERCISE = {
+  effect: "none",
+  validate,
+  checks,
+} satisfies Descriptor;
