@@ -16,6 +16,7 @@ import { TX_CONVERTIBLE_ACCEPTANCE } from "./validators/convertible/tx_convertib
 import { TX_CONVERTIBLE_RETRACTION } from "./validators/convertible/tx_convertible_retraction";
 import { TX_CONVERTIBLE_CANCELLATION } from "./validators/convertible/tx_convertible_cancellation";
 import { TX_CONVERTIBLE_TRANSFER } from "./validators/convertible/tx_convertible_transfer";
+import { TX_CONVERTIBLE_CONVERSION } from "./validators/convertible/tx_convertible_conversion";
 import { TX_WARRANT_ISSUANCE } from "./validators/warrant/tx_warrant_issuance";
 import { TX_WARRANT_ACCEPTANCE } from "./validators/warrant/tx_warrant_acceptance";
 import { TX_WARRANT_RETRACTION } from "./validators/warrant/tx_warrant_retraction";
@@ -196,7 +197,7 @@ export const TX_DESCRIPTORS = {
   TX_CONVERTIBLE_RETRACTION,
   TX_CONVERTIBLE_CANCELLATION,
   TX_CONVERTIBLE_TRANSFER,
-  TX_CONVERTIBLE_CONVERSION: { effect: "remove", collection: "convertibleIssuances", legacyValidate: validators.valid_tx_convertible_conversion },
+  TX_CONVERTIBLE_CONVERSION,
   TX_WARRANT_RETRACTION,
   TX_WARRANT_CANCELLATION,
   TX_WARRANT_TRANSFER,

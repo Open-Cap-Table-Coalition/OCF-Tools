@@ -1,127 +1,177 @@
-import { OcfMachineContext } from "../../ocfMachine";
+import type { OCFStockIssuance } from "@opencaptablecoalition/ocf-types";
+import type { DeepReadonly, OcfMachineContext } from "../../../types/validator";
+import { defineValidator, type CheckObject } from "../checkKit";
+import { issuanceExists } from "./checks";
 
-/*
-CURRENT CHECKS:
-Check that convertible issuance in incoming security_id referenced by transaction exists in current state.
-The date of the convertible issuance referred to in the security_id must have a date equal to or earlier than the date of the convertible conversion
-Any stock issuances with corresponding security IDs referred to in the resulting_security_ids array must exist
-The security_id of the convertible issuance referred to in the security_id variable must not be the security_id related to any other transactions with the exception of a convertible acceptance transaction.
-The dates of any convertible issuances referred to in the resulting_security_ids variables must have a date equal to the date of the convertible conversion
-The stakeholder_id of the convertible issuance referred to in the security_id variable must equal the stakeholder_id of any stock issuances referred to in the resulting_security_ids variable
+// A convertible's conversion right can only point at a stock class, so every id
+// in resulting_security_ids names a stock issuance. The three resulting checks
+// locate those issuances in the package transaction history, dated the same day
+// as the conversion, so the result does not depend on the order the driver
+// processes same-day transactions in.
 
-NOT IMPLEMENTED:
-The quantity_converted variable must equal the sum of any convertible issuances referred to in the resulting_security_ids variable
-*/
+// The stock issuance a resulting id names: the first TX_STOCK_ISSUANCE in
+// package order matching the id, so each resulting check makes one comparison
+// per id even when an id matches more than one issuance.
+const resultingStockIssuance = (
+  context: DeepReadonly<OcfMachineContext>,
+  resultingId: string,
+): DeepReadonly<OCFStockIssuance> | undefined =>
+  context.ocfPackageContent.transactions.find(
+    (ele): ele is DeepReadonly<OCFStockIssuance> =>
+      ele.object_type === "TX_STOCK_ISSUANCE" && ele.security_id === resultingId,
+  );
 
-const valid_tx_convertible_conversion = (context: OcfMachineContext, event: any, isGuard: Boolean) => {
-  let validity = false;
-  const { transactions } = context.ocfPackageContent;
-  let report: any = { transaction_type: "TX_CONVERTIBLE_CONVERSION", transaction_id: event.data.id, transaction_date: event.data.date };
+const noOtherTransactions = {
+  id: "no-other-transactions",
+  severity: "error",
+  description:
+    "No other transaction dated on or before this transaction references its security_id, other than a convertible acceptance.",
+  run: (context, data: { id: string; security_id: string; date: string }) => {
+    const messages: string[] = [];
+    const { transactions } = context.ocfPackageContent;
 
-  // Check that convertible issuance in incoming security_id referenced by transaction exists in current state.
-  let incoming_convertibleIssuance_validity = false;
-  let incoming_stakeholder = "";
-  context.convertibleIssuances.forEach((ele: any) => {
-    if (ele.security_id === event.data.security_id && ele.object_type === "TX_CONVERTIBLE_ISSUANCE") {
-      incoming_convertibleIssuance_validity = true;
-      report.incoming_convertibleIssuance_validity = true;
-    }
-  });
-  if (!incoming_convertibleIssuance_validity) {
-    report.incoming_convertibleIssuance_validity = false;
-  }
-
-  // The date of the convertible issuance referred to in the security_id must have a date equal to or earlier than the date of the convertible conversion
-  let incoming_date_validity = false;
-  transactions.forEach((ele: any) => {
-    if (ele.security_id === event.data.security_id && ele.object_type === "TX_CONVERTIBLE_ISSUANCE") {
-      if (ele.date <= event.data.date) {
-        incoming_date_validity = true;
-        report.incoming_date_validity = true;
-      }
-    }
-  });
-  if (!incoming_date_validity) {
-    report.incoming_date_validity = false;
-  }
-
-  // Any stock issuances with corresponding security IDs referred to in the resulting_security_ids array must exist
-  let resulting_stockIssuances_validity = false;
-  for (let i = 0; i < event.data.resulting_security_ids.length; i++) {
-    const res = event.data.resulting_security_ids[i];
-    resulting_stockIssuances_validity = false;
-    transactions.map((ele: any) => {
-      if (ele.security_id === res && ele.object_type === "TX_STOCK_ISSUANCE") {
-        resulting_stockIssuances_validity = true;
-        report.resulting_convertibleIssuances_validity = true;
+    // One finding per transaction on this security_id dated on or before this
+    // conversion, exempting the issuance, any convertible acceptance, and this
+    // conversion itself. The scan keeps every transaction type in play, so it
+    // narrows by property presence rather than by discriminant: a transaction
+    // carrying no security_id can never reference this one. The conversion
+    // appears in its own history, so the self-exemption is by id, not by type.
+    transactions.forEach((ele) => {
+      if (
+        "security_id" in ele &&
+        ele.security_id === data.security_id &&
+        ele.date <= data.date &&
+        ele.object_type !== "TX_CONVERTIBLE_ISSUANCE" &&
+        ele.object_type !== "TX_CONVERTIBLE_ACCEPTANCE" &&
+        !(ele.object_type === "TX_CONVERTIBLE_CONVERSION" && ele.id === data.id)
+      ) {
+        messages.push(
+          `Another transaction (${ele.id}) references the transaction's security_id.`,
+        );
       }
     });
-    if (!resulting_stockIssuances_validity) {
-      report.resulting_convertibleIssuances_validity = false;
-    }
-  }
 
+    return messages;
+  },
+} satisfies CheckObject;
 
-  // The security_id of the convertible issuance referred to in the security_id variable must not be the security_id related to any other transactions with the exception of a convertible acceptance transaction.
-  let only_transaction_validity = true;
-  transactions.map((ele: any) => {
-    if (ele.security_id === event.data.security_id && ele.object_type !== "TX_CONVERTIBLE_ISSUANCE" && ele.object_type !== "TX_CONVERTIBLE_ACCEPTANCE" && !(ele.object_type === "TX_CONVERTIBLE_CONVERSION" && ele.id === event.data.id)) {
-      only_transaction_validity = false;
-      report.only_transaction_validity = false;
-    }
-  });
-  if (only_transaction_validity) {
-    report.only_transaction_validity = true;
-  }
+const resultingSecurityNamed = {
+  id: "resulting-security-named",
+  severity: "warning",
+  description: "The conversion names at least one resulting security.",
+  run: (_context, data: { resulting_security_ids: string[] }) => {
+    if (data.resulting_security_ids.length > 0) return [];
+    return ["The conversion names no resulting security."];
+  },
+} satisfies CheckObject;
 
-  // The dates of any convertible issuances referred to in the resulting_security_ids must have a date equal to the date of the convertible conversion
-  let resulting_dates_validity = false;
-  for (let i = 0; i < event.data.resulting_security_ids.length; i++) {
-    const res = event.data.resulting_security_ids[i];
-    resulting_dates_validity = false;
-    transactions.map((ele: any) => {
-      if (ele.security_id === res && ele.object_type === "TX_CONVERTIBLE_ISSUANCE" && ele.date === event.data.date) {
-        resulting_dates_validity = true;
-        report.resulting_dates_validity = true;
+const resultingStockExists = {
+  id: "resulting-stock-exists",
+  severity: "error",
+  description:
+    "Each resulting security is a stock issuance present in the package.",
+  run: (context, data: { resulting_security_ids: string[] }) => {
+    const messages: string[] = [];
+
+    // One finding per resulting id with no matching stock issuance in history.
+    data.resulting_security_ids.forEach((resultingId) => {
+      if (resultingStockIssuance(context, resultingId) === undefined) {
+        messages.push(
+          `No stock issuance with security_id ${resultingId} appears in the package.`,
+        );
       }
     });
-    if (!resulting_dates_validity) {
-      report.resulting_dates_validity = false;
-    }
-  }
 
+    return messages;
+  },
+} satisfies CheckObject;
 
-  // The stakeholder_id of the convertible issuance referred to in the security_id variable must equal the stakeholder_id of any convertible issuances referred to in the resulting_security_ids variable
-  let resulting_stakeholder_validity = false;
-  for (let i = 0; i < event.data.resulting_security_ids.length; i++) {
-    const res = event.data.resulting_security_ids[i];
-    resulting_stakeholder_validity = false;
-    transactions.map((ele: any) => {
-      if (ele.security_id === res && ele.object_type === "TX_STOCK_ISSUANCE") {
-        if (ele.stakeholder_id === incoming_stakeholder) {
-          resulting_stakeholder_validity = true;
-          report.resulting_stakeholder_validity = true;
-        }
+const resultingStockDated = {
+  id: "resulting-stock-dated",
+  severity: "error",
+  description:
+    "Each resulting stock issuance is dated the same day as the conversion.",
+  run: (context, data: { resulting_security_ids: string[]; date: string }) => {
+    const messages: string[] = [];
+
+    // Only resulting ids backed by a stock issuance are judged here; a missing
+    // id is solely resulting-stock-exists's concern.
+    data.resulting_security_ids.forEach((resultingId) => {
+      const issuance = resultingStockIssuance(context, resultingId);
+      if (issuance !== undefined && issuance.date !== data.date) {
+        messages.push(
+          `The resulting stock issuance ${resultingId} is dated ${issuance.date}, which differs from the conversion date ${data.date}.`,
+        );
       }
     });
-    if (!resulting_stakeholder_validity) {
-      report.resulting_stakeholder_validity = false;
-    }
-  }
 
-  if (
-    incoming_convertibleIssuance_validity &&
-    incoming_date_validity &&
-    only_transaction_validity &&
-    resulting_dates_validity &&
-    resulting_stakeholder_validity
-  ) {
-    validity = true;
-  }
+    return messages;
+  },
+} satisfies CheckObject;
 
-  const result = isGuard ? validity : report;
+const resultingStockStakeholder = {
+  id: "resulting-stock-stakeholder",
+  severity: "error",
+  description:
+    "Each resulting stock issuance names the stakeholder of the converted convertible issuance.",
+  run: (
+    context,
+    data: { security_id: string; resulting_security_ids: string[] },
+  ) => {
+    const messages: string[] = [];
 
-  return result;
-};
+    // The reference stakeholder comes from the live convertible issuance this
+    // conversion converts — the same record issuance-exists matches. With no live
+    // record, issuance-exists already carries the failure and there is no
+    // reference to compare against, so this check stays silent.
+    const reference = context.convertibleIssuances.find(
+      (ele) => ele.security_id === data.security_id,
+    );
+    if (reference === undefined) return messages;
 
-export default valid_tx_convertible_conversion;
+    // As with the date check, only resulting ids backed by a stock issuance are
+    // judged.
+    data.resulting_security_ids.forEach((resultingId) => {
+      const issuance = resultingStockIssuance(context, resultingId);
+      if (issuance !== undefined && issuance.stakeholder_id !== reference.stakeholder_id) {
+        messages.push(
+          `The resulting stock issuance ${resultingId} names stakeholder ${issuance.stakeholder_id}, which differs from the convertible issuance's stakeholder ${reference.stakeholder_id}.`,
+        );
+      }
+    });
+
+    return messages;
+  },
+} satisfies CheckObject;
+
+// Declared but not implemented: the same metadata with no run, so each reports
+// as a gap and contributes no findings.
+const quantityReconciles = {
+  id: "quantity-reconciles",
+  severity: "error",
+  description:
+    "The quantity converted equals the sum across the resulting securities.",
+} satisfies CheckObject;
+
+const balanceSecurityExists = {
+  id: "balance-security-exists",
+  severity: "error",
+  description:
+    "The balance security, when named, is a convertible issuance present in the package.",
+} satisfies CheckObject;
+
+export const TX_CONVERTIBLE_CONVERSION = defineValidator({
+  transaction: "TX_CONVERTIBLE_CONVERSION",
+  effect: "remove",
+  collection: "convertibleIssuances",
+  checks: [
+    issuanceExists,
+    noOtherTransactions,
+    resultingSecurityNamed,
+    resultingStockExists,
+    resultingStockDated,
+    resultingStockStakeholder,
+    quantityReconciles,
+    balanceSecurityExists,
+  ],
+});

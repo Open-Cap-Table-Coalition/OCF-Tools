@@ -17,6 +17,7 @@ const MIGRATED_KEYS = [
   "TX_CONVERTIBLE_RETRACTION",
   "TX_CONVERTIBLE_CANCELLATION",
   "TX_CONVERTIBLE_TRANSFER",
+  "TX_CONVERTIBLE_CONVERSION",
 ] as const;
 type MigratedKey = (typeof MIGRATED_KEYS)[number];
 
@@ -323,6 +324,250 @@ describe("convertible transfer validity", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Conversion: issuance-exists, no-other-transactions, resulting-security checks
+// ---------------------------------------------------------------------------
+
+describe("convertible conversion validity", () => {
+  const CONVERSION_DATE = "2021-06-01";
+  const conversion = (overrides: Record<string, unknown> = {}) => ({
+    id: "conv-main",
+    object_type: "TX_CONVERTIBLE_CONVERSION",
+    security_id: "conv-sec",
+    resulting_security_ids: ["result-stock"],
+    date: CONVERSION_DATE,
+    ...overrides,
+  });
+  const subject = { object_type: "TX_CONVERTIBLE_CONVERSION", id: "conv-main" };
+  const resultingChecks = ["resulting-stock-exists", "resulting-stock-dated", "resulting-stock-stakeholder"];
+
+  // A live convertible issuance carrying an explicit stakeholder_id — the reference
+  // the stakeholder check reads. The shared issuanceRecord helper omits it.
+  const liveConvertible = (security_id: string, stakeholder_id: string) => ({
+    id: `ci-${security_id}`,
+    object_type: "TX_CONVERTIBLE_ISSUANCE",
+    security_id,
+    stakeholder_id,
+    date: "2020-01-01",
+  });
+  // A resulting stock issuance as it sits in the package history.
+  const stockIssuance = (security_id: string, stakeholder_id: string, date: string) => ({
+    id: `si-${security_id}`,
+    object_type: "TX_STOCK_ISSUANCE",
+    security_id,
+    stakeholder_id,
+    date,
+  });
+
+  it("flags only the missing resulting id when a missing id precedes a present one", () => {
+    const context = contextWith({
+      convertibleIssuances: [liveConvertible("conv-sec", "holder-a")] as any,
+      transactions: [
+        liveConvertible("conv-sec", "holder-a"),
+        stockIssuance("present-stock", "holder-a", CONVERSION_DATE),
+      ],
+    });
+    const findings = runValidator(
+      "TX_CONVERTIBLE_CONVERSION",
+      context,
+      conversion({ resulting_security_ids: ["absent-stock", "present-stock"] }),
+    );
+    // The present id, second in the list, does not mask the missing id, first.
+    expect(findings).toHaveLength(1);
+    expectFindingShape(findings[0], "resulting-stock-exists", subject);
+    expect(findings[0].message).toContain("absent-stock");
+    expect(findings[0].message).not.toContain("present-stock");
+  });
+
+  it("flags a resulting stock issuance dated before or after the conversion, but not one dated the same day", () => {
+    const datedFindings = (stockDate: string) => {
+      const context = contextWith({
+        convertibleIssuances: [liveConvertible("conv-sec", "holder-a")] as any,
+        transactions: [
+          liveConvertible("conv-sec", "holder-a"),
+          stockIssuance("result-stock", "holder-a", stockDate),
+        ],
+      });
+      return runValidator("TX_CONVERTIBLE_CONVERSION", context, conversion()).filter(
+        (f) => f.check === "resulting-stock-dated",
+      );
+    };
+
+    const earlier = datedFindings("2021-05-01");
+    expect(earlier).toHaveLength(1);
+    expectFindingShape(earlier[0], "resulting-stock-dated", subject);
+    expect(earlier[0].message).toContain("differs");
+    expect(earlier[0].message).toContain("result-stock");
+    expect(earlier[0].message).toContain("2021-05-01");
+    expect(earlier[0].message).toContain(CONVERSION_DATE);
+
+    const later = datedFindings("2021-07-01");
+    expect(later).toHaveLength(1);
+    expect(later[0].message).toContain("differs");
+    expect(later[0].message).toContain("2021-07-01");
+
+    expect(datedFindings(CONVERSION_DATE)).toEqual([]);
+  });
+
+  it("flags a resulting stock issuance held by a different stakeholder than the converted issuance", () => {
+    const context = contextWith({
+      convertibleIssuances: [liveConvertible("conv-sec", "holder-alpha")] as any,
+      transactions: [
+        liveConvertible("conv-sec", "holder-alpha"),
+        stockIssuance("result-stock", "holder-beta", CONVERSION_DATE),
+      ],
+    });
+    const findings = runValidator("TX_CONVERTIBLE_CONVERSION", context, conversion()).filter(
+      (f) => f.check === "resulting-stock-stakeholder",
+    );
+    expect(findings).toHaveLength(1);
+    expectFindingShape(findings[0], "resulting-stock-stakeholder", subject);
+    expect(findings[0].message).toContain("result-stock");
+    expect(findings[0].message).toContain("holder-alpha");
+    expect(findings[0].message).toContain("holder-beta");
+  });
+
+  it("says nothing about resulting stakeholders when the converted issuance is absent from the live collection", () => {
+    // No live convertible record for conv-sec, so there is no reference stakeholder
+    // to compare against — yet a resulting stock issuance carrying a stakeholder_id
+    // is present, so the silence is the missing reference, not a missing value.
+    const context = contextWith({
+      convertibleIssuances: [] as any,
+      transactions: [stockIssuance("result-stock", "holder-beta", CONVERSION_DATE)],
+    });
+    const findings = runValidator("TX_CONVERTIBLE_CONVERSION", context, conversion());
+    expect(findings.some((f) => f.check === "resulting-stock-stakeholder")).toBe(false);
+  });
+
+  // A conversion's own record appears in its history scan; each fixture includes it
+  // so the self-exemption by id is exercised, alongside the offender under test.
+  const noOtherFindings = (...offenders: Record<string, unknown>[]) => {
+    const conversionRecord = conversion({ resulting_security_ids: [] });
+    const context = contextWith({
+      convertibleIssuances: [issuanceRecord("conv-sec")] as any,
+      transactions: [issuanceRecord("conv-sec"), conversionRecord, ...offenders],
+    });
+    return runValidator("TX_CONVERTIBLE_CONVERSION", context, conversionRecord).filter(
+      (f) => f.check === "no-other-transactions",
+    );
+  };
+
+  it("ignores an offender dated after the conversion but flags one dated on or before", () => {
+    const retraction = (date: string) => ({ id: "ret-off", object_type: "TX_CONVERTIBLE_RETRACTION", security_id: "conv-sec", date });
+    expect(noOtherFindings(retraction("2021-12-01"))).toEqual([]);
+
+    const sameDay = noOtherFindings(retraction(CONVERSION_DATE));
+    expect(sameDay).toHaveLength(1);
+    expectFindingShape(sameDay[0], "no-other-transactions", subject);
+    expect(sameDay[0].message).toContain("ret-off");
+
+    expect(noOtherFindings(retraction("2021-01-01"))).toHaveLength(1);
+  });
+
+  it("exempts a convertible acceptance dated on or before and never flags the conversion itself", () => {
+    const acceptance = { id: "acc-x", object_type: "TX_CONVERTIBLE_ACCEPTANCE", security_id: "conv-sec", date: "2021-01-01" };
+    expect(noOtherFindings(acceptance)).toEqual([]);
+    // With no other transaction present, the conversion's own history record is never flagged.
+    expect(noOtherFindings()).toEqual([]);
+  });
+
+  it("flags a second conversion sharing the security_id, pinning the self-exemption to the transaction id", () => {
+    const secondConversion = { id: "conv-other", object_type: "TX_CONVERTIBLE_CONVERSION", security_id: "conv-sec", resulting_security_ids: [], date: "2021-01-01" };
+    const findings = noOtherFindings(secondConversion);
+    expect(findings).toHaveLength(1);
+    expectFindingShape(findings[0], "no-other-transactions", subject);
+    expect(findings[0].message).toContain("conv-other");
+  });
+
+  it("warns once when the resulting array is empty and stays silent on the per-element resulting checks", () => {
+    const context = contextWith({
+      convertibleIssuances: [issuanceRecord("conv-sec")] as any,
+      transactions: [issuanceRecord("conv-sec")],
+    });
+    const findings = runValidator(
+      "TX_CONVERTIBLE_CONVERSION",
+      context,
+      conversion({ resulting_security_ids: [] }),
+    );
+    const named = findings.filter((f) => f.check === "resulting-security-named");
+    expect(named).toHaveLength(1);
+    expect(named[0].severity).toBe("warning");
+    expect(named[0].subject).toEqual(subject);
+    for (const check of resultingChecks) {
+      expect(findings.some((f) => f.check === check)).toBe(false);
+    }
+  });
+
+  it("raises no resulting-security-named finding when the resulting array names a security", () => {
+    const context = contextWith({
+      convertibleIssuances: [liveConvertible("conv-sec", "holder-a")] as any,
+      transactions: [
+        liveConvertible("conv-sec", "holder-a"),
+        stockIssuance("result-stock", "holder-a", CONVERSION_DATE),
+      ],
+    });
+    const findings = runValidator("TX_CONVERTIBLE_CONVERSION", context, conversion());
+    expect(findings.some((f) => f.check === "resulting-security-named")).toBe(false);
+  });
+
+  it("declares quantity-reconciles and balance-security-exists as unimplemented gaps", () => {
+    const declared = (TX_DESCRIPTORS.TX_CONVERTIBLE_CONVERSION as { checks: readonly { id: string; implemented?: false }[] }).checks;
+    for (const id of ["quantity-reconciles", "balance-security-exists"]) {
+      expect(declared.some((c) => c.id === id && c.implemented === false)).toBe(true);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Conversion drives the machine end to end
+// ---------------------------------------------------------------------------
+
+describe("convertible conversion drives the machine to completion", () => {
+  // The resulting stock stays history-only — never sent as an event — so the
+  // legacy stock validator is not dragged into these runs; the conversion checks
+  // find it in history regardless.
+  const seedPackage = (transactions: Record<string, unknown>[]) =>
+    baseContext({
+      ocfPackageContent: {
+        ...baseContext().ocfPackageContent,
+        stakeholders: [{ id: "holder-a" }],
+        transactions,
+      } as OcfMachineContext["ocfPackageContent"],
+    });
+
+  it("clears a fully valid conversion, removing the converted convertible and recording no findings", () => {
+    const issuance = { id: "ci-x", object_type: "TX_CONVERTIBLE_ISSUANCE", security_id: "conv-sec", stakeholder_id: "holder-a", date: "2020-01-01" };
+    const conversion = { id: "cv-x", object_type: "TX_CONVERTIBLE_CONVERSION", security_id: "conv-sec", resulting_security_ids: ["stock-sec"], date: "2020-01-02" };
+    const resultingStock = { id: "si-x", object_type: "TX_STOCK_ISSUANCE", security_id: "stock-sec", stakeholder_id: "holder-a", date: "2020-01-02" };
+
+    const actor = startSeeded(seedPackage([issuance, conversion, resultingStock]));
+    actor.send(ev("TX_CONVERTIBLE_ISSUANCE", issuance));
+    actor.send(ev("TX_CONVERTIBLE_CONVERSION", conversion));
+
+    const snapshot = actor.getSnapshot();
+    expect(snapshot.value).toBe("capTable");
+    expect(snapshot.context.findings).toEqual([]);
+    expect(snapshot.context.convertibleIssuances).toEqual([]);
+  });
+
+  it("completes an empty-resulting conversion on its warning alone and still removes the converted convertible", () => {
+    const issuance = { id: "ci-y", object_type: "TX_CONVERTIBLE_ISSUANCE", security_id: "conv-sec", stakeholder_id: "holder-a", date: "2020-01-01" };
+    const conversion = { id: "cv-y", object_type: "TX_CONVERTIBLE_CONVERSION", security_id: "conv-sec", resulting_security_ids: [], date: "2020-01-02" };
+
+    const actor = startSeeded(seedPackage([issuance, conversion]));
+    actor.send(ev("TX_CONVERTIBLE_ISSUANCE", issuance));
+    actor.send(ev("TX_CONVERTIBLE_CONVERSION", conversion));
+
+    const snapshot = actor.getSnapshot();
+    expect(snapshot.value).toBe("capTable");
+    // The lone finding is the warning, which does not block the machine.
+    expect(snapshot.context.findings).toHaveLength(1);
+    expect(snapshot.context.findings[0].check).toBe("resulting-security-named");
+    expect(snapshot.context.findings[0].severity).toBe("warning");
+    expect(snapshot.context.convertibleIssuances).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Existence check: layered failure diagnostics
 // ---------------------------------------------------------------------------
 
@@ -512,6 +757,29 @@ const failingScenarios: Record<MigratedKey, { context: OcfMachineContext; data: 
   TX_CONVERTIBLE_TRANSFER: [
     { context: contextWith({ transactions: [issuanceRecord("sec1")] }), data: txRecord("TX_CONVERTIBLE_TRANSFER", "x1", "sec1", "2021-01-01") },
   ],
+  TX_CONVERTIBLE_CONVERSION: [
+    // Missing issuance and an empty resulting array: issuance-exists and the
+    // resulting-security-named warning.
+    {
+      context: contextWith({ transactions: [] }),
+      data: { id: "cv1", object_type: "TX_CONVERTIBLE_CONVERSION", security_id: "sec1", resulting_security_ids: [], date: "2021-01-01" },
+    },
+    // A live issuance clears issuance-exists, leaving the remaining four checks
+    // to fire: an offender for no-other-transactions, and three resulting ids
+    // that are respectively absent, wrongly dated, and wrongly held.
+    {
+      context: contextWith({
+        convertibleIssuances: [{ id: "ci-sec1", object_type: "TX_CONVERTIBLE_ISSUANCE", security_id: "sec1", stakeholder_id: "holder-ref", date: "2020-01-01" }] as any,
+        transactions: [
+          { id: "ci-sec1", object_type: "TX_CONVERTIBLE_ISSUANCE", security_id: "sec1", stakeholder_id: "holder-ref", date: "2020-01-01" },
+          txRecord("TX_CONVERTIBLE_RETRACTION", "ret-off", "sec1", "2020-06-01"),
+          { id: "si-early", object_type: "TX_STOCK_ISSUANCE", security_id: "stock-early", stakeholder_id: "holder-ref", date: "2020-05-01" },
+          { id: "si-other", object_type: "TX_STOCK_ISSUANCE", security_id: "stock-other-holder", stakeholder_id: "holder-other", date: "2021-01-01" },
+        ],
+      }),
+      data: { id: "cv1", object_type: "TX_CONVERTIBLE_CONVERSION", security_id: "sec1", resulting_security_ids: ["stock-absent", "stock-early", "stock-other-holder"], date: "2021-01-01" },
+    },
+  ],
 };
 
 /** Every check id emitted across a module's failing scenarios. */
@@ -538,9 +806,9 @@ describe("declared and emitted checks stay consistent across the family", () => 
     expect(declared.some((c) => c.id === "no-other-transactions" && c.implemented === false)).toBe(true);
   });
 
-  it("leaves conversion on the legacy convention", () => {
-    expect("legacyValidate" in TX_DESCRIPTORS.TX_CONVERTIBLE_CONVERSION).toBe(true);
-    expect("validate" in TX_DESCRIPTORS.TX_CONVERTIBLE_CONVERSION).toBe(false);
+  it("carries conversion on the graded convention", () => {
+    expect("validate" in TX_DESCRIPTORS.TX_CONVERTIBLE_CONVERSION).toBe(true);
+    expect("legacyValidate" in TX_DESCRIPTORS.TX_CONVERTIBLE_CONVERSION).toBe(false);
   });
 });
 
