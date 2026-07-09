@@ -59,3 +59,38 @@ export const issuanceExists = {
     return messages;
   },
 } satisfies CheckObject;
+
+/**
+ * No other transaction dated on or before this transaction references its
+ * security_id, other than a convertible acceptance. One finding per offending
+ * transaction. The scan keeps every transaction type in play, so it narrows by
+ * property presence rather than by discriminant: a transaction carrying no
+ * security_id can never reference this one. The transaction under validation
+ * appears in its own history, so it is exempted by id.
+ */
+export const noOtherTransactions = {
+  id: "no-other-transactions",
+  severity: "error",
+  description:
+    "No other transaction dated on or before this transaction references its security_id, other than a convertible acceptance.",
+  run: (context, data: { id: string; security_id: string; date: string }) => {
+    const messages: string[] = [];
+
+    context.ocfPackageContent.transactions.forEach((ele) => {
+      if (
+        "security_id" in ele &&
+        ele.security_id === data.security_id &&
+        ele.date <= data.date &&
+        ele.object_type !== "TX_CONVERTIBLE_ISSUANCE" &&
+        ele.object_type !== "TX_CONVERTIBLE_ACCEPTANCE" &&
+        ele.id !== data.id
+      ) {
+        messages.push(
+          `Another transaction (${ele.id}) references the transaction's security_id.`,
+        );
+      }
+    });
+
+    return messages;
+  },
+} satisfies CheckObject;
