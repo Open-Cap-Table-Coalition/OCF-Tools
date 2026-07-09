@@ -1,127 +1,125 @@
-import { OcfMachineContext } from "../../ocfMachine";
+import type { OCFStockIssuance } from "@opencaptablecoalition/ocf-types";
+import type { DeepReadonly, OcfMachineContext } from "../../../types/validator";
+import { defineValidator, type CheckObject } from "../checkKit";
+import { issuanceExists, noOtherTransactions } from "./checks";
 
-/*
-CURRENT CHECKS:
-Check that warrant issuance in incoming security_id referenced by transaction exists in current state.
-The date of the warrant issuance referred to in the security_id must have a date equal to or earlier than the date of the warrant exercise
-Any stock issuances with corresponding security IDs referred to in the resulting_security_ids array must exist
-The security_id of the warrant issuance referred to in the security_id variable must not be the security_id related to any other transactions with the exception of a warrant acceptance transaction.
-The dates of any warrant issuances referred to in the resulting_security_ids variables must have a date equal to the date of the warrant exercise
-The stakeholder_id of the warrant issuance referred to in the security_id variable must equal the stakeholder_id of any stock issuances referred to in the resulting_security_ids variable
+// A warrant's conversion right can only point at a stock class, so every id in
+// resulting_security_ids names a stock issuance. The three resulting checks
+// locate those issuances in the package transaction history, dated the same day
+// as the exercise, so the result does not depend on the order the driver
+// processes same-day transactions in.
 
-NOT IMPLEMENTED:
-The quantity_converted variable must equal the sum of any warrant issuances referred to in the resulting_security_ids variable
-*/
+// The stock issuance a resulting id names: the first TX_STOCK_ISSUANCE in
+// package order matching the id, so each resulting check makes one comparison
+// per id even when an id matches more than one issuance.
+const resultingStockIssuance = (
+  context: DeepReadonly<OcfMachineContext>,
+  resultingId: string,
+): DeepReadonly<OCFStockIssuance> | undefined =>
+  context.ocfPackageContent.transactions.find(
+    (ele): ele is DeepReadonly<OCFStockIssuance> =>
+      ele.object_type === "TX_STOCK_ISSUANCE" && ele.security_id === resultingId,
+  );
 
-const valid_tx_warrant_exercise = (context: OcfMachineContext, event: any, isGuard: Boolean) => {
-  let validity = false;
-  const { transactions } = context.ocfPackageContent;
-  let report: any = { transaction_type: "TX_WARRANT_EXERCISE", transaction_id: event.data.id, transaction_date: event.data.date };
+const resultingSecurityNamed = {
+  id: "resulting-security-named",
+  severity: "warning",
+  description: "The exercise names at least one resulting security.",
+  run: (_context, data: { resulting_security_ids: string[] }) => {
+    if (data.resulting_security_ids.length > 0) return [];
+    return ["The exercise names no resulting security."];
+  },
+} satisfies CheckObject;
 
-  // Check that warrant issuance in incoming security_id referenced by transaction exists in current state.
-  let incoming_warrantIssuance_validity = false;
-  let incoming_stakeholder = "";
-  context.warrantIssuances.forEach((ele: any) => {
-    if (ele.security_id === event.data.security_id && ele.object_type === "TX_WARRANT_ISSUANCE") {
-      incoming_warrantIssuance_validity = true;
-      report.incoming_warrantIssuance_validity = true;
-    }
-  });
-  if (!incoming_warrantIssuance_validity) {
-    report.incoming_warrantIssuance_validity = false;
-  }
+const resultingStockExists = {
+  id: "resulting-stock-exists",
+  severity: "error",
+  description:
+    "Each resulting security is a stock issuance present in the package.",
+  run: (context, data: { resulting_security_ids: string[] }) => {
+    const messages: string[] = [];
 
-  // The date of the warrant issuance referred to in the security_id must have a date equal to or earlier than the date of the warrant exercise
-  let incoming_date_validity = false;
-  transactions.forEach((ele: any) => {
-    if (ele.security_id === event.data.security_id && ele.object_type === "TX_WARRANT_ISSUANCE") {
-      if (ele.date <= event.data.date) {
-        incoming_date_validity = true;
-        report.incoming_date_validity = true;
-      }
-    }
-  });
-  if (!incoming_date_validity) {
-    report.incoming_date_validity = false;
-  }
-
-  // Any stock issuances with corresponding security IDs referred to in the resulting_security_ids array must exist
-  let resulting_stockIssuances_validity = false;
-  for (let i = 0; i < event.data.resulting_security_ids.length; i++) {
-    const res = event.data.resulting_security_ids[i];
-    resulting_stockIssuances_validity = false;
-    transactions.map((ele: any) => {
-      if (ele.security_id === res && ele.object_type === "TX_STOCK_ISSUANCE") {
-        resulting_stockIssuances_validity = true;
-        report.resulting_warrantIssuances_validity = true;
+    // One finding per resulting id with no matching stock issuance in history.
+    data.resulting_security_ids.forEach((resultingId) => {
+      if (resultingStockIssuance(context, resultingId) === undefined) {
+        messages.push(
+          `No stock issuance with security_id ${resultingId} appears in the package.`,
+        );
       }
     });
-    if (!resulting_stockIssuances_validity) {
-      report.resulting_warrantIssuances_validity = false;
-    }
-  }
 
+    return messages;
+  },
+} satisfies CheckObject;
 
-  // The security_id of the warrant issuance referred to in the security_id variable must not be the security_id related to any other transactions with the exception of a warrant acceptance transaction.
-  let only_transaction_validity = true;
-  transactions.map((ele: any) => {
-    if (ele.security_id === event.data.security_id && ele.object_type !== "TX_WARRANT_ISSUANCE" && ele.object_type !== "TX_WARRANT_ACCEPTANCE" && !(ele.object_type === "TX_WARRANT_EXERCISE" && ele.id === event.data.id)) {
-      only_transaction_validity = false;
-      report.only_transaction_validity = false;
-    }
-  });
-  if (only_transaction_validity) {
-    report.only_transaction_validity = true;
-  }
+const resultingStockDated = {
+  id: "resulting-stock-dated",
+  severity: "error",
+  description:
+    "Each resulting stock issuance is dated the same day as the exercise.",
+  run: (context, data: { resulting_security_ids: string[]; date: string }) => {
+    const messages: string[] = [];
 
-  // The dates of any warrant issuances referred to in the resulting_security_ids must have a date equal to the date of the warrant exercise
-  let resulting_dates_validity = false;
-  for (let i = 0; i < event.data.resulting_security_ids.length; i++) {
-    const res = event.data.resulting_security_ids[i];
-    resulting_dates_validity = false;
-    transactions.map((ele: any) => {
-      if (ele.security_id === res && ele.object_type === "TX_WARRANT_ISSUANCE" && ele.date === event.data.date) {
-        resulting_dates_validity = true;
-        report.resulting_dates_validity = true;
+    // Only resulting ids backed by a stock issuance are judged here; a missing
+    // id is solely resulting-stock-exists's concern.
+    data.resulting_security_ids.forEach((resultingId) => {
+      const issuance = resultingStockIssuance(context, resultingId);
+      if (issuance !== undefined && issuance.date !== data.date) {
+        messages.push(
+          `The resulting stock issuance ${resultingId} is dated ${issuance.date}, which differs from the exercise date ${data.date}.`,
+        );
       }
     });
-    if (!resulting_dates_validity) {
-      report.resulting_dates_validity = false;
-    }
-  }
 
+    return messages;
+  },
+} satisfies CheckObject;
 
-  // The stakeholder_id of the warrant issuance referred to in the security_id variable must equal the stakeholder_id of any warrant issuances referred to in the resulting_security_ids variable
-  let resulting_stakeholder_validity = false;
-  for (let i = 0; i < event.data.resulting_security_ids.length; i++) {
-    const res = event.data.resulting_security_ids[i];
-    resulting_stakeholder_validity = false;
-    transactions.map((ele: any) => {
-      if (ele.security_id === res && ele.object_type === "TX_STOCK_ISSUANCE") {
-        if (ele.stakeholder_id === incoming_stakeholder) {
-          resulting_stakeholder_validity = true;
-          report.resulting_stakeholder_validity = true;
-        }
+const resultingStockStakeholder = {
+  id: "resulting-stock-stakeholder",
+  severity: "error",
+  description:
+    "Each resulting stock issuance names the stakeholder of the exercised warrant issuance.",
+  run: (
+    context,
+    data: { security_id: string; resulting_security_ids: string[] },
+  ) => {
+    const messages: string[] = [];
+
+    // The reference stakeholder comes from the live warrant issuance this
+    // exercise references — the same record issuance-exists matches. With no live
+    // record, issuance-exists already carries the failure and there is no
+    // reference to compare against, so this check stays silent.
+    const reference = context.warrantIssuances.find(
+      (ele) => ele.security_id === data.security_id,
+    );
+    if (reference === undefined) return messages;
+
+    // As with the date check, only resulting ids backed by a stock issuance are
+    // judged.
+    data.resulting_security_ids.forEach((resultingId) => {
+      const issuance = resultingStockIssuance(context, resultingId);
+      if (issuance !== undefined && issuance.stakeholder_id !== reference.stakeholder_id) {
+        messages.push(
+          `The resulting stock issuance ${resultingId} names stakeholder ${issuance.stakeholder_id}, which differs from the warrant issuance's stakeholder ${reference.stakeholder_id}.`,
+        );
       }
     });
-    if (!resulting_stakeholder_validity) {
-      report.resulting_stakeholder_validity = false;
-    }
-  }
 
-  if (
-    incoming_warrantIssuance_validity &&
-    incoming_date_validity &&
-    only_transaction_validity &&
-    resulting_dates_validity &&
-    resulting_stakeholder_validity
-  ) {
-    validity = true;
-  }
+    return messages;
+  },
+} satisfies CheckObject;
 
-  const result = isGuard ? validity : report;
-
-  return result;
-};
-
-export default valid_tx_warrant_exercise;
+export const TX_WARRANT_EXERCISE = defineValidator({
+  transaction: "TX_WARRANT_EXERCISE",
+  effect: "remove",
+  collection: "warrantIssuances",
+  checks: [
+    issuanceExists,
+    noOtherTransactions,
+    resultingSecurityNamed,
+    resultingStockExists,
+    resultingStockDated,
+    resultingStockStakeholder,
+  ],
+});

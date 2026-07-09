@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { TX_DESCRIPTORS } from "../ocf_validator/ocfMachine";
+import validators from "../ocf_validator/validators";
 import type { OcfMachineContext } from "../types/validator";
 import {
   baseContext,
@@ -17,6 +18,7 @@ const MIGRATED_KEYS = [
   "TX_WARRANT_RETRACTION",
   "TX_WARRANT_CANCELLATION",
   "TX_WARRANT_TRANSFER",
+  "TX_WARRANT_EXERCISE",
 ] as const;
 type MigratedKey = (typeof MIGRATED_KEYS)[number];
 
@@ -323,6 +325,307 @@ describe("warrant transfer validity", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Exercise: issuance-exists, no-other-transactions, resulting-security checks
+// ---------------------------------------------------------------------------
+
+describe("warrant exercise validity", () => {
+  const EXERCISE_DATE = "2021-06-01";
+  const exercise = (overrides: Record<string, unknown> = {}) => ({
+    id: "ex-main",
+    object_type: "TX_WARRANT_EXERCISE",
+    security_id: "war-sec",
+    resulting_security_ids: ["result-stock"],
+    date: EXERCISE_DATE,
+    ...overrides,
+  });
+  const subject = { object_type: "TX_WARRANT_EXERCISE", id: "ex-main" };
+  const resultingChecks = ["resulting-stock-exists", "resulting-stock-dated", "resulting-stock-stakeholder"];
+
+  // A live warrant issuance carrying an explicit stakeholder_id — the reference
+  // the stakeholder check reads. The shared issuanceRecord helper omits it.
+  const liveWarrant = (security_id: string, stakeholder_id: string) => ({
+    id: `wi-${security_id}`,
+    object_type: "TX_WARRANT_ISSUANCE",
+    security_id,
+    stakeholder_id,
+    date: "2020-01-01",
+  });
+  // A resulting stock issuance as it sits in the package history.
+  const stockIssuance = (security_id: string, stakeholder_id: string, date: string) => ({
+    id: `si-${security_id}`,
+    object_type: "TX_STOCK_ISSUANCE",
+    security_id,
+    stakeholder_id,
+    date,
+  });
+
+  it("emits one resulting-stock-exists finding per missing resulting id", () => {
+    const context = contextWith({
+      warrantIssuances: [liveWarrant("war-sec", "holder-a")] as any,
+      transactions: [liveWarrant("war-sec", "holder-a")],
+    });
+    const findings = runValidator(
+      "TX_WARRANT_EXERCISE",
+      context,
+      exercise({ resulting_security_ids: ["absent-one", "absent-two"] }),
+    ).filter((f) => f.check === "resulting-stock-exists");
+    expect(findings).toHaveLength(2);
+    for (const finding of findings) expectFindingShape(finding, "resulting-stock-exists", subject);
+    const messages = findings.map((f) => f.message).join("\n");
+    expect(messages).toContain("absent-one");
+    expect(messages).toContain("absent-two");
+  });
+
+  it("flags only the missing resulting id when a missing id precedes a present one", () => {
+    const context = contextWith({
+      warrantIssuances: [liveWarrant("war-sec", "holder-a")] as any,
+      transactions: [
+        liveWarrant("war-sec", "holder-a"),
+        stockIssuance("present-stock", "holder-a", EXERCISE_DATE),
+      ],
+    });
+    const findings = runValidator(
+      "TX_WARRANT_EXERCISE",
+      context,
+      exercise({ resulting_security_ids: ["absent-stock", "present-stock"] }),
+    );
+    // The present id, second in the list, does not mask the missing id, first.
+    expect(findings).toHaveLength(1);
+    expectFindingShape(findings[0], "resulting-stock-exists", subject);
+    expect(findings[0].message).toContain("absent-stock");
+    expect(findings[0].message).not.toContain("present-stock");
+  });
+
+  it("flags a resulting stock issuance dated before or after the exercise, but not one dated the same day", () => {
+    const datedFindings = (stockDate: string) => {
+      const context = contextWith({
+        warrantIssuances: [liveWarrant("war-sec", "holder-a")] as any,
+        transactions: [
+          liveWarrant("war-sec", "holder-a"),
+          stockIssuance("result-stock", "holder-a", stockDate),
+        ],
+      });
+      return runValidator("TX_WARRANT_EXERCISE", context, exercise()).filter(
+        (f) => f.check === "resulting-stock-dated",
+      );
+    };
+
+    const earlier = datedFindings("2021-05-01");
+    expect(earlier).toHaveLength(1);
+    expectFindingShape(earlier[0], "resulting-stock-dated", subject);
+    expect(earlier[0].message).toContain("differs");
+    expect(earlier[0].message).toContain("result-stock");
+    expect(earlier[0].message).toContain("2021-05-01");
+    expect(earlier[0].message).toContain(EXERCISE_DATE);
+
+    const later = datedFindings("2021-07-01");
+    expect(later).toHaveLength(1);
+    expect(later[0].message).toContain("differs");
+    expect(later[0].message).toContain("2021-07-01");
+
+    expect(datedFindings(EXERCISE_DATE)).toEqual([]);
+  });
+
+  it("flags a wrongly-dated resulting id before a correctly-dated one and ignores a resulting id with no backing issuance", () => {
+    const context = contextWith({
+      warrantIssuances: [liveWarrant("war-sec", "holder-a")] as any,
+      transactions: [
+        liveWarrant("war-sec", "holder-a"),
+        stockIssuance("wrong-date", "holder-a", "2021-05-01"),
+        stockIssuance("right-date", "holder-a", EXERCISE_DATE),
+      ],
+    });
+    const findings = runValidator(
+      "TX_WARRANT_EXERCISE",
+      context,
+      exercise({ resulting_security_ids: ["wrong-date", "right-date", "absent-stock"] }),
+    ).filter((f) => f.check === "resulting-stock-dated");
+    // The correctly-dated id, second, does not mask the wrong-dated id, first; the
+    // absent id is judged only by resulting-stock-exists.
+    expect(findings).toHaveLength(1);
+    expectFindingShape(findings[0], "resulting-stock-dated", subject);
+    expect(findings[0].message).toContain("wrong-date");
+    expect(findings[0].message).not.toContain("right-date");
+    expect(findings[0].message).not.toContain("absent-stock");
+  });
+
+  it("flags a resulting stock issuance held by a different stakeholder than the exercised warrant issuance", () => {
+    const context = contextWith({
+      warrantIssuances: [liveWarrant("war-sec", "holder-alpha")] as any,
+      transactions: [
+        liveWarrant("war-sec", "holder-alpha"),
+        stockIssuance("result-stock", "holder-beta", EXERCISE_DATE),
+      ],
+    });
+    const findings = runValidator("TX_WARRANT_EXERCISE", context, exercise()).filter(
+      (f) => f.check === "resulting-stock-stakeholder",
+    );
+    expect(findings).toHaveLength(1);
+    expectFindingShape(findings[0], "resulting-stock-stakeholder", subject);
+    expect(findings[0].message).toContain("result-stock");
+    expect(findings[0].message).toContain("holder-alpha");
+    expect(findings[0].message).toContain("holder-beta");
+  });
+
+  it("flags a mismatching resulting id before a matching one and ignores a resulting id with no backing issuance", () => {
+    const context = contextWith({
+      warrantIssuances: [liveWarrant("war-sec", "holder-match")] as any,
+      transactions: [
+        liveWarrant("war-sec", "holder-match"),
+        stockIssuance("wrong-holder", "holder-other", EXERCISE_DATE),
+        stockIssuance("right-holder", "holder-match", EXERCISE_DATE),
+      ],
+    });
+    const findings = runValidator(
+      "TX_WARRANT_EXERCISE",
+      context,
+      exercise({ resulting_security_ids: ["wrong-holder", "right-holder", "absent-stock"] }),
+    ).filter((f) => f.check === "resulting-stock-stakeholder");
+    // The matching id, second, does not mask the mismatching id, first; the absent
+    // id is judged only by resulting-stock-exists.
+    expect(findings).toHaveLength(1);
+    expectFindingShape(findings[0], "resulting-stock-stakeholder", subject);
+    expect(findings[0].message).toContain("wrong-holder");
+    expect(findings[0].message).not.toContain("right-holder");
+    expect(findings[0].message).not.toContain("absent-stock");
+  });
+
+  it("says nothing about resulting stakeholders when the exercised warrant issuance is absent from the live collection", () => {
+    // No live warrant record for war-sec, so there is no reference stakeholder to
+    // compare against — yet a resulting stock issuance carrying a stakeholder_id is
+    // present, so the silence is the missing reference, not a missing value.
+    const context = contextWith({
+      warrantIssuances: [] as any,
+      transactions: [stockIssuance("result-stock", "holder-beta", EXERCISE_DATE)],
+    });
+    const findings = runValidator("TX_WARRANT_EXERCISE", context, exercise());
+    expect(findings.some((f) => f.check === "resulting-stock-stakeholder")).toBe(false);
+    expect(findings.some((f) => f.check === "issuance-exists")).toBe(true);
+  });
+
+  // An exercise's own record appears in its history scan; each fixture includes it
+  // so the self-exemption by id is exercised, alongside the offender under test.
+  const noOtherFindings = (...offenders: Record<string, unknown>[]) => {
+    const exerciseRecord = exercise({ resulting_security_ids: [] });
+    const context = contextWith({
+      warrantIssuances: [issuanceRecord("war-sec")] as any,
+      transactions: [issuanceRecord("war-sec"), exerciseRecord, ...offenders],
+    });
+    return runValidator("TX_WARRANT_EXERCISE", context, exerciseRecord).filter(
+      (f) => f.check === "no-other-transactions",
+    );
+  };
+
+  it("ignores an offender dated after the exercise but flags one dated on or before", () => {
+    const retraction = (date: string) => ({ id: "ret-off", object_type: "TX_WARRANT_RETRACTION", security_id: "war-sec", date });
+    expect(noOtherFindings(retraction("2021-12-01"))).toEqual([]);
+
+    const sameDay = noOtherFindings(retraction(EXERCISE_DATE));
+    expect(sameDay).toHaveLength(1);
+    expectFindingShape(sameDay[0], "no-other-transactions", subject);
+    expect(sameDay[0].message).toContain("ret-off");
+
+    expect(noOtherFindings(retraction("2021-01-01"))).toHaveLength(1);
+  });
+
+  it("exempts a warrant acceptance dated on or before and never flags the exercise itself", () => {
+    const acceptance = { id: "acc-x", object_type: "TX_WARRANT_ACCEPTANCE", security_id: "war-sec", date: "2021-01-01" };
+    expect(noOtherFindings(acceptance)).toEqual([]);
+    // With no other transaction present, the exercise's own history record is never flagged.
+    expect(noOtherFindings()).toEqual([]);
+  });
+
+  it("flags a second exercise sharing the security_id, pinning the self-exemption to the transaction id", () => {
+    const secondExercise = { id: "ex-other", object_type: "TX_WARRANT_EXERCISE", security_id: "war-sec", resulting_security_ids: [], date: "2021-01-01" };
+    const findings = noOtherFindings(secondExercise);
+    expect(findings).toHaveLength(1);
+    expectFindingShape(findings[0], "no-other-transactions", subject);
+    expect(findings[0].message).toContain("ex-other");
+  });
+
+  it("warns once when the resulting array is empty and stays silent on the per-element resulting checks", () => {
+    const context = contextWith({
+      warrantIssuances: [issuanceRecord("war-sec")] as any,
+      transactions: [issuanceRecord("war-sec")],
+    });
+    const findings = runValidator(
+      "TX_WARRANT_EXERCISE",
+      context,
+      exercise({ resulting_security_ids: [] }),
+    );
+    const named = findings.filter((f) => f.check === "resulting-security-named");
+    expect(named).toHaveLength(1);
+    expect(named[0].severity).toBe("warning");
+    expect(named[0].subject).toEqual(subject);
+    for (const check of resultingChecks) {
+      expect(findings.some((f) => f.check === check)).toBe(false);
+    }
+  });
+
+  it("raises no resulting-security-named finding when the resulting array names a security", () => {
+    const context = contextWith({
+      warrantIssuances: [liveWarrant("war-sec", "holder-a")] as any,
+      transactions: [
+        liveWarrant("war-sec", "holder-a"),
+        stockIssuance("result-stock", "holder-a", EXERCISE_DATE),
+      ],
+    });
+    const findings = runValidator("TX_WARRANT_EXERCISE", context, exercise());
+    expect(findings.some((f) => f.check === "resulting-security-named")).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Exercise drives the machine end to end
+// ---------------------------------------------------------------------------
+
+describe("warrant exercise drives the machine to completion", () => {
+  // The resulting stock stays history-only — never sent as an event — so the
+  // legacy stock validator is not dragged into these runs; the exercise checks
+  // find it in history regardless.
+  const seedPackage = (transactions: Record<string, unknown>[]) =>
+    baseContext({
+      ocfPackageContent: {
+        ...baseContext().ocfPackageContent,
+        stakeholders: [{ id: "holder-a" }],
+        transactions,
+      } as OcfMachineContext["ocfPackageContent"],
+    });
+
+  it("clears a fully valid exercise, removing the exercised warrant and recording no findings", () => {
+    const issuance = { id: "wi-x", object_type: "TX_WARRANT_ISSUANCE", security_id: "war-sec", stakeholder_id: "holder-a", date: "2020-01-01" };
+    const exercise = { id: "ex-x", object_type: "TX_WARRANT_EXERCISE", security_id: "war-sec", resulting_security_ids: ["stock-sec"], date: "2020-01-02" };
+    const resultingStock = { id: "si-x", object_type: "TX_STOCK_ISSUANCE", security_id: "stock-sec", stakeholder_id: "holder-a", date: "2020-01-02" };
+
+    const actor = startSeeded(seedPackage([issuance, exercise, resultingStock]));
+    actor.send(ev("TX_WARRANT_ISSUANCE", issuance));
+    actor.send(ev("TX_WARRANT_EXERCISE", exercise));
+
+    const snapshot = actor.getSnapshot();
+    expect(snapshot.value).toBe("capTable");
+    expect(snapshot.context.findings).toEqual([]);
+    expect(snapshot.context.warrantIssuances).toEqual([]);
+  });
+
+  it("completes an empty-resulting exercise on its warning alone and still removes the exercised warrant", () => {
+    const issuance = { id: "wi-y", object_type: "TX_WARRANT_ISSUANCE", security_id: "war-sec", stakeholder_id: "holder-a", date: "2020-01-01" };
+    const exercise = { id: "ex-y", object_type: "TX_WARRANT_EXERCISE", security_id: "war-sec", resulting_security_ids: [], date: "2020-01-02" };
+
+    const actor = startSeeded(seedPackage([issuance, exercise]));
+    actor.send(ev("TX_WARRANT_ISSUANCE", issuance));
+    actor.send(ev("TX_WARRANT_EXERCISE", exercise));
+
+    const snapshot = actor.getSnapshot();
+    expect(snapshot.value).toBe("capTable");
+    // The lone finding is the warning, which does not block the machine.
+    expect(snapshot.context.findings).toHaveLength(1);
+    expect(snapshot.context.findings[0].check).toBe("resulting-security-named");
+    expect(snapshot.context.findings[0].severity).toBe("warning");
+    expect(snapshot.context.warrantIssuances).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Existence check: layered failure diagnostics
 // ---------------------------------------------------------------------------
 
@@ -512,6 +815,29 @@ const failingScenarios: Record<MigratedKey, { context: OcfMachineContext; data: 
   TX_WARRANT_TRANSFER: [
     { context: contextWith({ transactions: [issuanceRecord("sec1")] }), data: txRecord("TX_WARRANT_TRANSFER", "x1", "sec1", "2021-01-01") },
   ],
+  TX_WARRANT_EXERCISE: [
+    // Missing issuance and an empty resulting array: issuance-exists and the
+    // resulting-security-named warning.
+    {
+      context: contextWith({ transactions: [] }),
+      data: { id: "ex1", object_type: "TX_WARRANT_EXERCISE", security_id: "sec1", resulting_security_ids: [], date: "2021-01-01" },
+    },
+    // A live issuance clears issuance-exists, leaving the remaining four checks
+    // to fire: an offender for no-other-transactions, and three resulting ids
+    // that are respectively absent, wrongly dated, and wrongly held.
+    {
+      context: contextWith({
+        warrantIssuances: [{ id: "wi-sec1", object_type: "TX_WARRANT_ISSUANCE", security_id: "sec1", stakeholder_id: "holder-ref", date: "2020-01-01" }] as any,
+        transactions: [
+          { id: "wi-sec1", object_type: "TX_WARRANT_ISSUANCE", security_id: "sec1", stakeholder_id: "holder-ref", date: "2020-01-01" },
+          txRecord("TX_WARRANT_RETRACTION", "ret-off", "sec1", "2020-06-01"),
+          { id: "si-early", object_type: "TX_STOCK_ISSUANCE", security_id: "stock-early", stakeholder_id: "holder-ref", date: "2020-05-01" },
+          { id: "si-other", object_type: "TX_STOCK_ISSUANCE", security_id: "stock-other-holder", stakeholder_id: "holder-other", date: "2021-01-01" },
+        ],
+      }),
+      data: { id: "ex1", object_type: "TX_WARRANT_EXERCISE", security_id: "sec1", resulting_security_ids: ["stock-absent", "stock-early", "stock-other-holder"], date: "2021-01-01" },
+    },
+  ],
 };
 
 /** Every check id emitted across a module's failing scenarios. */
@@ -538,9 +864,12 @@ describe("declared and emitted checks stay consistent across the family", () => 
     expect(declared.some((c) => c.id === "no-other-transactions" && c.implemented === false)).toBe(true);
   });
 
-  it("leaves warrant exercise on the legacy convention", () => {
-    expect("legacyValidate" in TX_DESCRIPTORS.TX_WARRANT_EXERCISE).toBe(true);
-    expect("validate" in TX_DESCRIPTORS.TX_WARRANT_EXERCISE).toBe(false);
+  it("carries warrant exercise on the graded convention with no legacy validator", () => {
+    expect("validate" in TX_DESCRIPTORS.TX_WARRANT_EXERCISE).toBe(true);
+    expect("legacyValidate" in TX_DESCRIPTORS.TX_WARRANT_EXERCISE).toBe(false);
+    // A stray default export would still register a legacy key here, so assert its
+    // absence directly rather than trusting the descriptor swap alone.
+    expect("valid_tx_warrant_exercise" in validators).toBe(false);
   });
 });
 
