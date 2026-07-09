@@ -63,7 +63,7 @@ const validate: GradedValidator<Acceptance> = (context, data) => {
     findings.push({
       severity: "error",
       check: "date-order",
-      message: `The transaction is dated before the warrant issuance it references (security_id ${data.security_id}).`,
+      message: `The transaction is not dated on or after a warrant issuance with security_id ${data.security_id}.`,
       subject,
     });
   }
