@@ -119,9 +119,9 @@ export function familyChecksFor({ name, collection, issuance, acceptance }: Fami
   /**
    * Nothing dated on or before this transaction refers to this security except
    * its issuance, acceptances, and the transaction being validated. A later
-   * transaction can't make this one invalid. The cancellation and conversion
-   * validators run this check; the transfer validator only declares it, as a
-   * gap (see `asGap`).
+   * transaction can't make this one invalid. The cancellation, conversion, and
+   * exercise validators run this check; the transfer validator only declares
+   * it, as a gap (see `asGap`).
    */
   const noOtherTransactions = {
     id: "no-other-transactions",

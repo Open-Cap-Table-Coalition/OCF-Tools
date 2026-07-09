@@ -6,7 +6,6 @@ import valid_tx_stock_conversion from './stock/tx_stock_conversion';
 import valid_tx_stock_reissuance from './stock/tx_stock_reissuance';
 import valid_tx_stock_repurchase from './stock/tx_stock_repurchase';
 import valid_tx_stock_transfer from './stock/tx_stock_transfer';
-import valid_tx_warrant_exercise from './warrant/tx_warrant_exercise';
 import valid_tx_equity_compensation_issuance from './equity_compensation/tx_equity_compensation_issuance';
 import valid_tx_equity_compensation_retraction from './equity_compensation/tx_equity_compensation_retraction';
 import valid_tx_equity_compensation_acceptance from './equity_compensation/tx_equity_compensation_acceptance';
@@ -39,7 +38,6 @@ const validators = {
   valid_tx_stock_reissuance,
   valid_tx_stock_repurchase,
   valid_tx_stock_transfer,
-  valid_tx_warrant_exercise,
   valid_tx_equity_compensation_issuance,
   valid_tx_equity_compensation_retraction,
   valid_tx_equity_compensation_acceptance,
