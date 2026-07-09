@@ -317,7 +317,10 @@ export function failureResult(
   context: OcfMachineContext,
   event: ValidatorEvent,
 ): string {
-  const subject = "data" in event && "id" in event.data ? event.data.id : event.type;
+  const subject =
+    typeof event.data === "object" && event.data !== null && "id" in event.data
+      ? event.data.id
+      : event.type;
   if (descriptor && "validate" in descriptor) {
     return failureMessage(context, subject, JSON.stringify(context.lastErrorFindings, null, 2));
   }
