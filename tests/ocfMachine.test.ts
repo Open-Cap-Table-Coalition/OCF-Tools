@@ -3,12 +3,16 @@ import { createActor } from "xstate";
 import {
   ocfMachine,
   collectionUpdate,
+  isValidOutcome,
+  outcomeUpdate,
+  failureResult,
   TX_DESCRIPTORS,
-  type OcfMachineContext,
   type OcfMachineEvent,
   type TxKey,
   type CollectionKey,
 } from "../ocf_validator/ocfMachine";
+import type { Finding } from "../types/finding";
+import type { GradedValidator, OcfMachineContext } from "../types/validator";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -32,6 +36,7 @@ const baseContext = (overrides: Partial<OcfMachineContext> = {}): OcfMachineCont
   } as OcfMachineContext["ocfPackageContent"],
   report: [],
   findings: [],
+  lastErrorFindings: [],
   snapshots: [],
   result: "Incomplete",
   ...overrides,
@@ -277,5 +282,155 @@ describe("per-type collection placement", () => {
   it("a passthrough type mutates no collection", () => {
     const result = collectionUpdate(baseContext(), ev("TX_VESTING_START", { security_id: "s" }));
     expect(Object.keys(result)).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Graded validators through the dispatch helpers
+// ---------------------------------------------------------------------------
+
+// No table entry carries a graded `validate` yet, so these drive the exported
+// dispatch helpers directly with synthetic descriptors. The machine-actor
+// route stays legacy-only (next describe) until a validator family migrates.
+
+/** A synthetic `none` descriptor carrying a graded validator. */
+const gradedDescriptor = (validate: GradedValidator<any>) => ({ effect: "none", validate }) as const;
+
+/** A minimal finding; `check` doubles as the distinguishing label. */
+const finding = (severity: Finding["severity"], check: string): Finding => ({
+  severity,
+  check,
+  message: `${check} message`,
+  subject: { object_type: "TX_STOCK_ISSUANCE", id: "si1" },
+});
+
+describe("graded validators through the dispatch helpers", () => {
+  it("passes the transaction payload, not the event wrapper, to the validator", () => {
+    const received: unknown[] = [];
+    const descriptor = gradedDescriptor((_context, data) => {
+      received.push(data);
+      return [];
+    });
+    const data = { id: "si1", security_id: "sec1" };
+
+    isValidOutcome(descriptor, baseContext(), ev("TX_STOCK_ISSUANCE", data));
+
+    expect(received).toHaveLength(1);
+    expect(received[0]).toBe(data);
+  });
+
+  it("warnings alone leave the transaction valid and land on findings, never report", () => {
+    const warning = finding("warning", "advisory");
+    const descriptor = gradedDescriptor(() => [warning]);
+    const earlierFinding = finding("warning", "from-an-earlier-transaction");
+    const context = baseContext({
+      report: [{ marker: "pre-existing report" }],
+      findings: [earlierFinding],
+    });
+    const event = ev("TX_STOCK_ISSUANCE", { id: "si1", security_id: "sec1" });
+
+    expect(isValidOutcome(descriptor, context, event)).toBe(true);
+
+    const update = outcomeUpdate(descriptor, context, event);
+    // The update touches the findings channel and the error stash — no report write…
+    expect(Object.keys(update)).toEqual(["findings", "lastErrorFindings"]);
+    // …appending the new findings after the accumulated ones…
+    expect(update.findings).toEqual([earlierFinding, warning]);
+    // …and stashing no error findings for a warnings-only outcome.
+    expect(update.lastErrorFindings).toEqual([]);
+    // The helper is pure: neither input channel was mutated.
+    expect(context.report).toEqual([{ marker: "pre-existing report" }]);
+    expect(context.findings).toEqual([earlierFinding]);
+  });
+
+  it("an error finding makes the transaction invalid while recording every finding, warnings included", () => {
+    const descriptor = gradedDescriptor(() => [finding("warning", "advisory"), finding("error", "hard-failure")]);
+    const context = baseContext({ report: [{ marker: "pre-existing report" }] });
+    const event = ev("TX_STOCK_ISSUANCE", { id: "si1", security_id: "sec1" });
+
+    expect(isValidOutcome(descriptor, context, event)).toBe(false);
+
+    const update = outcomeUpdate(descriptor, context, event);
+    // Errors and warnings are both recorded, on findings only — the invalid
+    // branch writes no report entry either.
+    expect(Object.keys(update)).toEqual(["findings", "lastErrorFindings"]);
+    expect(update.findings).toEqual([finding("warning", "advisory"), finding("error", "hard-failure")]);
+    // Only the error slice is stashed for the failure branch.
+    expect(update.lastErrorFindings).toEqual([finding("error", "hard-failure")]);
+    expect(context.report).toEqual([{ marker: "pre-existing report" }]);
+  });
+
+  it("serializes only this transaction's error findings, in return order, in the failure result", () => {
+    const firstError = finding("error", "first-error");
+    const warning = finding("warning", "advisory");
+    const secondError = finding("error", "second-error");
+    let invocations = 0;
+    const descriptor = gradedDescriptor(() => {
+      invocations += 1;
+      return [firstError, warning, secondError];
+    });
+    // Decoys on both channels: an exact-match assertion proves the detail comes
+    // from the record stash, not from the report tail or the findings
+    // accumulator.
+    const context = baseContext({
+      report: [{ marker: "pre-existing report" }],
+      findings: [finding("error", "from-an-earlier-transaction")],
+    });
+    const event = ev("TX_STOCK_ISSUANCE", { id: "si1", security_id: "sec1" });
+
+    // Mirror the machine's invalid branch: record first, then build the result.
+    const recorded = { ...context, ...outcomeUpdate(descriptor, context, event) };
+
+    expect(failureResult(descriptor, recorded, event)).toBe(
+      `The validation of the OCF package for Test Co failed on si1: ${JSON.stringify([firstError, secondError], null, 2)}`,
+    );
+    // The failure detail comes from the stash; the validator ran only at record time.
+    expect(invocations).toBe(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Legacy validators through the machine
+// ---------------------------------------------------------------------------
+
+// These pin the old convention while table entries still carry it; they are
+// deleted with `legacyValidate` when the last family migrates.
+
+describe("legacy validators through the machine", () => {
+  const seededWithStakeholder = () =>
+    baseContext({
+      ocfPackageContent: {
+        ...baseContext().ocfPackageContent,
+        stakeholders: [{ id: "sh1" }],
+      } as OcfMachineContext["ocfPackageContent"],
+    });
+
+  it("records a validated transaction's report entry and leaves findings empty", () => {
+    const actor = startSeeded(seededWithStakeholder());
+    actor.send(ev("TX_WARRANT_ISSUANCE", { id: "wi1", security_id: "war1", stakeholder_id: "sh1" }));
+
+    const snapshot = actor.getSnapshot();
+    expect(snapshot.value).toBe("capTable");
+    expect(snapshot.context.report).toHaveLength(1);
+    expect(snapshot.context.report[0]).toMatchObject({
+      transaction_type: "TX_WARRANT_ISSUANCE",
+      transaction_id: "wi1",
+      stakeholder_validity: true,
+    });
+    expect(snapshot.context.findings).toEqual([]);
+  });
+
+  it("fails an invalid transaction with the report entry serialized in the result and findings still empty", () => {
+    const actor = startSeeded(seededWithStakeholder());
+    // No such stakeholder — the warrant issuance validator rejects it.
+    actor.send(ev("TX_WARRANT_ISSUANCE", { id: "wi1", security_id: "war1", stakeholder_id: "nobody" }));
+
+    const snapshot = actor.getSnapshot();
+    expect(snapshot.value).toBe("validationError");
+    expect(snapshot.context.report).toHaveLength(1);
+    expect(snapshot.context.result).toBe(
+      `The validation of the OCF package for Test Co failed on wi1: ${JSON.stringify(snapshot.context.report[0], null, 2)}`,
+    );
+    expect(snapshot.context.findings).toEqual([]);
   });
 });

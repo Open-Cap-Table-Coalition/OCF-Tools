@@ -35,6 +35,7 @@ exports[`ocfValidator over testPackage > produces a stable validation result and
     },
   ],
   "findings": [],
+  "lastErrorFindings": [],
   "report": [
     {
       "stakeholder_validity": true,

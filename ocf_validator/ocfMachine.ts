@@ -8,10 +8,16 @@ import type {
 } from "@opencaptablecoalition/ocf-types";
 import type { TransactionFor } from "../types/ocf-input";
 import type { OcfPackageContent } from "../read_ocf_package";
-import type { Snapshot } from "../types/snapshot";
 import type { Finding } from "../types/finding";
+import type { GradedValidator, OcfMachineContext } from "../types/validator";
 import validators from "./validators";
 import run_EOD from "./eod";
+
+// The validator contract types are defined in types/validator.ts; re-exported
+// here because the validator modules and the package barrel import them from
+// this module. The re-export is removed once every module imports
+// types/validator.ts directly.
+export type { GradedValidator, OcfMachineContext } from "../types/validator";
 
 // ---------------------------------------------------------------------------
 // Cap-table collections
@@ -30,18 +36,6 @@ interface CollectionElement {
 }
 
 export type CollectionKey = keyof CollectionElement;
-
-export type OcfMachineContext = {
-  stockIssuances: OCFStockIssuance[];
-  equityCompensation: OCFEquityCompensationIssuance[];
-  convertibleIssuances: OCFConvertibleIssuance[];
-  warrantIssuances: OCFWarrantIssuance[];
-  ocfPackageContent: OcfPackageContent;
-  report: any[];
-  findings: Finding[];
-  snapshots: Snapshot[];
-  result: string;
-};
 
 // ---------------------------------------------------------------------------
 // Per-key event union — each transaction handler's payload is `TransactionFor<K>`
@@ -92,9 +86,15 @@ function removeFromCollection<E extends { security_id: string }>(
 // ---------------------------------------------------------------------------
 
 /**
- * A validator for a transaction whose payload is `T`. The payload sits in a
- * contravariant position and is optional, so control events (which carry no
- * `data`) and the untyped `event: any` validators all satisfy it.
+ * A legacy dual-mode validator for a transaction whose payload is `T`: asked
+ * with `isGuard: true` it returns a validity boolean, with `isGuard: false` its
+ * report-mode entry. The payload sits in a contravariant position and is
+ * optional, so control events (which carry no `data`) and the untyped
+ * `event: any` validators all satisfy it.
+ *
+ * Transitional: this type, the `legacyValidate` field that carries it, and the
+ * legacy arms of the dispatch helpers are all deleted once the last validator
+ * family migrates to the graded shape.
  */
 type Validator<T> = (
   context: OcfMachineContext,
@@ -104,65 +104,89 @@ type Validator<T> = (
 
 /**
  * Everything the machine needs to know about one transaction type, keyed on its
- * `effect`. The validator is referenced once so the guard and the report always
- * use the same one.
+ * `effect`. A non-passthrough descriptor names its validator under exactly one
+ * of two mutually exclusive fields — `legacyValidate` (dual-mode shape) or
+ * `validate` (graded shape) — so which convention a transaction uses is part of
+ * the table's static description, and the machine dispatches on field presence
+ * the same way it dispatches on `effect`. The validator is referenced once so
+ * the guard and the recorded outcome always use the same one. The
+ * `legacyValidate` arms exist only while families migrate; the union collapses
+ * to the graded arms when the last one does.
  *
- *  - `passthrough`: received and silently ignored — no validator, report, or mutation.
- *  - `none`:        validate and report, but mutate no collection.
- *  - `remove`:      validate, report, and filter `collection` by `security_id`.
- *  - `append`:      validate, report, and append the issuance to `collection`.
+ *  - `passthrough`: received and silently ignored — no validator, record, or mutation.
+ *  - `none`:        validate and record, but mutate no collection.
+ *  - `remove`:      validate, record, and filter `collection` by `security_id`.
+ *  - `append`:      validate, record, and append the issuance to `collection`.
  *
- * The `append` variant distributes over `CollectionKey`, tying `collection` to the
- * payload family of its `validate`, so a family-typed validator cannot be declared
- * under a mismatched collection (demonstrated in `types/ocf-machine-table.assert.ts`).
+ * The `none`/`remove` graded arms take `GradedValidator<any>`, not
+ * `GradedValidator<unknown>`: the payload is contravariant, so `unknown` would
+ * reject every family-typed validator — like `Validator<unknown>` over the
+ * `event: any` validators, the `any` constrains the shape, not the payload.
+ *
+ * The `append` variants distribute over `CollectionKey`, tying `collection` to
+ * the payload family of the validator — under either field — so a family-typed
+ * validator cannot be declared under a mismatched collection (demonstrated in
+ * `types/ocf-machine-table.assert.ts`).
  */
 type Descriptor =
   | { effect: "passthrough" }
-  | { effect: "none"; validate: Validator<unknown> }
-  | { effect: "remove"; validate: Validator<unknown>; collection: CollectionKey }
+  | { effect: "none"; legacyValidate: Validator<unknown> }
+  | { effect: "none"; validate: GradedValidator<any> }
+  | { effect: "remove"; legacyValidate: Validator<unknown>; collection: CollectionKey }
+  | { effect: "remove"; validate: GradedValidator<any>; collection: CollectionKey }
   | {
       [C in CollectionKey]: {
         effect: "append";
         collection: C;
-        validate: Validator<CollectionElement[C]>;
+        legacyValidate: Validator<CollectionElement[C]>;
+      };
+    }[CollectionKey]
+  | {
+      [C in CollectionKey]: {
+        effect: "append";
+        collection: C;
+        validate: GradedValidator<CollectionElement[C]>;
       };
     }[CollectionKey];
 
+/** A non-passthrough descriptor — the shape the dispatch helpers consume. */
+export type ActiveDescriptor = Exclude<Descriptor, { effect: "passthrough" }>;
+
 export const TX_DESCRIPTORS = {
   // --- append: issuance appended to its family collection -----------------
-  TX_STOCK_ISSUANCE: { effect: "append", collection: "stockIssuances", validate: validators.valid_tx_stock_issuance },
-  TX_CONVERTIBLE_ISSUANCE: { effect: "append", collection: "convertibleIssuances", validate: validators.valid_tx_convertible_issuance },
-  TX_WARRANT_ISSUANCE: { effect: "append", collection: "warrantIssuances", validate: validators.valid_tx_warrant_issuance },
-  TX_EQUITY_COMPENSATION_ISSUANCE: { effect: "append", collection: "equityCompensation", validate: validators.valid_tx_equity_compensation_issuance },
+  TX_STOCK_ISSUANCE: { effect: "append", collection: "stockIssuances", legacyValidate: validators.valid_tx_stock_issuance },
+  TX_CONVERTIBLE_ISSUANCE: { effect: "append", collection: "convertibleIssuances", legacyValidate: validators.valid_tx_convertible_issuance },
+  TX_WARRANT_ISSUANCE: { effect: "append", collection: "warrantIssuances", legacyValidate: validators.valid_tx_warrant_issuance },
+  TX_EQUITY_COMPENSATION_ISSUANCE: { effect: "append", collection: "equityCompensation", legacyValidate: validators.valid_tx_equity_compensation_issuance },
 
   // --- none: validate + report, no collection mutation --------------------
-  TX_STOCK_ACCEPTANCE: { effect: "none", validate: validators.valid_tx_stock_acceptance },
-  TX_CONVERTIBLE_ACCEPTANCE: { effect: "none", validate: validators.valid_tx_convertible_acceptance },
-  TX_WARRANT_ACCEPTANCE: { effect: "none", validate: validators.valid_tx_warrant_acceptance },
-  TX_EQUITY_COMPENSATION_ACCEPTANCE: { effect: "none", validate: validators.valid_tx_equity_compensation_acceptance },
+  TX_STOCK_ACCEPTANCE: { effect: "none", legacyValidate: validators.valid_tx_stock_acceptance },
+  TX_CONVERTIBLE_ACCEPTANCE: { effect: "none", legacyValidate: validators.valid_tx_convertible_acceptance },
+  TX_WARRANT_ACCEPTANCE: { effect: "none", legacyValidate: validators.valid_tx_warrant_acceptance },
+  TX_EQUITY_COMPENSATION_ACCEPTANCE: { effect: "none", legacyValidate: validators.valid_tx_equity_compensation_acceptance },
   // TX_EQUITY_COMPENSATION_EXERCISE removes nothing today (its collection filter
   // is commented out in the legacy machine), asymmetric with TX_WARRANT_EXERCISE
   // which removes. That asymmetry is PRESERVED pending investigation, not endorsed.
-  TX_EQUITY_COMPENSATION_EXERCISE: { effect: "none", validate: validators.valid_tx_equity_compensation_exercise },
+  TX_EQUITY_COMPENSATION_EXERCISE: { effect: "none", legacyValidate: validators.valid_tx_equity_compensation_exercise },
 
   // --- remove: filter the family collection by security_id ---------------
-  TX_STOCK_RETRACTION: { effect: "remove", collection: "stockIssuances", validate: validators.valid_tx_stock_retraction },
-  TX_STOCK_CANCELLATION: { effect: "remove", collection: "stockIssuances", validate: validators.valid_tx_stock_cancellation },
-  TX_STOCK_CONVERSION: { effect: "remove", collection: "stockIssuances", validate: validators.valid_tx_stock_conversion },
-  TX_STOCK_REISSUANCE: { effect: "remove", collection: "stockIssuances", validate: validators.valid_tx_stock_reissuance },
-  TX_STOCK_REPURCHASE: { effect: "remove", collection: "stockIssuances", validate: validators.valid_tx_stock_repurchase },
-  TX_STOCK_TRANSFER: { effect: "remove", collection: "stockIssuances", validate: validators.valid_tx_stock_transfer },
-  TX_CONVERTIBLE_RETRACTION: { effect: "remove", collection: "convertibleIssuances", validate: validators.valid_tx_convertible_retraction },
-  TX_CONVERTIBLE_CANCELLATION: { effect: "remove", collection: "convertibleIssuances", validate: validators.valid_tx_convertible_cancellation },
-  TX_CONVERTIBLE_TRANSFER: { effect: "remove", collection: "convertibleIssuances", validate: validators.valid_tx_convertible_transfer },
-  TX_CONVERTIBLE_CONVERSION: { effect: "remove", collection: "convertibleIssuances", validate: validators.valid_tx_convertible_conversion },
-  TX_WARRANT_RETRACTION: { effect: "remove", collection: "warrantIssuances", validate: validators.valid_tx_warrant_retraction },
-  TX_WARRANT_CANCELLATION: { effect: "remove", collection: "warrantIssuances", validate: validators.valid_tx_warrant_cancellation },
-  TX_WARRANT_TRANSFER: { effect: "remove", collection: "warrantIssuances", validate: validators.valid_tx_warrant_transfer },
-  TX_WARRANT_EXERCISE: { effect: "remove", collection: "warrantIssuances", validate: validators.valid_tx_warrant_exercise },
-  TX_EQUITY_COMPENSATION_RETRACTION: { effect: "remove", collection: "equityCompensation", validate: validators.valid_tx_equity_compensation_retraction },
-  TX_EQUITY_COMPENSATION_CANCELLATION: { effect: "remove", collection: "equityCompensation", validate: validators.valid_tx_equity_compensation_cancellation },
-  TX_EQUITY_COMPENSATION_TRANSFER: { effect: "remove", collection: "equityCompensation", validate: validators.valid_tx_equity_compensation_transfer },
+  TX_STOCK_RETRACTION: { effect: "remove", collection: "stockIssuances", legacyValidate: validators.valid_tx_stock_retraction },
+  TX_STOCK_CANCELLATION: { effect: "remove", collection: "stockIssuances", legacyValidate: validators.valid_tx_stock_cancellation },
+  TX_STOCK_CONVERSION: { effect: "remove", collection: "stockIssuances", legacyValidate: validators.valid_tx_stock_conversion },
+  TX_STOCK_REISSUANCE: { effect: "remove", collection: "stockIssuances", legacyValidate: validators.valid_tx_stock_reissuance },
+  TX_STOCK_REPURCHASE: { effect: "remove", collection: "stockIssuances", legacyValidate: validators.valid_tx_stock_repurchase },
+  TX_STOCK_TRANSFER: { effect: "remove", collection: "stockIssuances", legacyValidate: validators.valid_tx_stock_transfer },
+  TX_CONVERTIBLE_RETRACTION: { effect: "remove", collection: "convertibleIssuances", legacyValidate: validators.valid_tx_convertible_retraction },
+  TX_CONVERTIBLE_CANCELLATION: { effect: "remove", collection: "convertibleIssuances", legacyValidate: validators.valid_tx_convertible_cancellation },
+  TX_CONVERTIBLE_TRANSFER: { effect: "remove", collection: "convertibleIssuances", legacyValidate: validators.valid_tx_convertible_transfer },
+  TX_CONVERTIBLE_CONVERSION: { effect: "remove", collection: "convertibleIssuances", legacyValidate: validators.valid_tx_convertible_conversion },
+  TX_WARRANT_RETRACTION: { effect: "remove", collection: "warrantIssuances", legacyValidate: validators.valid_tx_warrant_retraction },
+  TX_WARRANT_CANCELLATION: { effect: "remove", collection: "warrantIssuances", legacyValidate: validators.valid_tx_warrant_cancellation },
+  TX_WARRANT_TRANSFER: { effect: "remove", collection: "warrantIssuances", legacyValidate: validators.valid_tx_warrant_transfer },
+  TX_WARRANT_EXERCISE: { effect: "remove", collection: "warrantIssuances", legacyValidate: validators.valid_tx_warrant_exercise },
+  TX_EQUITY_COMPENSATION_RETRACTION: { effect: "remove", collection: "equityCompensation", legacyValidate: validators.valid_tx_equity_compensation_retraction },
+  TX_EQUITY_COMPENSATION_CANCELLATION: { effect: "remove", collection: "equityCompensation", legacyValidate: validators.valid_tx_equity_compensation_cancellation },
+  TX_EQUITY_COMPENSATION_TRANSFER: { effect: "remove", collection: "equityCompensation", legacyValidate: validators.valid_tx_equity_compensation_transfer },
 
   // --- passthrough: received and silently ignored today ------------------
   //   No validator, no report entry, no collection mutation. They stay in
@@ -199,18 +223,103 @@ type ControlEvent = (typeof CONTROL_EVENTS)[number];
 const isControlEvent = (event: OcfMachineEvent): event is Extract<OcfMachineEvent, { type: ControlEvent }> =>
   (CONTROL_EVENTS as readonly string[]).includes(event.type);
 
-/** The descriptor's validator for a transaction type, or `undefined` for passthrough types. */
-const validatorFor = (type: TxKey): Validator<any> | undefined => {
+/** The descriptor for a transaction type, or `undefined` for passthrough types. */
+const activeDescriptorFor = (type: TxKey): ActiveDescriptor | undefined => {
   const descriptor = TX_DESCRIPTORS[type];
-  return "validate" in descriptor ? descriptor.validate : undefined;
+  return descriptor.effect === "passthrough" ? undefined : descriptor;
 };
+
+// ---------------------------------------------------------------------------
+// Validator dispatch — legacyValidate vs validate
+// ---------------------------------------------------------------------------
+//
+// Each helper takes the descriptor as a parameter (rather than resolving it
+// from the table) and branches on which validator field it carries: a
+// `legacyValidate` validator receives the whole event plus the guard flag; a
+// `validate` (graded) validator receives only `event.data` and returns
+// findings. The legacy arms are today's dispatch relocated into one place, not
+// new behavior; they are deleted with `legacyValidate` when the last family
+// migrates, leaving each helper single-armed.
+
+const failureMessage = (context: OcfMachineContext, subject: string, detail: string): string =>
+  `The validation of the OCF package for ${context.ocfPackageContent.manifest.issuer.legal_name} failed on ${subject}: ${detail}`;
+
+/**
+ * The event slice the dispatch helpers read. `data` is `any` for the same
+ * reason legacy validators declare `event: any`: the payload's family is the
+ * descriptor table's concern, not the dispatcher's.
+ */
+type ValidatorEvent = { type: string; data?: any };
+
+/** The single blocking rule for graded findings: only an error blocks. */
+const isErrorFinding = (finding: Finding): boolean => finding.severity === "error";
+
+/**
+ * Guard outcome for one transaction under `descriptor`'s validator. A graded
+ * validator's findings decide: valid iff none carries severity "error", so
+ * warnings alone do not block. A legacy validator is asked directly in guard
+ * (boolean) mode.
+ */
+export function isValidOutcome(
+  descriptor: ActiveDescriptor,
+  context: OcfMachineContext,
+  event: ValidatorEvent,
+): boolean {
+  if ("validate" in descriptor) {
+    return !descriptor.validate(context, event.data).some(isErrorFinding);
+  }
+  return descriptor.legacyValidate(context, event, true);
+}
+
+/**
+ * The record-channel update for one transaction's outcome, valid or invalid:
+ * a graded validator's findings are appended to `findings` and its error
+ * slice is stashed on `lastErrorFindings` for the failure branch; `report` is
+ * never written. A legacy validator's report-mode entry is appended to
+ * `report`.
+ */
+export function outcomeUpdate(
+  descriptor: ActiveDescriptor,
+  context: OcfMachineContext,
+  event: ValidatorEvent,
+): Partial<OcfMachineContext> {
+  if ("validate" in descriptor) {
+    const found = descriptor.validate(context, event.data);
+    return {
+      findings: [...context.findings, ...found],
+      lastErrorFindings: found.filter(isErrorFinding),
+    };
+  }
+  return { report: [...context.report, descriptor.legacyValidate(context, event, false)] };
+}
+
+/**
+ * The invalid-branch `result` message, with a shape-specific failure detail.
+ * Both arms read what the record action wrote immediately before this one,
+ * rather than re-running the (package-scanning) validator: the graded arm
+ * serializes `lastErrorFindings` (this transaction's error findings, in
+ * return order), the legacy arm the report entry at the tail of `report`.
+ */
+export function failureResult(
+  descriptor: ActiveDescriptor | undefined,
+  context: OcfMachineContext,
+  event: ValidatorEvent,
+): string {
+  const subject =
+    typeof event.data === "object" && event.data !== null && "id" in event.data
+      ? event.data.id
+      : event.type;
+  if (descriptor && "validate" in descriptor) {
+    return failureMessage(context, subject, JSON.stringify(context.lastErrorFindings, null, 2));
+  }
+  const lastReport = context.report[context.report.length - 1];
+  const detail = context.report.length ? JSON.stringify(lastReport, null, 2) : "";
+  return failureMessage(context, subject, detail);
+}
 
 // ---------------------------------------------------------------------------
 // The machine — typed via setup({ types, actions, guards })
 // ---------------------------------------------------------------------------
-
-const failureMessage = (context: OcfMachineContext, subject: string, detail: string): string =>
-  `The validation of the OCF package for ${context.ocfPackageContent.manifest.issuer.legal_name} failed on ${subject}: ${detail}`;
 
 /**
  * Valid-branch collection mutation, driven by the descriptor's `effect` and
@@ -272,11 +381,11 @@ function buildTransactionHandlers() {
     {
       guard: "isValidTx",
       target: "capTable",
-      actions: ["appendReport", "mutateCollection"],
+      actions: ["recordOutcome", "mutateCollection"],
     },
     {
       target: "validationError",
-      actions: ["appendReport", "setValidationError"],
+      actions: ["recordOutcome", "setValidationError"],
     },
   ] as const;
   const passthrough = {} as const;
@@ -296,37 +405,31 @@ export const ocfMachine = setup({
     events: OcfMachineEvent;
   },
   guards: {
-    // Guard the valid branch via the type's own validator in `true` (boolean) mode.
-    // Control events never reach this guard (they have their own handlers); the
-    // narrow drops them so `event` carries the `data` the validator reads.
+    // Guard the valid branch via the type's own validator, legacyValidate or
+    // validate (see isValidOutcome). Control events never reach this guard
+    // (they have their own handlers); the narrow drops them so `event` carries
+    // the `data` the validator reads.
     isValidTx: ({ context, event }) => {
       if (isControlEvent(event)) return false;
-      const validator = validatorFor(event.type);
-      return validator ? validator(context, event, true) : false;
+      const descriptor = activeDescriptorFor(event.type);
+      return descriptor ? isValidOutcome(descriptor, context, event) : false;
     },
   },
   actions: {
-    // Append the validator's report entry. Same validator reference as the guard,
-    // so the guard and the report can never diverge.
-    appendReport: assign({
-      report: ({ context, event }) => {
-        if (isControlEvent(event)) return context.report;
-        const validator = validatorFor(event.type);
-        return validator ? [...context.report, validator(context, event, false)] : context.report;
-      },
+    // Record the validator's outcome on its shape's channel — legacy report
+    // entries onto `report`, graded findings onto `findings`. Same descriptor
+    // as the guard, so the guard and the record can never diverge.
+    recordOutcome: assign(({ context, event }) => {
+      if (isControlEvent(event)) return {};
+      const descriptor = activeDescriptorFor(event.type);
+      return descriptor ? outcomeUpdate(descriptor, context, event) : {};
     }),
 
-    // Invalid branch: record the failure message. `appendReport` runs immediately
-    // before this action on the invalid branch, so the validator's report entry is
-    // already at the tail of `report` — reuse it instead of re-running the
-    // (package-scanning) validator a third time.
+    // Invalid branch: record the failure message (see failureResult for the
+    // shape-specific detail sourcing).
     setValidationError: assign({
-      result: ({ context, event }) => {
-        const subject = "data" in event && "id" in event.data ? event.data.id : event.type;
-        const lastReport = context.report[context.report.length - 1];
-        const detail = context.report.length ? JSON.stringify(lastReport, null, 2) : "";
-        return failureMessage(context, subject, detail);
-      },
+      result: ({ context, event }) =>
+        failureResult(isControlEvent(event) ? undefined : activeDescriptorFor(event.type), context, event),
     }),
 
     // Valid branch collection mutation, driven by the descriptor's `effect` and
@@ -353,6 +456,7 @@ export const ocfMachine = setup({
     },
     report: [],
     findings: [],
+    lastErrorFindings: [],
     snapshots: [],
     result: "Incomplete",
   },
