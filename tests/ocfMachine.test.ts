@@ -366,19 +366,31 @@ describe("legacy validators through the machine", () => {
       ocfPackageContent: {
         ...baseContext().ocfPackageContent,
         stakeholders: [{ id: "sh1" }],
+        stockClasses: [{ id: "sc1" }],
       } as OcfMachineContext["ocfPackageContent"],
     });
 
+  // A stock issuance the legacy validator accepts: a known stakeholder, a known
+  // stock class, and no stock legends to resolve.
+  const stockIssuance = (overrides: Record<string, unknown> = {}) => ({
+    id: "si1",
+    security_id: "s-sec1",
+    stakeholder_id: "sh1",
+    stock_class_id: "sc1",
+    stock_legend_ids: [],
+    ...overrides,
+  });
+
   it("records a validated transaction's report entry and leaves findings empty", () => {
     const actor = startSeeded(seededWithStakeholder());
-    actor.send(ev("TX_EQUITY_COMPENSATION_ISSUANCE", { id: "ec1", security_id: "ec-sec1", stakeholder_id: "sh1" }));
+    actor.send(ev("TX_STOCK_ISSUANCE", stockIssuance()));
 
     const snapshot = actor.getSnapshot();
     expect(snapshot.value).toBe("capTable");
     expect(snapshot.context.report).toHaveLength(1);
     expect(snapshot.context.report[0]).toMatchObject({
-      transaction_type: "TX_EQUITY_COMPENSATION_ISSUANCE",
-      transaction_id: "ec1",
+      transaction_type: "TX_STOCK_ISSUANCE",
+      transaction_id: "si1",
       stakeholder_validity: true,
     });
     expect(snapshot.context.findings).toEqual([]);
@@ -386,14 +398,14 @@ describe("legacy validators through the machine", () => {
 
   it("fails an invalid transaction with the report entry serialized in the result and findings still empty", () => {
     const actor = startSeeded(seededWithStakeholder());
-    // No such stakeholder — the equity compensation issuance validator rejects it.
-    actor.send(ev("TX_EQUITY_COMPENSATION_ISSUANCE", { id: "ec1", security_id: "ec-sec1", stakeholder_id: "nobody" }));
+    // No such stakeholder — the stock issuance validator rejects it.
+    actor.send(ev("TX_STOCK_ISSUANCE", stockIssuance({ stakeholder_id: "nobody" })));
 
     const snapshot = actor.getSnapshot();
     expect(snapshot.value).toBe("validationError");
     expect(snapshot.context.report).toHaveLength(1);
     expect(snapshot.context.result).toBe(
-      `The validation of the OCF package for Test Co failed on ec1: ${JSON.stringify(snapshot.context.report[0], null, 2)}`,
+      `The validation of the OCF package for Test Co failed on si1: ${JSON.stringify(snapshot.context.report[0], null, 2)}`,
     );
     expect(snapshot.context.findings).toEqual([]);
   });
