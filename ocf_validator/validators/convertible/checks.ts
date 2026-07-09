@@ -1,16 +1,22 @@
 import type { CheckObject } from "../checkKit";
 
 /**
- * The convertible issuance referenced by the transaction's security_id exists in
- * the current cap-table state. Matches on security_id alone against the live
- * convertible collection, which holds only issuances.
+ * The convertible issuance referenced by the transaction's security_id is
+ * outstanding as of the transaction's date. Passes on a bare security_id match
+ * against the live convertible collection, which holds only issuances. When the
+ * live match fails, the message consults the full package transaction history
+ * and states one of three causes by elimination: the security was never issued,
+ * it is issued only later, or it was issued on or before this date but is no
+ * longer outstanding. The cause and any date it displays come from a single
+ * history record — a match dated on or before the transaction is preferred over
+ * a later-dated one.
  */
 export const issuanceExists = {
   id: "issuance-exists",
   severity: "error",
   description:
-    "The convertible issuance referenced by the transaction's security_id exists in the current cap-table state.",
-  run: (context, data: { security_id: string }) => {
+    "The convertible issuance referenced by the transaction's security_id is outstanding as of the transaction's date.",
+  run: (context, data: { security_id: string; date: string }) => {
     const messages: string[] = [];
 
     let issuanceExists = false;
@@ -19,44 +25,34 @@ export const issuanceExists = {
         issuanceExists = true;
       }
     });
-    if (!issuanceExists) {
-      messages.push(
-        `No convertible issuance with security_id ${data.security_id} exists in the current cap-table state.`,
-      );
-    }
+    if (issuanceExists) return messages;
 
-    return messages;
-  },
-} satisfies CheckObject;
-
-/**
- * The transaction is dated on or after the convertible issuance it references.
- */
-export const dateOrder = {
-  id: "date-order",
-  severity: "error",
-  description:
-    "The transaction is dated on or after the convertible issuance it references.",
-  run: (context, data: { security_id: string; date: string }) => {
-    const messages: string[] = [];
     const { transactions } = context.ocfPackageContent;
-
-    // date-order scans the full package transaction history for the issuance.
-    // The object_type test leads so it narrows the transaction union to a
-    // security_id-bearing member before the other reads.
-    let dateOrdered = false;
+    let firstIssuanceDate: string | undefined;
+    let onOrBeforeDate: string | undefined;
     transactions.forEach((ele) => {
       if (
         ele.object_type === "TX_CONVERTIBLE_ISSUANCE" &&
-        ele.security_id === data.security_id &&
-        ele.date <= data.date
+        ele.security_id === data.security_id
       ) {
-        dateOrdered = true;
+        if (firstIssuanceDate === undefined) firstIssuanceDate = ele.date;
+        if (onOrBeforeDate === undefined && ele.date <= data.date) {
+          onOrBeforeDate = ele.date;
+        }
       }
     });
-    if (!dateOrdered) {
+
+    if (firstIssuanceDate === undefined) {
       messages.push(
-        `The transaction is not dated on or after a convertible issuance with security_id ${data.security_id}.`,
+        `No convertible issuance with security_id ${data.security_id} appears in the package.`,
+      );
+    } else if (onOrBeforeDate === undefined) {
+      messages.push(
+        `The convertible issuance referenced by security_id ${data.security_id} is dated ${firstIssuanceDate}, after this transaction (${data.date}).`,
+      );
+    } else {
+      messages.push(
+        `The convertible issuance referenced by security_id ${data.security_id} (dated ${onOrBeforeDate}) is not outstanding as of this transaction's date.`,
       );
     }
 

@@ -1,24 +1,25 @@
 import { defineValidator, type CheckObject } from "../checkKit";
-import { issuanceExists, dateOrder } from "./checks";
+import { issuanceExists } from "./checks";
 
 const noOtherTransactions = {
   id: "no-other-transactions",
   severity: "error",
   description:
-    "No other transaction references the transaction's security_id, other than a convertible acceptance.",
-  run: (context, data: { id: string; security_id: string }) => {
+    "No other transaction dated on or before this transaction references its security_id, other than a convertible acceptance.",
+  run: (context, data: { id: string; security_id: string; date: string }) => {
     const messages: string[] = [];
     const { transactions } = context.ocfPackageContent;
 
-    // no-other-transactions emits one finding per transaction on this security_id,
-    // exempting the issuance, any convertible acceptance, and this cancellation itself.
-    // This scan keeps every transaction type in play, so it narrows by property
-    // presence rather than by discriminant: a transaction that carries no
-    // security_id can never reference this one.
+    // no-other-transactions emits one finding per transaction on this security_id
+    // dated on or before this cancellation, exempting the issuance, any convertible
+    // acceptance, and this cancellation itself. This scan keeps every transaction
+    // type in play, so it narrows by property presence rather than by discriminant:
+    // a transaction that carries no security_id can never reference this one.
     transactions.forEach((ele) => {
       if (
         "security_id" in ele &&
         ele.security_id === data.security_id &&
+        ele.date <= data.date &&
         ele.object_type !== "TX_CONVERTIBLE_ISSUANCE" &&
         ele.object_type !== "TX_CONVERTIBLE_ACCEPTANCE" &&
         !(ele.object_type === "TX_CONVERTIBLE_CANCELLATION" && ele.id === data.id)
@@ -37,5 +38,5 @@ export const TX_CONVERTIBLE_CANCELLATION = defineValidator({
   transaction: "TX_CONVERTIBLE_CANCELLATION",
   effect: "remove",
   collection: "convertibleIssuances",
-  checks: [issuanceExists, dateOrder, noOtherTransactions],
+  checks: [issuanceExists, noOtherTransactions],
 });
