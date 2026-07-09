@@ -63,7 +63,7 @@ const validate: GradedValidator<Retraction> = (context, data) => {
     findings.push({
       severity: "error",
       check: "date-order",
-      message: `The transaction is dated before the convertible issuance it references (security_id ${data.security_id}).`,
+      message: `The transaction is not dated on or after a convertible issuance with security_id ${data.security_id}.`,
       subject,
     });
   }
