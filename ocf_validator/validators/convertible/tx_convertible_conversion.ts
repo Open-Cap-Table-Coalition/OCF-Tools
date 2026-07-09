@@ -1,7 +1,7 @@
 import type { OCFStockIssuance } from "@opencaptablecoalition/ocf-types";
 import type { DeepReadonly, OcfMachineContext } from "../../../types/validator";
 import { defineValidator, type CheckObject } from "../checkKit";
-import { issuanceExists } from "./checks";
+import { issuanceExists, noOtherTransactions } from "./checks";
 
 // A convertible's conversion right can only point at a stock class, so every id
 // in resulting_security_ids names a stock issuance. The three resulting checks
@@ -20,40 +20,6 @@ const resultingStockIssuance = (
     (ele): ele is DeepReadonly<OCFStockIssuance> =>
       ele.object_type === "TX_STOCK_ISSUANCE" && ele.security_id === resultingId,
   );
-
-const noOtherTransactions = {
-  id: "no-other-transactions",
-  severity: "error",
-  description:
-    "No other transaction dated on or before this transaction references its security_id, other than a convertible acceptance.",
-  run: (context, data: { id: string; security_id: string; date: string }) => {
-    const messages: string[] = [];
-    const { transactions } = context.ocfPackageContent;
-
-    // One finding per transaction on this security_id dated on or before this
-    // conversion, exempting the issuance, any convertible acceptance, and this
-    // conversion itself. The scan keeps every transaction type in play, so it
-    // narrows by property presence rather than by discriminant: a transaction
-    // carrying no security_id can never reference this one. The conversion
-    // appears in its own history, so the self-exemption is by id, not by type.
-    transactions.forEach((ele) => {
-      if (
-        "security_id" in ele &&
-        ele.security_id === data.security_id &&
-        ele.date <= data.date &&
-        ele.object_type !== "TX_CONVERTIBLE_ISSUANCE" &&
-        ele.object_type !== "TX_CONVERTIBLE_ACCEPTANCE" &&
-        !(ele.object_type === "TX_CONVERTIBLE_CONVERSION" && ele.id === data.id)
-      ) {
-        messages.push(
-          `Another transaction (${ele.id}) references the transaction's security_id.`,
-        );
-      }
-    });
-
-    return messages;
-  },
-} satisfies CheckObject;
 
 const resultingSecurityNamed = {
   id: "resulting-security-named",
