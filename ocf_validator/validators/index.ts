@@ -7,11 +7,6 @@ import valid_tx_stock_reissuance from './stock/tx_stock_reissuance';
 import valid_tx_stock_repurchase from './stock/tx_stock_repurchase';
 import valid_tx_stock_transfer from './stock/tx_stock_transfer';
 import valid_tx_convertible_conversion from './convertible/tx_convertible_conversion';
-import valid_tx_warrant_issuance from './warrant/tx_warrant_issuance';
-import valid_tx_warrant_retraction from './warrant/tx_warrant_retraction';
-import valid_tx_warrant_acceptance from './warrant/tx_warrant_acceptance';
-import valid_tx_warrant_cancellation from './warrant/tx_warrant_cancellation';
-import valid_tx_warrant_transfer from './warrant/tx_warrant_transfer';
 import valid_tx_warrant_exercise from './warrant/tx_warrant_exercise';
 import valid_tx_equity_compensation_issuance from './equity_compensation/tx_equity_compensation_issuance';
 import valid_tx_equity_compensation_retraction from './equity_compensation/tx_equity_compensation_retraction';
@@ -46,11 +41,6 @@ const validators = {
   valid_tx_stock_repurchase,
   valid_tx_stock_transfer,
   valid_tx_convertible_conversion,
-  valid_tx_warrant_issuance,
-  valid_tx_warrant_retraction,
-  valid_tx_warrant_acceptance,
-  valid_tx_warrant_cancellation,
-  valid_tx_warrant_transfer,
   valid_tx_warrant_exercise,
   valid_tx_equity_compensation_issuance,
   valid_tx_equity_compensation_retraction,

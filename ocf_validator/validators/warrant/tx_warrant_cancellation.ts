@@ -1,79 +1,103 @@
-// Reference for tx_warrant_cancellation: https://open-cap-table-coalition.github.io/Open-Cap-Format-OCF/schema_markdown/schema/objects/transactions/cancellation/StockCancellation/
-/*
-  CURRENT CHECKS:
-    1. Check that warrant issuance in incoming security_id reference by transaction exists in current state.
-    2. Check to ensure that the date of transaction is the same day or after the date of the incoming warrant issuance.
-    3. The security_id of the warrant issuance referred to in the security_id variable must not be the security_id related to any other transactions with the exception of a warrant acceptance transaction.
-*/
+import type { TransactionFor } from "../../../types/ocf-input";
+import type { Check, GradedValidator } from "../../../types/validator";
+import type { Finding } from "../../../types/finding";
+import type { Descriptor } from "../../ocfMachine";
 
-import {OcfMachineContext} from '../../ocfMachine';
+type Cancellation = TransactionFor<"TX_WARRANT_CANCELLATION">;
 
-const valid_tx_warrant_cancellation = (
-  context: OcfMachineContext,
-  event: any,
-  isGuard: Boolean = false
-) => {
-  let validity = false;
-  let report: any = {transaction_type: "TX_WARRANT_CANCELLATION", transaction_id: event.data.id, transaction_date: event.data.date};
+const checks: readonly Check[] = [
+  {
+    id: "issuance-exists",
+    severity: "error",
+    description:
+      "The warrant issuance referenced by the transaction's security_id exists in the current cap-table state.",
+  },
+  {
+    id: "date-order",
+    severity: "error",
+    description:
+      "The transaction is dated on or after the warrant issuance it references.",
+  },
+  {
+    id: "no-other-transactions",
+    severity: "error",
+    description:
+      "No other transaction references the transaction's security_id, other than a warrant acceptance.",
+  },
+];
 
-  const {transactions} = context.ocfPackageContent;
-  // 1. Check that warrant issuance in incoming security_id reference by transaction exists in current state.
-  let incoming_warrantIssuance_validity = false;
-  context.warrantIssuances.forEach((ele: any) => {
-    if (ele.security_id === event.data.security_id) {
-      incoming_warrantIssuance_validity = true;
-      report.incoming_warrantIssuance_validity = true;
+const validate: GradedValidator<Cancellation> = (context, data) => {
+  const findings: Finding[] = [];
+  const subject = { object_type: data.object_type, id: data.id };
+  const { transactions } = context.ocfPackageContent;
+
+  // issuance-exists here matches on security_id alone — unlike the sibling
+  // validators it does not also require object_type TX_WARRANT_ISSUANCE.
+  let issuanceExists = false;
+  context.warrantIssuances.forEach((ele) => {
+    if (ele.security_id === data.security_id) {
+      issuanceExists = true;
     }
   });
-
-  if (!incoming_warrantIssuance_validity) {
-    report.incoming_warrantIssuance_validity = false;
+  if (!issuanceExists) {
+    findings.push({
+      severity: "error",
+      check: "issuance-exists",
+      message: `No warrant issuance with security_id ${data.security_id} exists in the current cap-table state.`,
+      subject,
+    });
   }
 
-  // 2. Check to ensure that the date of transaction is the same day or after the date of the incoming warrant issuance.
-  let incoming_date_validity = false;
-  transactions.forEach((ele: any) => {
+  // date-order scans the full package transaction history for the issuance.
+  // The object_type test leads so it narrows the transaction union to a
+  // security_id-bearing member before the other reads.
+  let dateOrdered = false;
+  transactions.forEach((ele) => {
     if (
-      ele.security_id === event.data.security_id &&
-      ele.object_type === 'TX_WARRANT_ISSUANCE'
+      ele.object_type === "TX_WARRANT_ISSUANCE" &&
+      ele.security_id === data.security_id &&
+      ele.date <= data.date
     ) {
-      if (ele.date <= event.data.date) {
-        incoming_date_validity = true;
-        report.incoming_date_validity = true;
-      }
+      dateOrdered = true;
     }
   });
-  if (!incoming_date_validity) {
-    report.incoming_date_validity = false;
+  if (!dateOrdered) {
+    findings.push({
+      severity: "error",
+      check: "date-order",
+      message: `The transaction is not dated on or after a warrant issuance with security_id ${data.security_id}.`,
+      subject,
+    });
   }
 
-  let only_transaction_validity = true;
-  transactions.map((ele: any) => {
+  // no-other-transactions emits one finding per transaction on this security_id,
+  // exempting the issuance, any warrant acceptance, and this cancellation itself.
+  // This scan keeps every transaction type in play, so it narrows by property
+  // presence rather than by discriminant: a transaction that carries no
+  // security_id can never reference this one.
+  transactions.forEach((ele) => {
     if (
-      ele.security_id === event.data.security_id &&
-      ele.object_type !== 'TX_WARRANT_ISSUANCE' &&
-      ele.object_type !== 'TX_WARRANT_ACCEPTANCE' &&
-      !(ele.object_type === 'TX_WARRANT_CANCELLATION' && ele.id === event.data.id)
+      "security_id" in ele &&
+      ele.security_id === data.security_id &&
+      ele.object_type !== "TX_WARRANT_ISSUANCE" &&
+      ele.object_type !== "TX_WARRANT_ACCEPTANCE" &&
+      !(ele.object_type === "TX_WARRANT_CANCELLATION" && ele.id === data.id)
     ) {
-      only_transaction_validity = false;
-      report.only_transaction_validity = false;
+      findings.push({
+        severity: "error",
+        check: "no-other-transactions",
+        message: `Another transaction (${ele.id}) references the transaction's security_id.`,
+        subject,
+      });
     }
   });
-  if (only_transaction_validity) {
-    report.only_transaction_validity = true;
-  }
 
-  if (
-    incoming_warrantIssuance_validity &&
-    incoming_date_validity &&
-    only_transaction_validity
-  ) {
-    validity = true;
-  }
-
-  const result = isGuard ? validity : report;
-  
-  return result;
+  return findings;
 };
 
-export default valid_tx_warrant_cancellation;
+export const TX_WARRANT_CANCELLATION = {
+  effect: "remove",
+  collection: "warrantIssuances",
+  validate,
+  checks,
+} satisfies Descriptor;

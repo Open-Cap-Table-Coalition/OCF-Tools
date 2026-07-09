@@ -1,63 +1,81 @@
-import {OcfMachineContext} from '../../ocfMachine';
-// Reference for tx_warrant_transfer transaction: https://open-cap-table-coalition.github.io/Open-Cap-Format-OCF/schema_markdown/schema/objects/transactions/transfer/StockTransfer/
+import type { TransactionFor } from "../../../types/ocf-input";
+import type { Check, GradedValidator } from "../../../types/validator";
+import type { Finding } from "../../../types/finding";
+import type { Descriptor } from "../../ocfMachine";
 
-/*
-  CURRENT CHECKS:
-    1. Does the incoming security_id referenced by transaction exist in current cap table state?
-    2. Is the date of transaction the same day or after the date of the incoming issuance?
- MISSING CHECKS:
-    1. The security_id of the warrant issuance referred to in the security_id variable must not be the security_id related to any other transactions with the exception of a warrant acceptance transaction.
-*/
+type Transfer = TransactionFor<"TX_WARRANT_TRANSFER">;
 
-const valid_tx_warrant_transfer = (context: OcfMachineContext, event: any, isGuard: Boolean) => {
-  let validity = false;
-  const {transactions} = context.ocfPackageContent;
-  let report: any = {transaction_type: "TX_WARRANT_TRANSFER", transaction_id: event.data.id, transaction_date: event.data.date};
+const checks: readonly Check[] = [
+  {
+    id: "issuance-exists",
+    severity: "error",
+    description:
+      "The warrant issuance referenced by the transaction's security_id exists in the current cap-table state.",
+  },
+  {
+    id: "date-order",
+    severity: "error",
+    description:
+      "The transaction is dated on or after the warrant issuance it references.",
+  },
+  {
+    id: "no-other-transactions",
+    severity: "error",
+    description:
+      "No other transaction references the transaction's security_id, other than a warrant acceptance.",
+    implemented: false,
+  },
+];
 
-  // Check that warrant issuance in incoming security_id referenced by transaction exists in current state.
-  let incoming_warrantIssuance_validity = false;
-  context.warrantIssuances.map((ele: any) => {
-    if (
-      ele.security_id === event.data.security_id &&
-      ele.object_type === 'TX_WARRANT_ISSUANCE'
-    ) {
-      incoming_warrantIssuance_validity = true;
-      report.incoming_warrantIssuance_validity = true;
+const validate: GradedValidator<Transfer> = (context, data) => {
+  const findings: Finding[] = [];
+  const subject = { object_type: data.object_type, id: data.id };
+  const { transactions } = context.ocfPackageContent;
+
+  // issuance-exists scans the live warrant collection.
+  let issuanceExists = false;
+  context.warrantIssuances.forEach((ele) => {
+    if (ele.security_id === data.security_id && ele.object_type === "TX_WARRANT_ISSUANCE") {
+      issuanceExists = true;
     }
   });
-  if (!incoming_warrantIssuance_validity) {
-    report.incoming_warrantIssuance_validity = false;
+  if (!issuanceExists) {
+    findings.push({
+      severity: "error",
+      check: "issuance-exists",
+      message: `No warrant issuance with security_id ${data.security_id} exists in the current cap-table state.`,
+      subject,
+    });
   }
 
-  // Check to ensure that the date of transaction is the same day or after the date of the incoming warrant issuance.
-  let incoming_date_validity = false;
-  transactions.map((ele: any) => {
+  // date-order scans the full package transaction history for the issuance.
+  // The object_type test leads so it narrows the transaction union to a
+  // security_id-bearing member before the other reads.
+  let dateOrdered = false;
+  transactions.forEach((ele) => {
     if (
-      ele.security_id === event.data.security_id &&
-      ele.object_type === 'TX_WARRANT_ISSUANCE'
+      ele.object_type === "TX_WARRANT_ISSUANCE" &&
+      ele.security_id === data.security_id &&
+      ele.date <= data.date
     ) {
-      if (ele.date <= event.data.date) {
-        incoming_date_validity = true;
-        report.incoming_date_validity = true;
-      }
+      dateOrdered = true;
     }
   });
-  if (!incoming_date_validity) {
-    report.incoming_date_validity = false;
+  if (!dateOrdered) {
+    findings.push({
+      severity: "error",
+      check: "date-order",
+      message: `The transaction is not dated on or after a warrant issuance with security_id ${data.security_id}.`,
+      subject,
+    });
   }
 
- 
-
-  if (
-    incoming_warrantIssuance_validity &&
-    incoming_date_validity
-  ) {
-    validity = true;
-  }
-
-  const result = isGuard ? validity : report;
-  
-  return result;
+  return findings;
 };
 
-export default valid_tx_warrant_transfer;
+export const TX_WARRANT_TRANSFER = {
+  effect: "remove",
+  collection: "warrantIssuances",
+  validate,
+  checks,
+} satisfies Descriptor;

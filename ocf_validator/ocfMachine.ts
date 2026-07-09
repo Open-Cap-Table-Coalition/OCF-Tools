@@ -16,6 +16,11 @@ import { TX_CONVERTIBLE_ACCEPTANCE } from "./validators/convertible/tx_convertib
 import { TX_CONVERTIBLE_RETRACTION } from "./validators/convertible/tx_convertible_retraction";
 import { TX_CONVERTIBLE_CANCELLATION } from "./validators/convertible/tx_convertible_cancellation";
 import { TX_CONVERTIBLE_TRANSFER } from "./validators/convertible/tx_convertible_transfer";
+import { TX_WARRANT_ISSUANCE } from "./validators/warrant/tx_warrant_issuance";
+import { TX_WARRANT_ACCEPTANCE } from "./validators/warrant/tx_warrant_acceptance";
+import { TX_WARRANT_RETRACTION } from "./validators/warrant/tx_warrant_retraction";
+import { TX_WARRANT_CANCELLATION } from "./validators/warrant/tx_warrant_cancellation";
+import { TX_WARRANT_TRANSFER } from "./validators/warrant/tx_warrant_transfer";
 import run_EOD from "./eod";
 
 // The validator contract types are defined in types/validator.ts; re-exported
@@ -168,13 +173,13 @@ export const TX_DESCRIPTORS = {
   // --- append: issuance appended to its family collection -----------------
   TX_STOCK_ISSUANCE: { effect: "append", collection: "stockIssuances", legacyValidate: validators.valid_tx_stock_issuance },
   TX_CONVERTIBLE_ISSUANCE,
-  TX_WARRANT_ISSUANCE: { effect: "append", collection: "warrantIssuances", legacyValidate: validators.valid_tx_warrant_issuance },
+  TX_WARRANT_ISSUANCE,
   TX_EQUITY_COMPENSATION_ISSUANCE: { effect: "append", collection: "equityCompensation", legacyValidate: validators.valid_tx_equity_compensation_issuance },
 
   // --- none: validate + report, no collection mutation --------------------
   TX_STOCK_ACCEPTANCE: { effect: "none", legacyValidate: validators.valid_tx_stock_acceptance },
   TX_CONVERTIBLE_ACCEPTANCE,
-  TX_WARRANT_ACCEPTANCE: { effect: "none", legacyValidate: validators.valid_tx_warrant_acceptance },
+  TX_WARRANT_ACCEPTANCE,
   TX_EQUITY_COMPENSATION_ACCEPTANCE: { effect: "none", legacyValidate: validators.valid_tx_equity_compensation_acceptance },
   // TX_EQUITY_COMPENSATION_EXERCISE removes nothing today (its collection filter
   // is commented out in the legacy machine), asymmetric with TX_WARRANT_EXERCISE
@@ -192,9 +197,9 @@ export const TX_DESCRIPTORS = {
   TX_CONVERTIBLE_CANCELLATION,
   TX_CONVERTIBLE_TRANSFER,
   TX_CONVERTIBLE_CONVERSION: { effect: "remove", collection: "convertibleIssuances", legacyValidate: validators.valid_tx_convertible_conversion },
-  TX_WARRANT_RETRACTION: { effect: "remove", collection: "warrantIssuances", legacyValidate: validators.valid_tx_warrant_retraction },
-  TX_WARRANT_CANCELLATION: { effect: "remove", collection: "warrantIssuances", legacyValidate: validators.valid_tx_warrant_cancellation },
-  TX_WARRANT_TRANSFER: { effect: "remove", collection: "warrantIssuances", legacyValidate: validators.valid_tx_warrant_transfer },
+  TX_WARRANT_RETRACTION,
+  TX_WARRANT_CANCELLATION,
+  TX_WARRANT_TRANSFER,
   TX_WARRANT_EXERCISE: { effect: "remove", collection: "warrantIssuances", legacyValidate: validators.valid_tx_warrant_exercise },
   TX_EQUITY_COMPENSATION_RETRACTION: { effect: "remove", collection: "equityCompensation", legacyValidate: validators.valid_tx_equity_compensation_retraction },
   TX_EQUITY_COMPENSATION_CANCELLATION: { effect: "remove", collection: "equityCompensation", legacyValidate: validators.valid_tx_equity_compensation_cancellation },
