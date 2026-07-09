@@ -293,8 +293,9 @@ describe("per-type collection placement", () => {
 // dispatch helpers directly with synthetic descriptors. The machine-actor
 // route stays legacy-only (next describe) until a validator family migrates.
 
-/** A synthetic `none` descriptor carrying a graded validator. */
-const gradedDescriptor = (validate: GradedValidator<any>) => ({ effect: "none", validate }) as const;
+/** A synthetic `none` descriptor carrying a graded validator and (empty) checks. */
+const gradedDescriptor = (validate: GradedValidator<any>) =>
+  ({ effect: "none", validate, checks: [] }) as const;
 
 /** A minimal finding; `check` doubles as the distinguishing label. */
 const finding = (severity: Finding["severity"], check: string): Finding => ({

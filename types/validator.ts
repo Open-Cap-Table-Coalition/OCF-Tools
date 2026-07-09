@@ -6,7 +6,7 @@ import type {
 } from "@opencaptablecoalition/ocf-types";
 import type { OcfPackageContent } from "../read_ocf_package";
 import type { Snapshot } from "./snapshot";
-import type { Finding } from "./finding";
+import type { Finding, Severity } from "./finding";
 
 /**
  * The machine context a validator receives: the package under validation, the
@@ -60,3 +60,30 @@ export type GradedValidator<T> = (
   context: DeepReadonly<OcfMachineContext>,
   data: DeepReadonly<T>,
 ) => Finding[];
+
+/**
+ * One declared validation check for a module, written as structured data in
+ * place of the free-text `CURRENT CHECKS` / `MISSING CHECKS` comment blocks.
+ * This is documentation-grade metadata: the machine never reads it at runtime —
+ * a finding's own severity, not the declared one here, drives validity — so it
+ * exists purely to be rolled up by the coverage-report generator.
+ *
+ *  - `id`:          the check's identifier, unique within its own descriptor (the
+ *                   report renders per transaction type), not globally — reusing a
+ *                   generic id across modules is fine.
+ *  - `severity`:    the severity the report renders for this check, reusing the
+ *                   `Finding` severities. It states declared intent; it does not
+ *                   constrain the severity a validator actually emits.
+ *  - `description`: the human-readable sentence the report renders. Required — it
+ *                   is what replaces the prose comment blocks.
+ *  - `implemented`: absent for a check the module performs, or literally `false`
+ *                   for a declared gap (replacing today's `MISSING CHECKS` prose).
+ *                   Typing it `false` makes `implemented: true` noise
+ *                   unrepresentable, so the field is only ever a gap marker.
+ */
+export type Check = {
+  id: string;
+  severity: Severity;
+  description: string;
+  implemented?: false;
+};
