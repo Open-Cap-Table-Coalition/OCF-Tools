@@ -1,91 +1,30 @@
-import type { TransactionFor } from "../../../types/ocf-input";
-import type { Check, GradedValidator } from "../../../types/validator";
-import type { Finding } from "../../../types/finding";
-import type { Descriptor } from "../../ocfMachine";
+import { defineValidator, type CheckObject } from "../checkKit";
+import { issuanceExists, dateOrder } from "./checks";
 
-type Retraction = TransactionFor<"TX_CONVERTIBLE_RETRACTION">;
+const noAcceptance = {
+  id: "no-acceptance",
+  severity: "error",
+  description: "No convertible acceptance references the transaction's security_id.",
+  run: (context, data: { security_id: string }) => {
+    const messages: string[] = [];
+    const { transactions } = context.ocfPackageContent;
 
-const checks: readonly Check[] = [
-  {
-    id: "issuance-exists",
-    severity: "error",
-    description:
-      "The convertible issuance referenced by the transaction's security_id exists in the current cap-table state.",
-  },
-  {
-    id: "date-order",
-    severity: "error",
-    description:
-      "The transaction is dated on or after the convertible issuance it references.",
-  },
-  {
-    id: "no-acceptance",
-    severity: "error",
-    description: "No convertible acceptance references the transaction's security_id.",
-  },
-];
-
-const validate: GradedValidator<Retraction> = (context, data) => {
-  const findings: Finding[] = [];
-  const subject = { object_type: data.object_type, id: data.id };
-  const { transactions } = context.ocfPackageContent;
-
-  // issuance-exists scans the live convertible collection.
-  let issuanceExists = false;
-  context.convertibleIssuances.forEach((ele) => {
-    if (ele.security_id === data.security_id && ele.object_type === "TX_CONVERTIBLE_ISSUANCE") {
-      issuanceExists = true;
-    }
-  });
-  if (!issuanceExists) {
-    findings.push({
-      severity: "error",
-      check: "issuance-exists",
-      message: `No convertible issuance with security_id ${data.security_id} exists in the current cap-table state.`,
-      subject,
+    // no-acceptance emits one finding per convertible acceptance on this security_id.
+    transactions.forEach((ele) => {
+      if (ele.object_type === "TX_CONVERTIBLE_ACCEPTANCE" && ele.security_id === data.security_id) {
+        messages.push(
+          `A convertible acceptance (${ele.id}) references the transaction's security_id.`,
+        );
+      }
     });
-  }
 
-  // date-order scans the full package transaction history for the issuance.
-  // The object_type test leads so it narrows the transaction union to a
-  // security_id-bearing member before the other reads.
-  let dateOrdered = false;
-  transactions.forEach((ele) => {
-    if (
-      ele.object_type === "TX_CONVERTIBLE_ISSUANCE" &&
-      ele.security_id === data.security_id &&
-      ele.date <= data.date
-    ) {
-      dateOrdered = true;
-    }
-  });
-  if (!dateOrdered) {
-    findings.push({
-      severity: "error",
-      check: "date-order",
-      message: `The transaction is not dated on or after a convertible issuance with security_id ${data.security_id}.`,
-      subject,
-    });
-  }
+    return messages;
+  },
+} satisfies CheckObject;
 
-  // no-acceptance emits one finding per convertible acceptance on this security_id.
-  transactions.forEach((ele) => {
-    if (ele.object_type === "TX_CONVERTIBLE_ACCEPTANCE" && ele.security_id === data.security_id) {
-      findings.push({
-        severity: "error",
-        check: "no-acceptance",
-        message: `A convertible acceptance (${ele.id}) references the transaction's security_id.`,
-        subject,
-      });
-    }
-  });
-
-  return findings;
-};
-
-export const TX_CONVERTIBLE_RETRACTION = {
+export const TX_CONVERTIBLE_RETRACTION = defineValidator({
+  transaction: "TX_CONVERTIBLE_RETRACTION",
   effect: "remove",
   collection: "convertibleIssuances",
-  validate,
-  checks,
-} satisfies Descriptor;
+  checks: [issuanceExists, dateOrder, noAcceptance],
+});
