@@ -1,72 +1,36 @@
-const valid_tx_equity_compensation_acceptance = (context: any, event: any, isGuard: Boolean) => {
-  const {transactions} = context.ocfPackageContent;
+import { defineValidator, type CheckObject } from "../checkKit";
+import { issuanceExists } from "./checks";
 
-  let validity = false;
-  let report: any = {transaction_type: "TX_EQUITY_COMPENSATION_ACCEPTANCE", transaction_id: event.data.id, transaction_date: event.data.date};
+const noRetraction = {
+  id: "no-retraction",
+  severity: "error",
+  description:
+    "No equity compensation retraction dated on or before this transaction references its security_id.",
+  run: (context, data: { security_id: string; date: string }) => {
+    const messages: string[] = [];
+    const { transactions } = context.ocfPackageContent;
 
-  // Check that equity_compensation issuance in incoming security_id referenced by transaction exists in current state.
-  let incoming_equity_compensationIssuance_validity = false;
-  context.equity_compensationIssuances.forEach((ele: any) => {
-    if (
-      ele.security_id === event.data.security_id &&
-      ele.object_type === 'TX_EQUITY_COMPENSATION_ISSUANCE'
-    ) {
-      incoming_equity_compensationIssuance_validity = true;
-      report.incoming_equity_compensationIssuance_validity = true;
-    }
-  });
-  if (!incoming_equity_compensationIssuance_validity) {
-    report.incoming_equity_compensationIssuance_validity = false;
-  }
-
-  // Check to ensure that the date of transaction is the same day or after the date of the incoming equity_compensation issuance.
-  let incoming_date_validity = false;
-  transactions.forEach((ele: any) => {
-    if (
-      ele.security_id === event.data.security_id &&
-      ele.object_type === 'TX_EQUITY_COMPENSATION_ISSUANCE'
-    ) {
-      if (ele.date <= event.data.date) {
-        incoming_date_validity = true;
-        report.incoming_date_validity = true;
+    // no-retraction emits one finding per equity compensation retraction on this
+    // security_id dated on or before this transaction; a later retraction cannot
+    // invalidate it.
+    transactions.forEach((ele) => {
+      if (
+        ele.object_type === "TX_EQUITY_COMPENSATION_RETRACTION" &&
+        ele.security_id === data.security_id &&
+        ele.date <= data.date
+      ) {
+        messages.push(
+          `An equity compensation retraction (${ele.id}) references the transaction's security_id.`,
+        );
       }
-    }
-  });
-  if (!incoming_date_validity) {
-    report.incoming_date_validity = false;
-  }
+    });
 
-  // Check that equity_compensation issuance in incoming security_id does not have a equity_compensation retraction transaction associated with it.
-  let no_equity_compensation_retraction_validity = false;
-  let equity_compensation_retraction_exists = false;
-  transactions.forEach((ele: any) => {
-    if (
-      ele.security_id === event.data.security_id &&
-      ele.object_type === 'TX_EQUITY_COMPENSATION_RETRACTION'
-    ) {
-      equity_compensation_retraction_exists = true;
-    }
-  });
+    return messages;
+  },
+} satisfies CheckObject;
 
-  if (!equity_compensation_retraction_exists) {
-    no_equity_compensation_retraction_validity = true;
-    report.no_equity_compensation_retraction_validity = true;
-  }
-  if (!no_equity_compensation_retraction_validity) {
-    report.no_equity_compensation_retraction_validity = false;
-  }
-
-  if (
-    incoming_equity_compensationIssuance_validity &&
-    incoming_date_validity &&
-    no_equity_compensation_retraction_validity
-  ) {
-    validity = true;
-  }
-
-  const result = isGuard ? validity : report;
-  
-  return result;
-};
-
-export default valid_tx_equity_compensation_acceptance;
+export const TX_EQUITY_COMPENSATION_ACCEPTANCE = defineValidator({
+  transaction: "TX_EQUITY_COMPENSATION_ACCEPTANCE",
+  effect: "none",
+  checks: [issuanceExists, noRetraction],
+});
