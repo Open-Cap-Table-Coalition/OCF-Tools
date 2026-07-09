@@ -1,22 +1,15 @@
 import { describe, it, expect } from "vitest";
 import { TX_DESCRIPTORS } from "../ocf_validator/ocfMachine";
-import type { Finding } from "../types/finding";
-import type { GradedValidator, OcfMachineContext } from "../types/validator";
-import { baseContext, startSeeded, ev } from "./helpers";
-
-/** A context whose package `transactions` list is `transactions`. */
-const contextWith = (
-  overrides: Partial<OcfMachineContext> & { transactions?: any[] } = {},
-): OcfMachineContext => {
-  const { transactions = [], ...rest } = overrides;
-  return baseContext({
-    ...rest,
-    ocfPackageContent: {
-      ...baseContext().ocfPackageContent,
-      transactions,
-    } as OcfMachineContext["ocfPackageContent"],
-  });
-};
+import type { OcfMachineContext } from "../types/validator";
+import {
+  baseContext,
+  startSeeded,
+  ev,
+  contextWith,
+  runValidator,
+  implementedCheckIds,
+  expectFindingShape,
+} from "./helpers";
 
 const MIGRATED_KEYS = [
   "TX_CONVERTIBLE_ISSUANCE",
@@ -26,34 +19,6 @@ const MIGRATED_KEYS = [
   "TX_CONVERTIBLE_TRANSFER",
 ] as const;
 type MigratedKey = (typeof MIGRATED_KEYS)[number];
-
-/** Invoke the graded validator a migrated descriptor carries. */
-const runValidator = (
-  key: MigratedKey,
-  context: OcfMachineContext,
-  data: Record<string, unknown>,
-): Finding[] => {
-  const descriptor = TX_DESCRIPTORS[key] as { validate?: GradedValidator<any> };
-  if (!descriptor.validate) throw new Error(`${key} carries no graded validate`);
-  return descriptor.validate(context, data);
-};
-
-/** The check ids a descriptor declares as implemented (drops `implemented: false`). */
-const implementedCheckIds = (key: MigratedKey): string[] => {
-  const descriptor = TX_DESCRIPTORS[key] as { checks?: readonly { id: string; implemented?: false }[] };
-  return (descriptor.checks ?? []).filter((c) => c.implemented !== false).map((c) => c.id);
-};
-
-/** Assert a finding carries the declared id, error severity, and the transaction as subject. */
-const expectFindingShape = (
-  finding: Finding,
-  check: string,
-  subject: { object_type: string; id: string },
-) => {
-  expect(finding.check).toBe(check);
-  expect(finding.severity).toBe("error");
-  expect(finding.subject).toEqual(subject);
-};
 
 // A single convertible issuance, in the shape both the live collection and the
 // package transaction history hold it. `date` lets a scenario push the issuance
