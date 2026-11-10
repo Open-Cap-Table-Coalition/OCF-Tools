@@ -430,11 +430,11 @@ describe("convertible transfer validity", () => {
 // ---------------------------------------------------------------------------
 
 describe("convertible issuance-exists matching", () => {
-  // Every validator that runs issuance-exists matches the live collection on
-  // security_id alone, ignoring object_type (decision 3 on #198): a live record of
-  // any object_type with the transaction's security_id satisfies it. That is sound
-  // only because the collection holds nothing but issuances, which
-  // tests/ocfMachine.test.ts pins.
+  // All four validators that run issuance-exists find the issuance by
+  // security_id alone and ignore its object_type (decision 3 on #198), so any
+  // record in the collection with a matching security_id counts. That's only
+  // safe because the collection holds nothing but issuances, which
+  // tests/ocfMachine.test.ts checks.
   it.each([
     "TX_CONVERTIBLE_ACCEPTANCE",
     "TX_CONVERTIBLE_RETRACTION",

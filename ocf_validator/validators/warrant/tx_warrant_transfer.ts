@@ -5,6 +5,7 @@ export const TX_WARRANT_TRANSFER = defineValidator({
   transaction: "TX_WARRANT_TRANSFER",
   effect: "remove",
   collection: "warrantIssuances",
-  // Declared but not implemented here: the cancellation validator's check, as a gap.
+  // Transfers don't perform no-other-transactions yet, so it's listed as a gap.
+  // It reuses cancellation's definition so the two stay in sync.
   checks: [issuanceExists, dateOrder, asGap(noOtherTransactions)],
 });

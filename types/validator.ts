@@ -62,32 +62,26 @@ export type GradedValidator<T> = (
 ) => Finding[];
 
 /**
- * One declared validation check for a module, written as structured data in
- * place of the free-text `CURRENT CHECKS` / `MISSING CHECKS` comment blocks.
- * The machine never reads a descriptor's `checks` array at runtime; it is rolled
- * up by the coverage-report generator. But a validator built with
- * `defineValidator` (see `ocf_validator/validators/checkKit.ts`) derives both
- * this metadata and its findings from the same check objects, so the declared
- * `severity` is not documentation only: it is stamped onto every finding the
- * check emits, and it decides validity.
+ * One check a validator performs (or should perform), written as data. This
+ * replaces the old free-text `CURRENT CHECKS` / `MISSING CHECKS` comment blocks.
  *
- *  - `id`:          the check's identifier, unique within its own descriptor (the
- *                   report renders per transaction type), not globally — reusing a
- *                   generic id across modules is fine. Stamped onto each finding's
- *                   `check`.
- *  - `severity`:    reusing the `Finding` severities, the severity of every finding
- *                   this check emits, and the severity the report renders. The
- *                   machine blocks a transaction only on an "error" finding, so
- *                   changing a check to "warning" stops its failures from blocking
- *                   the transaction: a behavior change, not a relabeling.
- *  - `description`: the human-readable sentence the report renders. Required — it
- *                   is what replaces the prose comment blocks.
- *  - `implemented`: absent for a check the module performs, or literally `false`
- *                   for a declared gap (replacing today's `MISSING CHECKS` prose).
- *                   Typing it `false` makes `implemented: true` noise
- *                   unrepresentable, so the field is only ever a gap marker.
- *                   `defineValidator` derives it: a check object with no `run`
- *                   is a gap.
+ * The machine doesn't read these while validating; the coverage report does.
+ * But for validators built with `defineValidator` (see
+ * `ocf_validator/validators/checkKit.ts`), the same definitions also produce the
+ * findings, so `severity` affects behavior, not just the report.
+ *
+ *  - `id`:          the check's name, e.g. "issuance-exists". It must be unique
+ *                   within one transaction type's list; the same id can appear
+ *                   under different transaction types. Copied onto each finding.
+ *  - `severity`:    "error" or "warning". Copied onto every finding the check
+ *                   produces. Only errors block a transaction, so changing a
+ *                   check to "warning" lets transactions that fail it through.
+ *  - `description`: the sentence the report shows for this check. Required.
+ *  - `implemented`: left out for a check the validator performs; `false` for a
+ *                   known gap, a check that's needed but not written yet. It
+ *                   can only be `false`, never `true`, so it only ever marks a
+ *                   gap. `defineValidator` sets it for you: a check with no
+ *                   `run` is a gap.
  */
 export type Check = {
   id: string;

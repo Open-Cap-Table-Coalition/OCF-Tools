@@ -138,13 +138,16 @@ type Validator<T> = (
  * validator cannot be declared under a mismatched collection (demonstrated in
  * `types/ocf-machine-table.assert.ts`).
  *
- * Each graded arm also carries `checks`: the module's declared validation
- * coverage as structured `Check` data (see `types/validator.ts`). The machine
- * never reads the array — it is for the coverage-report generator — but
- * requiring it on the graded arms makes declaring the checks inseparable from
- * migrating a family to the graded shape. (The declared severities still matter
- * at runtime: `defineValidator` stamps them onto the findings `validate`
- * returns.) Legacy arms carry none.
+ * Graded descriptors (the ones with `validate`) must also list their checks in
+ * `checks` (see `types/validator.ts`). The machine doesn't read this list while
+ * validating; it's for the coverage report, which shows what each transaction
+ * type checks. Making it required means no family can move to the graded style
+ * without listing its checks. Legacy descriptors don't have it.
+ *
+ * The list isn't only documentation, though. For validators built with
+ * `defineValidator`, the same check definitions produce the findings, and each
+ * finding's severity is copied from its check. Changing a check's severity
+ * changes whether a failing transaction is blocked.
  */
 type Descriptor =
   | { effect: "passthrough" }
@@ -172,12 +175,14 @@ type Descriptor =
 export type ActiveDescriptor = Exclude<Descriptor, { effect: "passthrough" }>;
 
 /**
- * The shape of the descriptor table: a `Descriptor` for every `TxKey`, where a
- * descriptor that names its own transaction (every one `defineValidator` builds
- * does) must name the key it is filed under. A graded validator filed under
- * another transaction's key is therefore a compile error, even for `none` and
- * `remove` descriptors, whose `validate` the `Descriptor` arms do not type by
- * payload.
+ * The type the descriptor table must satisfy: one descriptor for every
+ * transaction type. If a descriptor says which transaction it's for (every one
+ * built by `defineValidator` does), that must match the key it's listed under.
+ *
+ * For example, listing the warrant retraction validator under
+ * `TX_CONVERTIBLE_RETRACTION` won't compile. `Descriptor` alone wouldn't catch
+ * that: it checks an "append" descriptor's validator against its collection,
+ * but accepts any validator on a "none" or "remove" descriptor.
  */
 export type DescriptorTable = { [K in TxKey]: Descriptor & { transaction?: K } };
 

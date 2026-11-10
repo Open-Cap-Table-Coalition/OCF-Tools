@@ -252,13 +252,15 @@ describe("per-type collection placement", () => {
 // Family collections hold only issuances
 // ---------------------------------------------------------------------------
 
-// The graded issuance-exists checks match the live collection on security_id
-// alone (decision 3 on #198), which is sound only while every collection holds
-// nothing but issuances. That holds because the collections start empty, only
-// the four family issuance keys append (each appending its own payload, pinned
-// above), and removal only filters (also pinned above). The append set and the
-// empty start are pinned here. The append set is written out by hand:
-// TX_PLAN_SECURITY_ISSUANCE is passthrough and appends nothing.
+// issuance-exists finds an issuance by security_id alone (decision 3 on #198).
+// That's only safe if the collections never hold anything but issuances, which
+// is true because:
+//  - they start empty (tested here);
+//  - only the four family issuance types add to them (tested here), and each
+//    adds its own transaction (tested above);
+//  - removing only takes things out (tested above).
+// The issuance types are written out by hand on purpose. TX_PLAN_SECURITY_ISSUANCE
+// isn't one of them: the machine currently ignores that type.
 const ISSUANCE_KEYS = [
   "TX_STOCK_ISSUANCE",
   "TX_CONVERTIBLE_ISSUANCE",

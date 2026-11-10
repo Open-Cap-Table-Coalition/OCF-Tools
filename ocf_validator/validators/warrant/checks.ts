@@ -1,6 +1,6 @@
 import { familyChecksFor } from "../checks";
 
-/** The family checks shared within the warrant family. */
+/** Checks used by more than one warrant validator, worded for warrants. */
 export const { issuanceExists, dateOrder, noOtherTransactions } = familyChecksFor({
   name: "warrant",
   collection: "warrantIssuances",

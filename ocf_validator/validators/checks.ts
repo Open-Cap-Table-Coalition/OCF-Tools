@@ -3,9 +3,8 @@ import type { CollectionKey, TxKey } from "../ocfMachine";
 import type { CheckObject } from "./checkKit";
 
 /**
- * The stakeholder referenced by the transaction exists in the stakeholder file.
- * Family-independent: every issuance references its stakeholder by
- * `stakeholder_id`.
+ * The stakeholder named by the transaction's `stakeholder_id` is in the
+ * package's stakeholder file. Every family's issuance validator uses this.
  */
 export const stakeholderExists = {
   id: "stakeholder-exists",
@@ -16,8 +15,8 @@ export const stakeholderExists = {
     const messages: string[] = [];
     const { stakeholders } = context.ocfPackageContent;
 
-    // The package reader leaves stakeholders untyped; the parameter annotation
-    // names the one field this check reads.
+    // The package reader doesn't give stakeholders a type, so this states the
+    // one field the check uses.
     let stakeholderExists = false;
     stakeholders.forEach((ele: { id: string }) => {
       if (ele.id === data.stakeholder_id) stakeholderExists = true;
@@ -33,12 +32,13 @@ export const stakeholderExists = {
 } satisfies CheckObject<{ stakeholder_id: string }>;
 
 /**
- * A security family's vocabulary, as the family checks below read it: the noun
- * the messages use, the live collection, the issuance transaction, and the
- * acceptance and cancellation transactions the no-other-transactions scan
- * exempts. `issuance` is tied to `collection` (it must be the `object_type` the
- * collection holds), and `acceptance` / `cancellation` must be real transaction
- * keys of that kind, so a mismatched or mistyped literal fails to compile.
+ * What the shared checks need to know about a family: its name as used in
+ * messages ("convertible"), its collection, and its issuance, acceptance, and
+ * cancellation transaction types.
+ *
+ * The types catch mix-ups: `issuance` must be the transaction type that
+ * `collection` actually holds, and `acceptance` and `cancellation` must be real
+ * transaction types, so a typo won't compile.
  */
 type Family = {
   [C in CollectionKey]: {
@@ -51,15 +51,16 @@ type Family = {
 }[CollectionKey];
 
 /**
- * The checks every security family shares, phrased in that family's vocabulary.
- * Each family's `checks.ts` calls this once; its validator modules import the
- * results from there.
+ * Builds the checks every security family uses the same way, worded for the
+ * given family. Each family's `checks.ts` calls this once, and that family's
+ * validators import the checks from there.
  */
 export function familyChecksFor({ name, collection, issuance, acceptance, cancellation }: Family) {
   /**
-   * The issuance referenced by the transaction's security_id exists in the
-   * current cap-table state. Matches on security_id alone against the live
-   * family collection, which holds only issuances.
+   * The issuance named by the transaction's `security_id` is currently on the
+   * cap table. Looks it up in the family's collection by `security_id` only.
+   * That's enough because the collection only ever holds issuances, which
+   * tests/ocfMachine.test.ts checks.
    */
   const issuanceExists = {
     id: "issuance-exists",
@@ -85,7 +86,7 @@ export function familyChecksFor({ name, collection, issuance, acceptance, cancel
   } satisfies CheckObject<{ security_id: string }>;
 
   /**
-   * The transaction is dated on or after the issuance it references.
+   * The transaction is dated on or after the issuance it refers to.
    */
   const dateOrder = {
     id: "date-order",
@@ -95,9 +96,10 @@ export function familyChecksFor({ name, collection, issuance, acceptance, cancel
       const messages: string[] = [];
       const { transactions } = context.ocfPackageContent;
 
-      // date-order scans the full package transaction history for the issuance.
-      // The object_type test leads so it narrows the transaction union to a
-      // security_id-bearing member before the other reads.
+      // Searches every transaction in the package, not just the current
+      // collection. The object_type comparison comes first because it tells
+      // TypeScript this is an issuance, which is what allows reading
+      // `security_id` and `date` next.
       let dateOrdered = false;
       transactions.forEach((ele) => {
         if (
@@ -119,10 +121,9 @@ export function familyChecksFor({ name, collection, issuance, acceptance, cancel
   } satisfies CheckObject<{ security_id: string; date: string }>;
 
   /**
-   * No other transaction references the transaction's security_id, other than
-   * the issuance, an acceptance, and the cancellation under validation itself.
-   * Implemented by the cancellation validator; the transfer validator declares
-   * it as a gap via `asGap`.
+   * Nothing refers to this security except its issuance, acceptances, and the
+   * cancellation being validated. The cancellation validator runs this check;
+   * the transfer validator only declares it, as a gap (see `asGap`).
    */
   const noOtherTransactions = {
     id: "no-other-transactions",
@@ -132,11 +133,9 @@ export function familyChecksFor({ name, collection, issuance, acceptance, cancel
       const messages: string[] = [];
       const { transactions } = context.ocfPackageContent;
 
-      // no-other-transactions emits one finding per transaction on this security_id,
-      // exempting the issuance, any acceptance, and this cancellation itself.
-      // This scan keeps every transaction type in play, so it narrows by property
-      // presence rather than by discriminant: a transaction that carries no
-      // security_id can never reference this one.
+      // One finding for each other transaction on this security_id. Many
+      // transaction types have no security_id field at all, so it checks for the
+      // field first; a transaction without one can't refer to this security.
       transactions.forEach((ele) => {
         if (
           "security_id" in ele &&
