@@ -12,7 +12,15 @@
  *  - a `Check` literal requires `id`, `severity`, and `description`, and admits
  *    `implemented` only when absent or literally `false`;
  *  - every graded descriptor arm carries its declared `checks`, and a graded
- *    descriptor missing `checks` is not a `Descriptor`.
+ *    descriptor missing `checks` is not a `Descriptor`;
+ *  - `defineValidator` rejects a collection on a "none" declaration, a check
+ *    that reads a field the transaction doesn't have, and (through
+ *    `Descriptor`) an "append" to another family's collection;
+ *  - a check can't modify the transaction it's given;
+ *  - a descriptor listed under another transaction's key is rejected, and the
+ *    real table is checked against `DescriptorTable` directly;
+ *  - `familyChecksFor` rejects an issuance type that doesn't match the
+ *    collection, and a misspelled acceptance type.
  */
 import type {
   OCFWarrantIssuance,
@@ -23,7 +31,10 @@ import {
   TX_DESCRIPTORS,
   type TxKey,
   type Descriptor,
+  type DescriptorTable,
 } from "../ocf_validator/ocfMachine";
+import { defineValidator, type CheckObject } from "../ocf_validator/validators/checkKit";
+import { familyChecksFor } from "../ocf_validator/validators/checks";
 import type { Check, GradedValidator, OcfMachineContext } from "./validator";
 import type { Expect, Equal } from "./type-assert";
 
@@ -150,3 +161,79 @@ const _gradedWithChecks: Descriptor = { effect: "none", validate: gradedValidate
 // …but dropping `checks` (the one-field delta) leaves it matching no arm.
 // @ts-expect-error — a graded descriptor must declare `checks`.
 const _gradedNoChecks: Descriptor = { effect: "none", validate: gradedValidate };
+
+// --- defineValidator: the spec shape ----------------------------------------
+
+// An effect-none spec without a collection compiles…
+const _noneSpec = defineValidator({ transaction: "TX_CONVERTIBLE_ACCEPTANCE", effect: "none", checks: [] });
+// …but the same declaration plus a collection does not: a "none" transaction changes no collection.
+// @ts-expect-error — an effect-none spec carries no collection.
+const _noneSpecWithCollection = defineValidator({ transaction: "TX_CONVERTIBLE_ACCEPTANCE", effect: "none", collection: "convertibleIssuances", checks: [] });
+
+// --- defineValidator: each check must accept the transaction's payload ------
+
+// Two stand-in checks, one reading security_id and one reading stakeholder_id.
+// Only their types matter, so they're declared without bodies.
+declare const readsSecurityId: CheckObject<{ security_id: string }>;
+declare const readsStakeholderId: CheckObject<{ stakeholder_id: string }>;
+
+// An acceptance carries a security_id, so a check reading one compiles…
+const _payloadMatch = defineValidator({ transaction: "TX_CONVERTIBLE_ACCEPTANCE", effect: "none", checks: [readsSecurityId] });
+// …but an acceptance carries no stakeholder_id, so the issuance check does not.
+// @ts-expect-error — the check reads a field the acceptance payload does not carry.
+const _payloadMismatch = defineValidator({ transaction: "TX_CONVERTIBLE_ACCEPTANCE", effect: "none", checks: [readsStakeholderId] });
+
+// --- defineValidator: wrong-family append -----------------------------------
+
+// A warrant issuance appended to the warrant collection is a Descriptor…
+const _defineAppendWarrant = defineValidator({ transaction: "TX_WARRANT_ISSUANCE", effect: "append", collection: "warrantIssuances", checks: [] }) satisfies Descriptor;
+// …but the same declaration naming the convertible collection is not.
+// @ts-expect-error — a warrant issuance cannot append to the convertible collection.
+const _defineAppendWrongFamily = defineValidator({ transaction: "TX_WARRANT_ISSUANCE", effect: "append", collection: "convertibleIssuances", checks: [] }) satisfies Descriptor;
+
+// --- A check body cannot mutate its payload ---------------------------------
+
+// Reading the payload compiles…
+const _readingCheck = {
+  id: "issuance-exists",
+  severity: "error",
+  description: "The referenced issuance exists.",
+  run: (_context, data) => [data.security_id],
+} satisfies CheckObject<{ security_id: string }>;
+// …but changing it does not: `run` gets the transaction read-only.
+const _mutatingCheck = {
+  id: "issuance-exists",
+  severity: "error",
+  description: "The referenced issuance exists.",
+  run: (_context, data) => {
+    // @ts-expect-error — a check's payload is read-only.
+    data.security_id = "changed";
+    return [];
+  },
+} satisfies CheckObject<{ security_id: string }>;
+
+// --- A descriptor is filed under its own transaction's key -------------------
+
+const _warrantRetraction = defineValidator({ transaction: "TX_WARRANT_RETRACTION", effect: "remove", collection: "warrantIssuances", checks: [] });
+
+// Filed under its own key, the descriptor fits the table…
+const _filedUnderOwnKey = { TX_WARRANT_RETRACTION: _warrantRetraction } satisfies Partial<DescriptorTable>;
+// …but listed under the convertible retraction's key it does not. Nothing else
+// would catch this: "remove" descriptors aren't checked against their collection.
+// @ts-expect-error — the descriptor names TX_WARRANT_RETRACTION, not TX_CONVERTIBLE_RETRACTION.
+const _filedUnderOtherKey = { TX_CONVERTIBLE_RETRACTION: _warrantRetraction } satisfies Partial<DescriptorTable>;
+
+// Check the real table here too, not only in ocfMachine.ts, so loosening the
+// type check there can't quietly turn off the key check.
+const _realTable: DescriptorTable = TX_DESCRIPTORS;
+
+// --- familyChecksFor: family vocabulary --------------------------------------
+
+// A consistent family compiles…
+const _warrantFamily = familyChecksFor({ name: "warrant", collection: "warrantIssuances", issuance: "TX_WARRANT_ISSUANCE", acceptance: "TX_WARRANT_ACCEPTANCE", cancellation: "TX_WARRANT_CANCELLATION" });
+// …but an issuance the collection does not hold does not…
+// @ts-expect-error — the warrant collection holds TX_WARRANT_ISSUANCE, not TX_CONVERTIBLE_ISSUANCE.
+const _mismatchedIssuance = familyChecksFor({ name: "warrant", collection: "warrantIssuances", issuance: "TX_CONVERTIBLE_ISSUANCE", acceptance: "TX_WARRANT_ACCEPTANCE", cancellation: "TX_WARRANT_CANCELLATION" });
+// …and neither does a mistyped acceptance key.
+// @ts-expect-error — TX_WARRANT_ACCEPTENCE is not a transaction key.
+const _mistypedAcceptance = familyChecksFor({ name: "warrant", collection: "warrantIssuances", issuance: "TX_WARRANT_ISSUANCE", acceptance: "TX_WARRANT_ACCEPTENCE", cancellation: "TX_WARRANT_CANCELLATION" });

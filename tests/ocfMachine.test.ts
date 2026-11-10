@@ -1,9 +1,11 @@
 import { describe, it, expect } from "vitest";
+import { createActor } from "xstate";
 import {
   collectionUpdate,
   isValidOutcome,
   outcomeUpdate,
   failureResult,
+  ocfMachine,
   TX_DESCRIPTORS,
   type OcfMachineEvent,
   type TxKey,
@@ -243,6 +245,43 @@ describe("per-type collection placement", () => {
   it("a passthrough type mutates no collection", () => {
     const result = collectionUpdate(baseContext(), ev("TX_VESTING_START", { security_id: "s" }));
     expect(Object.keys(result)).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Family collections hold only issuances
+// ---------------------------------------------------------------------------
+
+// issuance-exists finds an issuance by security_id alone (decision 3 on #198).
+// That's only safe if the collections never hold anything but issuances, which
+// is true because:
+//  - they start empty (tested here);
+//  - only the four family issuance types add to them (tested here), and each
+//    adds its own transaction (tested above);
+//  - removing only takes things out (tested above).
+// The issuance types are written out by hand on purpose. TX_PLAN_SECURITY_ISSUANCE
+// isn't one of them: the machine currently ignores that type.
+const ISSUANCE_KEYS = [
+  "TX_STOCK_ISSUANCE",
+  "TX_CONVERTIBLE_ISSUANCE",
+  "TX_WARRANT_ISSUANCE",
+  "TX_EQUITY_COMPENSATION_ISSUANCE",
+];
+
+describe("family collections hold only issuances", () => {
+  it("appends for exactly the four family issuance keys", () => {
+    const appendKeys = (Object.keys(TX_DESCRIPTORS) as TxKey[]).filter(
+      (key) => TX_DESCRIPTORS[key].effect === "append",
+    );
+    expect(new Set(appendKeys)).toEqual(new Set(ISSUANCE_KEYS));
+  });
+
+  it("starts every family collection empty", () => {
+    const { context } = createActor(ocfMachine).start().getSnapshot();
+    expect(context.stockIssuances).toEqual([]);
+    expect(context.convertibleIssuances).toEqual([]);
+    expect(context.warrantIssuances).toEqual([]);
+    expect(context.equityCompensation).toEqual([]);
   });
 });
 

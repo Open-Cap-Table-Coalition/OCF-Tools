@@ -138,11 +138,16 @@ type Validator<T> = (
  * validator cannot be declared under a mismatched collection (demonstrated in
  * `types/ocf-machine-table.assert.ts`).
  *
- * Each graded arm also carries `checks`: the module's declared validation
- * coverage as structured `Check` data (see `types/validator.ts`). The machine
- * never reads it — it is documentation-grade metadata for the coverage-report
- * generator — but requiring it on the graded arms makes declaring the checks
- * inseparable from migrating a family to the graded shape. Legacy arms carry none.
+ * Graded descriptors (the ones with `validate`) must also list their checks in
+ * `checks` (see `types/validator.ts`). The machine doesn't read this list while
+ * validating; it's for the coverage report, which shows what each transaction
+ * type checks. Making it required means no family can move to the graded style
+ * without listing its checks. Legacy descriptors don't have it.
+ *
+ * The list isn't only documentation, though. For validators built with
+ * `defineValidator`, the same check definitions produce the findings, and each
+ * finding's severity is copied from its check. Changing a check's severity
+ * changes whether a failing transaction is blocked.
  */
 type Descriptor =
   | { effect: "passthrough" }
@@ -168,6 +173,18 @@ type Descriptor =
 
 /** A non-passthrough descriptor — the shape the dispatch helpers consume. */
 export type ActiveDescriptor = Exclude<Descriptor, { effect: "passthrough" }>;
+
+/**
+ * The type the descriptor table must satisfy: one descriptor for every
+ * transaction type. If a descriptor says which transaction it's for (every one
+ * built by `defineValidator` does), that must match the key it's listed under.
+ *
+ * For example, listing the warrant retraction validator under
+ * `TX_CONVERTIBLE_RETRACTION` won't compile. `Descriptor` alone wouldn't catch
+ * that: it checks an "append" descriptor's validator against its collection,
+ * but accepts any validator on a "none" or "remove" descriptor.
+ */
+export type DescriptorTable = { [K in TxKey]: Descriptor & { transaction?: K } };
 
 export const TX_DESCRIPTORS = {
   // --- append: issuance appended to its family collection -----------------
@@ -208,7 +225,7 @@ export const TX_DESCRIPTORS = {
   // --- passthrough: received and silently ignored today ------------------
   //   No validator, no report entry, no collection mutation. They stay in
   //   `capTable` so today's behavior (and the characterization snapshot, which
-  //   contains TX_VESTING_START) is byte-identical. `satisfies Record<TxKey, …>`
+  //   contains TX_VESTING_START) is byte-identical. `satisfies DescriptorTable`
   //   below forces any future OCF transaction type to be classified here — a
   //   compile error until it is.
   TX_EQUITY_COMPENSATION_RELEASE: { effect: "passthrough" },
@@ -230,7 +247,7 @@ export const TX_DESCRIPTORS = {
   TX_VESTING_ACCELERATION: { effect: "passthrough" },
   TX_VESTING_EVENT: { effect: "passthrough" },
   TX_VESTING_START: { effect: "passthrough" },
-} satisfies Record<TxKey, Descriptor>;
+} satisfies DescriptorTable;
 
 export type { Descriptor };
 

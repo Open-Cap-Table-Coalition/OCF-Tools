@@ -299,16 +299,6 @@ describe("convertible cancellation validity", () => {
     expect(runValidator("TX_CONVERTIBLE_CANCELLATION", context, cancellation())).toEqual([]);
   });
 
-  it("treats any live convertible record matched by security_id as the issuance, regardless of object_type", () => {
-    // The existence check matches on security_id alone; a non-issuance object_type
-    // in the live collection still satisfies it.
-    const context = contextWith({
-      convertibleIssuances: [{ id: "x", object_type: "SOMETHING_ELSE", security_id: "sec1", date: "2020-01-01" }] as any,
-      transactions: [issuanceRecord("sec1")],
-    });
-    expect(runValidator("TX_CONVERTIBLE_CANCELLATION", context, cancellation())).toEqual([]);
-  });
-
   it("removes the referenced security from convertibleIssuances on the valid branch", () => {
     const seeded = contextWith({
       convertibleIssuances: [issuanceRecord("sec1"), issuanceRecord("sec2")] as any,
@@ -432,6 +422,31 @@ describe("convertible transfer validity", () => {
     // The declared gap is never checked, so the transaction stays valid here.
     expect(findings).toEqual([]);
     expect(findings.some((f) => f.check === "no-other-transactions")).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// issuance-exists matches the live collection on security_id alone
+// ---------------------------------------------------------------------------
+
+describe("convertible issuance-exists matching", () => {
+  // All four validators that run issuance-exists find the issuance by
+  // security_id alone and ignore its object_type (decision 3 on #198), so any
+  // record in the collection with a matching security_id counts. That's only
+  // safe because the collection holds nothing but issuances, which
+  // tests/ocfMachine.test.ts checks.
+  it.each([
+    "TX_CONVERTIBLE_ACCEPTANCE",
+    "TX_CONVERTIBLE_RETRACTION",
+    "TX_CONVERTIBLE_CANCELLATION",
+    "TX_CONVERTIBLE_TRANSFER",
+  ] as const)("%s treats any live convertible record matched by security_id as the issuance, regardless of object_type", (key) => {
+    const context = contextWith({
+      convertibleIssuances: [{ id: "x", object_type: "SOMETHING_ELSE", security_id: "sec1", date: "2020-01-01" }] as any,
+      transactions: [issuanceRecord("sec1")],
+    });
+    const data = { id: "tx1", object_type: key, security_id: "sec1", date: "2021-01-01" };
+    expect(runValidator(key, context, data)).toEqual([]);
   });
 });
 
