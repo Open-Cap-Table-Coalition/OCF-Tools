@@ -7,7 +7,7 @@ const valid_tx_equity_compensation_retraction = (context: any, event: any, isGua
   const {transactions} = context.ocfPackageContent;
   // Check that equity_compensation issuance in incoming security_id referenced by transaction exists in current state.
   let incoming_equity_compensationIssuance_validity = false;
-  context.equity_compensationIssuances.forEach((ele: any) => {
+  context.equityCompensation.forEach((ele: any) => {
     if (
       ele.security_id === event.data.security_id &&
       ele.object_type === 'TX_EQUITY_COMPENSATION_ISSUANCE'
