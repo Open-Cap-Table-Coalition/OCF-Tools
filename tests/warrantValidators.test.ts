@@ -563,6 +563,31 @@ describe("warrant exercise validity", () => {
     const findings = runValidator("TX_WARRANT_EXERCISE", context, exercise());
     expect(findings.some((f) => f.check === "resulting-security-named")).toBe(false);
   });
+
+  it.each([
+    { shape: "a string", value: "result-stock" },
+    { shape: "an empty string", value: "" },
+    { shape: "an object", value: { id: "result-stock" } },
+    { shape: "a number", value: 1 },
+    { shape: "null", value: null },
+    { shape: "undefined", value: undefined },
+  ])("reports a resulting_security_ids that is $shape as one resulting-stock-exists error instead of throwing", ({ value }) => {
+    const context = contextWith({
+      warrantIssuances: [liveWarrant("war-sec", "holder-a")] as any,
+      transactions: [
+        liveWarrant("war-sec", "holder-a"),
+        stockIssuance("result-stock", "holder-a", EXERCISE_DATE),
+      ],
+    });
+    const findings = runValidator(
+      "TX_WARRANT_EXERCISE",
+      context,
+      exercise({ resulting_security_ids: value }),
+    );
+    expect(findings).toHaveLength(1);
+    expectFindingShape(findings[0], "resulting-stock-exists", subject);
+    expect(findings[0].message).toContain("not a list");
+  });
 });
 
 // ---------------------------------------------------------------------------
