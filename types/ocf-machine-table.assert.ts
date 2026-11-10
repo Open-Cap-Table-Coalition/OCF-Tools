@@ -230,10 +230,10 @@ const _realTable: DescriptorTable = TX_DESCRIPTORS;
 // --- familyChecksFor: family vocabulary --------------------------------------
 
 // A consistent family compiles…
-const _warrantFamily = familyChecksFor({ name: "warrant", collection: "warrantIssuances", issuance: "TX_WARRANT_ISSUANCE", acceptance: "TX_WARRANT_ACCEPTANCE", cancellation: "TX_WARRANT_CANCELLATION" });
+const _warrantFamily = familyChecksFor({ name: "warrant", collection: "warrantIssuances", issuance: "TX_WARRANT_ISSUANCE", acceptance: "TX_WARRANT_ACCEPTANCE" });
 // …but an issuance the collection does not hold does not…
 // @ts-expect-error — the warrant collection holds TX_WARRANT_ISSUANCE, not TX_CONVERTIBLE_ISSUANCE.
-const _mismatchedIssuance = familyChecksFor({ name: "warrant", collection: "warrantIssuances", issuance: "TX_CONVERTIBLE_ISSUANCE", acceptance: "TX_WARRANT_ACCEPTANCE", cancellation: "TX_WARRANT_CANCELLATION" });
+const _mismatchedIssuance = familyChecksFor({ name: "warrant", collection: "warrantIssuances", issuance: "TX_CONVERTIBLE_ISSUANCE", acceptance: "TX_WARRANT_ACCEPTANCE" });
 // …and neither does a mistyped acceptance key.
 // @ts-expect-error — TX_WARRANT_ACCEPTENCE is not a transaction key.
-const _mistypedAcceptance = familyChecksFor({ name: "warrant", collection: "warrantIssuances", issuance: "TX_WARRANT_ISSUANCE", acceptance: "TX_WARRANT_ACCEPTENCE", cancellation: "TX_WARRANT_CANCELLATION" });
+const _mistypedAcceptance = familyChecksFor({ name: "warrant", collection: "warrantIssuances", issuance: "TX_WARRANT_ISSUANCE", acceptance: "TX_WARRANT_ACCEPTENCE" });
