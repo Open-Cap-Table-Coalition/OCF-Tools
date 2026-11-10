@@ -468,6 +468,15 @@ describe("convertible conversion validity", () => {
     expect(findings[0].message).toContain("conv-other");
   });
 
+  it("flags another type's transaction that reuses the conversion's id, pinning the self-exemption to the transaction type", () => {
+    // Ids aren't unique across types, so a vesting start sharing the conversion's
+    // id is still another transaction on the security.
+    const vestingStart = { id: "conv-main", object_type: "TX_VESTING_START", security_id: "conv-sec", date: "2021-01-01" };
+    const findings = noOtherFindings(vestingStart);
+    expect(findings).toHaveLength(1);
+    expectFindingShape(findings[0], "no-other-transactions", subject);
+  });
+
   it("warns once when the resulting array is empty and stays silent on the per-element resulting checks", () => {
     const context = contextWith({
       convertibleIssuances: [issuanceRecord("conv-sec")] as any,
@@ -497,6 +506,31 @@ describe("convertible conversion validity", () => {
     });
     const findings = runValidator("TX_CONVERTIBLE_CONVERSION", context, conversion());
     expect(findings.some((f) => f.check === "resulting-security-named")).toBe(false);
+  });
+
+  it.each([
+    { shape: "a string", value: "result-stock" },
+    { shape: "an empty string", value: "" },
+    { shape: "an object", value: { id: "result-stock" } },
+    { shape: "a number", value: 1 },
+    { shape: "null", value: null },
+    { shape: "undefined", value: undefined },
+  ])("reports a resulting_security_ids that is $shape as one resulting-stock-exists error instead of throwing", ({ value }) => {
+    const context = contextWith({
+      convertibleIssuances: [liveConvertible("conv-sec", "holder-a")] as any,
+      transactions: [
+        liveConvertible("conv-sec", "holder-a"),
+        stockIssuance("result-stock", "holder-a", CONVERSION_DATE),
+      ],
+    });
+    const findings = runValidator(
+      "TX_CONVERTIBLE_CONVERSION",
+      context,
+      conversion({ resulting_security_ids: value }),
+    );
+    expect(findings).toHaveLength(1);
+    expectFindingShape(findings[0], "resulting-stock-exists", subject);
+    expect(findings[0].message).toContain("not a list");
   });
 
   it("declares quantity-reconciles and balance-security-exists as unimplemented gaps", () => {
@@ -555,6 +589,35 @@ describe("convertible conversion drives the machine to completion", () => {
     expect(snapshot.context.findings[0].severity).toBe("warning");
     expect(snapshot.context.convertibleIssuances).toEqual([]);
   });
+
+  // A run used to stop at every conversion, so it never reached the legacy equity
+  // compensation validators after one. Now that conversions pass, the run goes on
+  // to them, and they must validate rather than crash the machine.
+  it.each(["TX_EQUITY_COMPENSATION_ACCEPTANCE", "TX_EQUITY_COMPENSATION_RETRACTION"])(
+    "goes on past a valid conversion to validate a later %s",
+    (txType) => {
+      const issuance = { id: "ci-z", object_type: "TX_CONVERTIBLE_ISSUANCE", security_id: "conv-sec", stakeholder_id: "holder-a", date: "2020-01-01" };
+      const conversion = { id: "cv-z", object_type: "TX_CONVERTIBLE_CONVERSION", security_id: "conv-sec", resulting_security_ids: ["stock-sec"], date: "2020-01-02" };
+      const resultingStock = { id: "si-z", object_type: "TX_STOCK_ISSUANCE", security_id: "stock-sec", stakeholder_id: "holder-a", date: "2020-01-02" };
+      // Seeded straight into its collection, so the legacy equity issuance
+      // validator stays out of the run just as the stock one does.
+      const option = { id: "ec-z", object_type: "TX_EQUITY_COMPENSATION_ISSUANCE", security_id: "opt-sec", stakeholder_id: "holder-a", date: "2020-01-03" };
+      const optionTx = { id: "ec-tx", object_type: txType, security_id: "opt-sec", date: "2020-01-04" };
+
+      const actor = startSeeded({
+        ...seedPackage([issuance, conversion, resultingStock, option, optionTx]),
+        equityCompensation: [option] as any,
+      });
+      actor.send(ev("TX_CONVERTIBLE_ISSUANCE", issuance));
+      actor.send(ev("TX_CONVERTIBLE_CONVERSION", conversion));
+      actor.send(ev(txType, optionTx));
+
+      const snapshot = actor.getSnapshot();
+      expect(snapshot.status).toBe("active");
+      expect(snapshot.value).toBe("capTable");
+      expect(snapshot.context.findings).toEqual([]);
+    },
+  );
 });
 
 // ---------------------------------------------------------------------------

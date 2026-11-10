@@ -135,7 +135,9 @@ export function familyChecksFor({ name, collection, issuance, acceptance }: Fami
       // before this one. Many transaction types have no security_id field at
       // all, so it checks for the field first; a transaction without one can't
       // refer to this security. The transaction being validated is in the
-      // package history too, so it's skipped by id, whatever its type.
+      // package history too, so it's skipped. It's matched on its type as well
+      // as its id: nothing makes ids unique across types, so matching on id
+      // alone would also skip another type's transaction that shares it.
       transactions.forEach((ele) => {
         if (
           "security_id" in ele &&
@@ -143,7 +145,7 @@ export function familyChecksFor({ name, collection, issuance, acceptance }: Fami
           ele.date <= data.date &&
           ele.object_type !== issuance &&
           ele.object_type !== acceptance &&
-          ele.id !== data.id
+          !(ele.object_type === data.object_type && ele.id === data.id)
         ) {
           messages.push(
             `Another transaction (${ele.id}) references the transaction's security_id.`,
@@ -153,7 +155,7 @@ export function familyChecksFor({ name, collection, issuance, acceptance }: Fami
 
       return messages;
     },
-  } satisfies CheckObject<{ id: string; security_id: string; date: string }>;
+  } satisfies CheckObject<{ object_type: string; id: string; security_id: string; date: string }>;
 
   return { issuanceExists, noOtherTransactions };
 }

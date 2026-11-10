@@ -21,12 +21,22 @@ const resultingStockIssuance = (
       ele.object_type === "TX_STOCK_ISSUANCE" && ele.security_id === resultingId,
   );
 
+// resulting_security_ids comes straight from the package file, and nothing
+// checks its shape first. The resulting checks read it through this helper so a
+// value that isn't a list can't crash the run: resulting-stock-exists reports
+// it, and the other resulting checks pass over it.
+const resultingIds = (
+  data: DeepReadonly<{ resulting_security_ids: string[] }>,
+): readonly string[] | undefined =>
+  Array.isArray(data.resulting_security_ids) ? data.resulting_security_ids : undefined;
+
 const resultingSecurityNamed = {
   id: "resulting-security-named",
   severity: "warning",
   description: "The conversion names at least one resulting security.",
   run: (_context, data) => {
-    if (data.resulting_security_ids.length > 0) return [];
+    const ids = resultingIds(data);
+    if (ids === undefined || ids.length > 0) return [];
     return ["The conversion names no resulting security."];
   },
 } satisfies CheckObject<{ resulting_security_ids: string[] }>;
@@ -37,10 +47,15 @@ const resultingStockExists = {
   description:
     "Each resulting security is a stock issuance present in the package.",
   run: (context, data) => {
+    const ids = resultingIds(data);
+    if (ids === undefined) {
+      return ["The conversion's resulting_security_ids is not a list of security ids."];
+    }
+
     const messages: string[] = [];
 
     // One finding per resulting id with no matching stock issuance in history.
-    data.resulting_security_ids.forEach((resultingId) => {
+    ids.forEach((resultingId) => {
       if (resultingStockIssuance(context, resultingId) === undefined) {
         messages.push(
           `No stock issuance with security_id ${resultingId} appears in the package.`,
@@ -62,7 +77,7 @@ const resultingStockDated = {
 
     // Only resulting ids backed by a stock issuance are judged here; a missing
     // id is solely resulting-stock-exists's concern.
-    data.resulting_security_ids.forEach((resultingId) => {
+    (resultingIds(data) ?? []).forEach((resultingId) => {
       const issuance = resultingStockIssuance(context, resultingId);
       if (issuance !== undefined && issuance.date !== data.date) {
         messages.push(
@@ -94,7 +109,7 @@ const resultingStockStakeholder = {
 
     // As with the date check, only resulting ids backed by a stock issuance are
     // judged.
-    data.resulting_security_ids.forEach((resultingId) => {
+    (resultingIds(data) ?? []).forEach((resultingId) => {
       const issuance = resultingStockIssuance(context, resultingId);
       if (issuance !== undefined && issuance.stakeholder_id !== reference.stakeholder_id) {
         messages.push(
