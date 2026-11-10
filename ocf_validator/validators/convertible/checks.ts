@@ -1,7 +1,7 @@
 import { familyChecksFor } from "../checks";
 
 /** Checks used by more than one convertible validator, worded for convertibles. */
-export const { issuanceExists, dateOrder, noOtherTransactions } = familyChecksFor({
+export const { issuanceExists, noOtherTransactions } = familyChecksFor({
   name: "convertible",
   collection: "convertibleIssuances",
   issuance: "TX_CONVERTIBLE_ISSUANCE",

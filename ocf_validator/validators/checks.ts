@@ -57,15 +57,23 @@ type Family = {
  */
 export function familyChecksFor({ name, collection, issuance, acceptance, cancellation }: Family) {
   /**
-   * The issuance named by the transaction's `security_id` is currently on the
-   * cap table. Looks it up in the family's collection by `security_id` only.
-   * That's enough because the collection only ever holds issuances, which
-   * tests/ocfMachine.test.ts checks.
+   * The issuance named by the transaction's `security_id` is outstanding as of
+   * the transaction's date. Passes if the family's collection holds a record
+   * with that `security_id`. Matching on `security_id` alone is enough because
+   * the collection only ever holds issuances, which tests/ocfMachine.test.ts
+   * checks.
+   *
+   * When there's no match, the message says why, worked out from the package's
+   * full transaction history: the security was never issued, it's only issued
+   * after this transaction, or it was issued on or before this date but is no
+   * longer outstanding. The reason and any date it shows come from one history
+   * record, preferring a match dated on or before the transaction over a later
+   * one.
    */
   const issuanceExists = {
     id: "issuance-exists",
     severity: "error",
-    description: `The ${name} issuance referenced by the transaction's security_id exists in the current cap-table state.`,
+    description: `The ${name} issuance referenced by the transaction's security_id is outstanding as of the transaction's date.`,
     run: (context, data) => {
       const messages: string[] = [];
 
@@ -75,44 +83,33 @@ export function familyChecksFor({ name, collection, issuance, acceptance, cancel
           issuanceExists = true;
         }
       });
-      if (!issuanceExists) {
-        messages.push(
-          `No ${name} issuance with security_id ${data.security_id} exists in the current cap-table state.`,
-        );
-      }
+      if (issuanceExists) return messages;
 
-      return messages;
-    },
-  } satisfies CheckObject<{ security_id: string }>;
-
-  /**
-   * The transaction is dated on or after the issuance it refers to.
-   */
-  const dateOrder = {
-    id: "date-order",
-    severity: "error",
-    description: `The transaction is dated on or after the ${name} issuance it references.`,
-    run: (context, data) => {
-      const messages: string[] = [];
+      // The object_type comparison comes first because it tells TypeScript this
+      // is an issuance, which is what allows reading `security_id` and `date` next.
       const { transactions } = context.ocfPackageContent;
-
-      // Searches every transaction in the package, not just the current
-      // collection. The object_type comparison comes first because it tells
-      // TypeScript this is an issuance, which is what allows reading
-      // `security_id` and `date` next.
-      let dateOrdered = false;
+      let firstIssuanceDate: string | undefined;
+      let onOrBeforeDate: string | undefined;
       transactions.forEach((ele) => {
-        if (
-          ele.object_type === issuance &&
-          ele.security_id === data.security_id &&
-          ele.date <= data.date
-        ) {
-          dateOrdered = true;
+        if (ele.object_type === issuance && ele.security_id === data.security_id) {
+          if (firstIssuanceDate === undefined) firstIssuanceDate = ele.date;
+          if (onOrBeforeDate === undefined && ele.date <= data.date) {
+            onOrBeforeDate = ele.date;
+          }
         }
       });
-      if (!dateOrdered) {
+
+      if (firstIssuanceDate === undefined) {
         messages.push(
-          `The transaction is not dated on or after a ${name} issuance with security_id ${data.security_id}.`,
+          `No ${name} issuance with security_id ${data.security_id} appears in the package.`,
+        );
+      } else if (onOrBeforeDate === undefined) {
+        messages.push(
+          `The ${name} issuance referenced by security_id ${data.security_id} is dated ${firstIssuanceDate}, after this transaction (${data.date}).`,
+        );
+      } else {
+        messages.push(
+          `The ${name} issuance referenced by security_id ${data.security_id} (dated ${onOrBeforeDate}) is not outstanding as of this transaction's date.`,
         );
       }
 
@@ -121,25 +118,28 @@ export function familyChecksFor({ name, collection, issuance, acceptance, cancel
   } satisfies CheckObject<{ security_id: string; date: string }>;
 
   /**
-   * Nothing refers to this security except its issuance, acceptances, and the
-   * cancellation being validated. The cancellation validator runs this check;
-   * the transfer validator only declares it, as a gap (see `asGap`).
+   * Nothing dated on or before this transaction refers to this security except
+   * its issuance, acceptances, and the cancellation being validated. A later
+   * transaction can't make this one invalid. The cancellation validator runs
+   * this check; the transfer validator only declares it, as a gap (see `asGap`).
    */
   const noOtherTransactions = {
     id: "no-other-transactions",
     severity: "error",
-    description: `No other transaction references the transaction's security_id, other than a ${name} acceptance.`,
+    description: `No other transaction dated on or before this transaction references its security_id, other than a ${name} acceptance.`,
     run: (context, data) => {
       const messages: string[] = [];
       const { transactions } = context.ocfPackageContent;
 
-      // One finding for each other transaction on this security_id. Many
-      // transaction types have no security_id field at all, so it checks for the
-      // field first; a transaction without one can't refer to this security.
+      // One finding for each other transaction on this security_id dated on or
+      // before this one. Many transaction types have no security_id field at
+      // all, so it checks for the field first; a transaction without one can't
+      // refer to this security.
       transactions.forEach((ele) => {
         if (
           "security_id" in ele &&
           ele.security_id === data.security_id &&
+          ele.date <= data.date &&
           ele.object_type !== issuance &&
           ele.object_type !== acceptance &&
           !(ele.object_type === cancellation && ele.id === data.id)
@@ -152,7 +152,7 @@ export function familyChecksFor({ name, collection, issuance, acceptance, cancel
 
       return messages;
     },
-  } satisfies CheckObject<{ id: string; security_id: string }>;
+  } satisfies CheckObject<{ id: string; security_id: string; date: string }>;
 
-  return { issuanceExists, dateOrder, noOtherTransactions };
+  return { issuanceExists, noOtherTransactions };
 }
