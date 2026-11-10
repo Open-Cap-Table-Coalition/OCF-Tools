@@ -20,7 +20,8 @@
  *  - a descriptor listed under another transaction's key is rejected, and the
  *    real table is checked against `DescriptorTable` directly;
  *  - `familyChecksFor` rejects an issuance type that doesn't match the
- *    collection, and a misspelled acceptance type.
+ *    collection, a misspelled acceptance type, and a `vests` flag that
+ *    contradicts whether the issuance type has vesting terms.
  */
 import type {
   OCFWarrantIssuance,
@@ -230,10 +231,14 @@ const _realTable: DescriptorTable = TX_DESCRIPTORS;
 // --- familyChecksFor: family vocabulary --------------------------------------
 
 // A consistent family compiles…
-const _warrantFamily = familyChecksFor({ name: "warrant", collection: "warrantIssuances", issuance: "TX_WARRANT_ISSUANCE", acceptance: "TX_WARRANT_ACCEPTANCE" });
+const _warrantFamily = familyChecksFor({ name: "warrant", collection: "warrantIssuances", issuance: "TX_WARRANT_ISSUANCE", acceptance: "TX_WARRANT_ACCEPTANCE", vests: true });
 // …but an issuance the collection does not hold does not…
 // @ts-expect-error — the warrant collection holds TX_WARRANT_ISSUANCE, not TX_CONVERTIBLE_ISSUANCE.
-const _mismatchedIssuance = familyChecksFor({ name: "warrant", collection: "warrantIssuances", issuance: "TX_CONVERTIBLE_ISSUANCE", acceptance: "TX_WARRANT_ACCEPTANCE" });
-// …and neither does a mistyped acceptance key.
+const _mismatchedIssuance = familyChecksFor({ name: "warrant", collection: "warrantIssuances", issuance: "TX_CONVERTIBLE_ISSUANCE", acceptance: "TX_WARRANT_ACCEPTANCE", vests: true });
+// …and neither does a mistyped acceptance key…
 // @ts-expect-error — TX_WARRANT_ACCEPTENCE is not a transaction key.
-const _mistypedAcceptance = familyChecksFor({ name: "warrant", collection: "warrantIssuances", issuance: "TX_WARRANT_ISSUANCE", acceptance: "TX_WARRANT_ACCEPTENCE" });
+const _mistypedAcceptance = familyChecksFor({ name: "warrant", collection: "warrantIssuances", issuance: "TX_WARRANT_ISSUANCE", acceptance: "TX_WARRANT_ACCEPTENCE", vests: true });
+// …or a vests flag that contradicts the issuance type, which would let the
+// no-other-transactions scan flag a warrant's own vesting records.
+// @ts-expect-error — OCFWarrantIssuance has vesting_terms_id, so the warrant family vests.
+const _wrongVests = familyChecksFor({ name: "warrant", collection: "warrantIssuances", issuance: "TX_WARRANT_ISSUANCE", acceptance: "TX_WARRANT_ACCEPTANCE", vests: false });

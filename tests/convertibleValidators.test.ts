@@ -260,6 +260,26 @@ describe("convertible cancellation validity", () => {
     // The exempt acceptance is never named as an offender.
     expect(messages).not.toContain("acc-x");
   });
+
+  // The warrant family exempts vesting transactions; this family doesn't,
+  // because a convertible issuance has no vesting terms.
+  it.each(["TX_VESTING_START", "TX_VESTING_EVENT", "TX_VESTING_ACCELERATION"])(
+    "still flags a past %s on the security, since a convertible can't vest",
+    (vestingType) => {
+      const context = contextWith({
+        convertibleIssuances: [issuanceRecord("sec1")] as any,
+        transactions: [
+          issuanceRecord("sec1"),
+          { id: "vest-x", object_type: vestingType, security_id: "sec1", date: "2020-06-01" },
+          cancellationRecord,
+        ],
+      });
+      const findings = runValidator("TX_CONVERTIBLE_CANCELLATION", context, cancellation());
+      expect(findings).toHaveLength(1);
+      expectFindingShape(findings[0], "no-other-transactions", subject);
+      expect(findings[0].message).toContain("vest-x");
+    },
+  );
 });
 
 // ---------------------------------------------------------------------------
