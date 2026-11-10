@@ -33,12 +33,13 @@ export const stakeholderExists = {
 
 /**
  * What the shared checks need to know about a family: its name as used in
- * messages ("convertible"), its collection, and its issuance and acceptance
- * transaction types.
+ * messages ("convertible"), its collection, its issuance and acceptance
+ * transaction types, and whether its securities can vest.
  *
  * The types catch mix-ups: `issuance` must be the transaction type that
- * `collection` actually holds, and `acceptance` must be a real transaction
- * type, so a typo won't compile.
+ * `collection` actually holds, `acceptance` must be a real transaction type,
+ * and `vests` must be true exactly when that issuance type has vesting terms
+ * (`vesting_terms_id`), so a typo or a wrong flag won't compile.
  */
 type Family = {
   [C in CollectionKey]: {
@@ -46,15 +47,26 @@ type Family = {
     collection: C;
     issuance: OcfMachineContext[C][number]["object_type"];
     acceptance: Extract<TxKey, `TX_${string}_ACCEPTANCE`>;
+    vests: "vesting_terms_id" extends keyof OcfMachineContext[C][number] ? true : false;
   };
 }[CollectionKey];
+
+/**
+ * The transactions that record a security's vesting. None of them transfers,
+ * converts, or retires the security.
+ */
+const VESTING_TRANSACTIONS = [
+  "TX_VESTING_START",
+  "TX_VESTING_EVENT",
+  "TX_VESTING_ACCELERATION",
+] as const satisfies readonly TxKey[];
 
 /**
  * Builds the checks every security family uses the same way, worded for the
  * given family. Each family's `checks.ts` calls this once, and that family's
  * validators import the checks from there.
  */
-export function familyChecksFor({ name, collection, issuance, acceptance }: Family) {
+export function familyChecksFor({ name, collection, issuance, acceptance, vests }: Family) {
   /**
    * The issuance named by the transaction's `security_id` is outstanding as of
    * the transaction's date. Passes if the family's collection holds a record
@@ -116,9 +128,15 @@ export function familyChecksFor({ name, collection, issuance, acceptance }: Fami
     },
   } satisfies CheckObject<{ security_id: string; date: string }>;
 
+  // What no-other-transactions' description says the scan exempts.
+  const exempt = vests
+    ? `a ${name} acceptance or a vesting start, event, or acceleration`
+    : `a ${name} acceptance`;
+
   /**
    * Nothing dated on or before this transaction refers to this security except
-   * its issuance, acceptances, and the transaction being validated. A later
+   * its issuance, acceptances, and the transaction being validated, plus its
+   * vesting transactions in a family whose securities can vest. A later
    * transaction can't make this one invalid. The cancellation, conversion, and
    * exercise validators run this check; the transfer validator only declares
    * it, as a gap (see `asGap`).
@@ -126,7 +144,7 @@ export function familyChecksFor({ name, collection, issuance, acceptance }: Fami
   const noOtherTransactions = {
     id: "no-other-transactions",
     severity: "error",
-    description: `No other transaction dated on or before this transaction references its security_id, other than a ${name} acceptance.`,
+    description: `No other transaction dated on or before this transaction references its security_id, other than ${exempt}.`,
     run: (context, data) => {
       const messages: string[] = [];
       const { transactions } = context.ocfPackageContent;
@@ -134,10 +152,13 @@ export function familyChecksFor({ name, collection, issuance, acceptance }: Fami
       // One finding for each other transaction on this security_id dated on or
       // before this one. Many transaction types have no security_id field at
       // all, so it checks for the field first; a transaction without one can't
-      // refer to this security. The transaction being validated is in the
-      // package history too, so it's skipped. It's matched on its type as well
-      // as its id: nothing makes ids unique across types, so matching on id
-      // alone would also skip another type's transaction that shares it.
+      // refer to this security. In a family whose securities can vest, vesting
+      // transactions are skipped too: they only record the security's vesting,
+      // and a security that vests before it's exercised or cancelled is the
+      // ordinary case. The transaction being validated is in the package
+      // history too, so it's skipped. It's matched on its type as well as its
+      // id: nothing makes ids unique across types, so matching on id alone
+      // would also skip another type's transaction that shares it.
       transactions.forEach((ele) => {
         if (
           "security_id" in ele &&
@@ -145,6 +166,7 @@ export function familyChecksFor({ name, collection, issuance, acceptance }: Fami
           ele.date <= data.date &&
           ele.object_type !== issuance &&
           ele.object_type !== acceptance &&
+          !(vests && (VESTING_TRANSACTIONS as readonly string[]).includes(ele.object_type)) &&
           !(ele.object_type === data.object_type && ele.id === data.id)
         ) {
           messages.push(

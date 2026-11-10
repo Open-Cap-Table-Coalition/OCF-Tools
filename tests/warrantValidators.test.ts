@@ -261,6 +261,21 @@ describe("warrant cancellation validity", () => {
     // The exempt acceptance is never named as an offender.
     expect(messages).not.toContain("acc-x");
   });
+
+  it.each(["TX_VESTING_START", "TX_VESTING_EVENT", "TX_VESTING_ACCELERATION"])(
+    "exempts a past %s on the security, since a warrant can vest before it's cancelled",
+    (vestingType) => {
+      const context = contextWith({
+        warrantIssuances: [issuanceRecord("sec1")] as any,
+        transactions: [
+          issuanceRecord("sec1"),
+          { id: "vest-x", object_type: vestingType, security_id: "sec1", date: "2020-06-01" },
+          cancellationRecord,
+        ],
+      });
+      expect(runValidator("TX_WARRANT_CANCELLATION", context, cancellation())).toEqual([]);
+    },
+  );
 });
 
 // ---------------------------------------------------------------------------
@@ -525,6 +540,15 @@ describe("warrant exercise validity", () => {
     expect(noOtherFindings()).toEqual([]);
   });
 
+  it.each(["TX_VESTING_START", "TX_VESTING_EVENT", "TX_VESTING_ACCELERATION"])(
+    "exempts a %s dated on or before, since a warrant can vest before it's exercised",
+    (vestingType) => {
+      const vesting = (date: string) => ({ id: "vest-x", object_type: vestingType, security_id: "war-sec", date });
+      expect(noOtherFindings(vesting("2021-01-01"))).toEqual([]);
+      expect(noOtherFindings(vesting(EXERCISE_DATE))).toEqual([]);
+    },
+  );
+
   it("flags a second exercise sharing the security_id, pinning the self-exemption to the transaction id", () => {
     const secondExercise = { id: "ex-other", object_type: "TX_WARRANT_EXERCISE", security_id: "war-sec", resulting_security_ids: [], date: "2021-01-01" };
     const findings = noOtherFindings(secondExercise);
@@ -636,6 +660,23 @@ describe("warrant exercise drives the machine to completion", () => {
     expect(snapshot.context.findings).toHaveLength(1);
     expect(snapshot.context.findings[0].check).toBe("resulting-security-named");
     expect(snapshot.context.findings[0].severity).toBe("warning");
+    expect(snapshot.context.warrantIssuances).toEqual([]);
+  });
+
+  it("clears an exercise of a warrant that started vesting first, removing the exercised warrant and recording no findings", () => {
+    const issuance = { id: "wi-v", object_type: "TX_WARRANT_ISSUANCE", security_id: "war-sec", stakeholder_id: "holder-a", vesting_terms_id: "vt-1", date: "2020-01-01" };
+    const vestingStart = { id: "vs-v", object_type: "TX_VESTING_START", security_id: "war-sec", vesting_condition_id: "vc-start", date: "2020-01-01" };
+    const exercise = { id: "ex-v", object_type: "TX_WARRANT_EXERCISE", security_id: "war-sec", resulting_security_ids: ["stock-sec"], date: "2020-01-02" };
+    const resultingStock = { id: "si-v", object_type: "TX_STOCK_ISSUANCE", security_id: "stock-sec", stakeholder_id: "holder-a", date: "2020-01-02" };
+
+    const actor = startSeeded(seedPackage([issuance, vestingStart, exercise, resultingStock]));
+    actor.send(ev("TX_WARRANT_ISSUANCE", issuance));
+    actor.send(ev("TX_VESTING_START", vestingStart));
+    actor.send(ev("TX_WARRANT_EXERCISE", exercise));
+
+    const snapshot = actor.getSnapshot();
+    expect(snapshot.value).toBe("capTable");
+    expect(snapshot.context.findings).toEqual([]);
     expect(snapshot.context.warrantIssuances).toEqual([]);
   });
 });

@@ -6,4 +6,5 @@ export const { issuanceExists, noOtherTransactions } = familyChecksFor({
   collection: "convertibleIssuances",
   issuance: "TX_CONVERTIBLE_ISSUANCE",
   acceptance: "TX_CONVERTIBLE_ACCEPTANCE",
+  vests: false,
 });
