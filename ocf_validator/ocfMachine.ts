@@ -140,9 +140,11 @@ type Validator<T> = (
  *
  * Each graded arm also carries `checks`: the module's declared validation
  * coverage as structured `Check` data (see `types/validator.ts`). The machine
- * never reads it — it is documentation-grade metadata for the coverage-report
- * generator — but requiring it on the graded arms makes declaring the checks
- * inseparable from migrating a family to the graded shape. Legacy arms carry none.
+ * never reads the array — it is for the coverage-report generator — but
+ * requiring it on the graded arms makes declaring the checks inseparable from
+ * migrating a family to the graded shape. (The declared severities still matter
+ * at runtime: `defineValidator` stamps them onto the findings `validate`
+ * returns.) Legacy arms carry none.
  */
 type Descriptor =
   | { effect: "passthrough" }
@@ -168,6 +170,16 @@ type Descriptor =
 
 /** A non-passthrough descriptor — the shape the dispatch helpers consume. */
 export type ActiveDescriptor = Exclude<Descriptor, { effect: "passthrough" }>;
+
+/**
+ * The shape of the descriptor table: a `Descriptor` for every `TxKey`, where a
+ * descriptor that names its own transaction (every one `defineValidator` builds
+ * does) must name the key it is filed under. A graded validator filed under
+ * another transaction's key is therefore a compile error, even for `none` and
+ * `remove` descriptors, whose `validate` the `Descriptor` arms do not type by
+ * payload.
+ */
+export type DescriptorTable = { [K in TxKey]: Descriptor & { transaction?: K } };
 
 export const TX_DESCRIPTORS = {
   // --- append: issuance appended to its family collection -----------------
@@ -208,7 +220,7 @@ export const TX_DESCRIPTORS = {
   // --- passthrough: received and silently ignored today ------------------
   //   No validator, no report entry, no collection mutation. They stay in
   //   `capTable` so today's behavior (and the characterization snapshot, which
-  //   contains TX_VESTING_START) is byte-identical. `satisfies Record<TxKey, …>`
+  //   contains TX_VESTING_START) is byte-identical. `satisfies DescriptorTable`
   //   below forces any future OCF transaction type to be classified here — a
   //   compile error until it is.
   TX_EQUITY_COMPENSATION_RELEASE: { effect: "passthrough" },
@@ -230,7 +242,7 @@ export const TX_DESCRIPTORS = {
   TX_VESTING_ACCELERATION: { effect: "passthrough" },
   TX_VESTING_EVENT: { effect: "passthrough" },
   TX_VESTING_START: { effect: "passthrough" },
-} satisfies Record<TxKey, Descriptor>;
+} satisfies DescriptorTable;
 
 export type { Descriptor };
 

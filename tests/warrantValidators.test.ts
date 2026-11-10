@@ -299,16 +299,6 @@ describe("warrant cancellation validity", () => {
     expect(runValidator("TX_WARRANT_CANCELLATION", context, cancellation())).toEqual([]);
   });
 
-  it("treats any live warrant record matched by security_id as the issuance, regardless of object_type", () => {
-    // The existence check matches on security_id alone; a non-issuance object_type
-    // in the live collection still satisfies it.
-    const context = contextWith({
-      warrantIssuances: [{ id: "x", object_type: "SOMETHING_ELSE", security_id: "sec1", date: "2020-01-01" }] as any,
-      transactions: [issuanceRecord("sec1")],
-    });
-    expect(runValidator("TX_WARRANT_CANCELLATION", context, cancellation())).toEqual([]);
-  });
-
   it("removes the referenced security from warrantIssuances on the valid branch", () => {
     const seeded = contextWith({
       warrantIssuances: [issuanceRecord("sec1"), issuanceRecord("sec2")] as any,
@@ -432,6 +422,31 @@ describe("warrant transfer validity", () => {
     // The declared gap is never checked, so the transaction stays valid here.
     expect(findings).toEqual([]);
     expect(findings.some((f) => f.check === "no-other-transactions")).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// issuance-exists matches the live collection on security_id alone
+// ---------------------------------------------------------------------------
+
+describe("warrant issuance-exists matching", () => {
+  // Every validator that runs issuance-exists matches the live collection on
+  // security_id alone, ignoring object_type (decision 3 on #198): a live record of
+  // any object_type with the transaction's security_id satisfies it. That is sound
+  // only because the collection holds nothing but issuances, which
+  // tests/ocfMachine.test.ts pins.
+  it.each([
+    "TX_WARRANT_ACCEPTANCE",
+    "TX_WARRANT_RETRACTION",
+    "TX_WARRANT_CANCELLATION",
+    "TX_WARRANT_TRANSFER",
+  ] as const)("%s treats any live warrant record matched by security_id as the issuance, regardless of object_type", (key) => {
+    const context = contextWith({
+      warrantIssuances: [{ id: "x", object_type: "SOMETHING_ELSE", security_id: "sec1", date: "2020-01-01" }] as any,
+      transactions: [issuanceRecord("sec1")],
+    });
+    const data = { id: "tx1", object_type: key, security_id: "sec1", date: "2021-01-01" };
+    expect(runValidator(key, context, data)).toEqual([]);
   });
 });
 

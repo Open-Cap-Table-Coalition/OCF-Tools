@@ -5,7 +5,7 @@ const noRetraction = {
   id: "no-retraction",
   severity: "error",
   description: "No convertible retraction references the transaction's security_id.",
-  run: (context, data: { security_id: string }) => {
+  run: (context, data) => {
     const messages: string[] = [];
     const { transactions } = context.ocfPackageContent;
 
@@ -20,7 +20,7 @@ const noRetraction = {
 
     return messages;
   },
-} satisfies CheckObject;
+} satisfies CheckObject<{ security_id: string }>;
 
 export const TX_CONVERTIBLE_ACCEPTANCE = defineValidator({
   transaction: "TX_CONVERTIBLE_ACCEPTANCE",

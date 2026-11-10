@@ -1,9 +1,11 @@
 import { describe, it, expect } from "vitest";
+import { createActor } from "xstate";
 import {
   collectionUpdate,
   isValidOutcome,
   outcomeUpdate,
   failureResult,
+  ocfMachine,
   TX_DESCRIPTORS,
   type OcfMachineEvent,
   type TxKey,
@@ -243,6 +245,41 @@ describe("per-type collection placement", () => {
   it("a passthrough type mutates no collection", () => {
     const result = collectionUpdate(baseContext(), ev("TX_VESTING_START", { security_id: "s" }));
     expect(Object.keys(result)).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Family collections hold only issuances
+// ---------------------------------------------------------------------------
+
+// The graded issuance-exists checks match the live collection on security_id
+// alone (decision 3 on #198), which is sound only while every collection holds
+// nothing but issuances. That holds because the collections start empty, only
+// the four family issuance keys append (each appending its own payload, pinned
+// above), and removal only filters (also pinned above). The append set and the
+// empty start are pinned here. The append set is written out by hand:
+// TX_PLAN_SECURITY_ISSUANCE is passthrough and appends nothing.
+const ISSUANCE_KEYS = [
+  "TX_STOCK_ISSUANCE",
+  "TX_CONVERTIBLE_ISSUANCE",
+  "TX_WARRANT_ISSUANCE",
+  "TX_EQUITY_COMPENSATION_ISSUANCE",
+];
+
+describe("family collections hold only issuances", () => {
+  it("appends for exactly the four family issuance keys", () => {
+    const appendKeys = (Object.keys(TX_DESCRIPTORS) as TxKey[]).filter(
+      (key) => TX_DESCRIPTORS[key].effect === "append",
+    );
+    expect(new Set(appendKeys)).toEqual(new Set(ISSUANCE_KEYS));
+  });
+
+  it("starts every family collection empty", () => {
+    const { context } = createActor(ocfMachine).start().getSnapshot();
+    expect(context.stockIssuances).toEqual([]);
+    expect(context.convertibleIssuances).toEqual([]);
+    expect(context.warrantIssuances).toEqual([]);
+    expect(context.equityCompensation).toEqual([]);
   });
 });
 

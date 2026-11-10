@@ -64,22 +64,30 @@ export type GradedValidator<T> = (
 /**
  * One declared validation check for a module, written as structured data in
  * place of the free-text `CURRENT CHECKS` / `MISSING CHECKS` comment blocks.
- * This is documentation-grade metadata: the machine never reads it at runtime —
- * a finding's own severity, not the declared one here, drives validity — so it
- * exists purely to be rolled up by the coverage-report generator.
+ * The machine never reads a descriptor's `checks` array at runtime; it is rolled
+ * up by the coverage-report generator. But a validator built with
+ * `defineValidator` (see `ocf_validator/validators/checkKit.ts`) derives both
+ * this metadata and its findings from the same check objects, so the declared
+ * `severity` is not documentation only: it is stamped onto every finding the
+ * check emits, and it decides validity.
  *
  *  - `id`:          the check's identifier, unique within its own descriptor (the
  *                   report renders per transaction type), not globally — reusing a
- *                   generic id across modules is fine.
- *  - `severity`:    the severity the report renders for this check, reusing the
- *                   `Finding` severities. It states declared intent; it does not
- *                   constrain the severity a validator actually emits.
+ *                   generic id across modules is fine. Stamped onto each finding's
+ *                   `check`.
+ *  - `severity`:    reusing the `Finding` severities, the severity of every finding
+ *                   this check emits, and the severity the report renders. The
+ *                   machine blocks a transaction only on an "error" finding, so
+ *                   changing a check to "warning" stops its failures from blocking
+ *                   the transaction: a behavior change, not a relabeling.
  *  - `description`: the human-readable sentence the report renders. Required — it
  *                   is what replaces the prose comment blocks.
  *  - `implemented`: absent for a check the module performs, or literally `false`
  *                   for a declared gap (replacing today's `MISSING CHECKS` prose).
  *                   Typing it `false` makes `implemented: true` noise
  *                   unrepresentable, so the field is only ever a gap marker.
+ *                   `defineValidator` derives it: a check object with no `run`
+ *                   is a gap.
  */
 export type Check = {
   id: string;
