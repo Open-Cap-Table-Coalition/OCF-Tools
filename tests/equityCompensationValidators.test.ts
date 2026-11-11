@@ -286,6 +286,59 @@ describe("equity compensation cancellation validity", () => {
     // The exempt acceptance is never named as an offender.
     expect(messages).not.toContain("acc-x");
   });
+
+  it.each(["TX_VESTING_START", "TX_VESTING_EVENT", "TX_VESTING_ACCELERATION"])(
+    "exempts a past %s on the security, since an equity compensation grant can vest before it's cancelled",
+    (vestingType) => {
+      const context = contextWith({
+        equityCompensation: [issuanceRecord("sec1")] as any,
+        transactions: [
+          issuanceRecord("sec1"),
+          { id: "vest-x", object_type: vestingType, security_id: "sec1", date: "2020-06-01" },
+          cancellationRecord,
+        ],
+      });
+      expect(runValidator("TX_EQUITY_COMPENSATION_CANCELLATION", context, cancellation())).toEqual([]);
+    },
+  );
+
+  it("flags another type's transaction that reuses the cancellation's id, pinning the self-exemption to the transaction type", () => {
+    // Ids aren't unique across types, so a transfer sharing the cancellation's id
+    // is still another transaction on the security.
+    const context = contextWith({
+      equityCompensation: [issuanceRecord("sec1")] as any,
+      transactions: [
+        issuanceRecord("sec1"),
+        { id: "can1", object_type: "TX_EQUITY_COMPENSATION_TRANSFER", security_id: "sec1", date: "2020-06-01" },
+        cancellationRecord,
+      ],
+    });
+    const findings = runValidator("TX_EQUITY_COMPENSATION_CANCELLATION", context, cancellation());
+    expect(findings).toHaveLength(1);
+    expectFindingShape(findings[0], "no-other-transactions", subject);
+  });
+
+  it("words no-other-transactions for equity compensation", () => {
+    const declared = declaredChecks("TX_EQUITY_COMPENSATION_CANCELLATION");
+    expect(declared.find((c) => c.id === "no-other-transactions")?.description).toBe(
+      "No other transaction dated on or before this transaction references its security_id, other than an equity compensation acceptance or a vesting start, event, or acceleration.",
+    );
+  });
+
+  it("clears a cancellation of a grant that started vesting first, removing it and recording no findings", () => {
+    const issuance = { ...issuanceRecord("sec1"), stakeholder_id: "sh1", vesting_terms_id: "vt-1" };
+    const vestingStart = { id: "vs-1", object_type: "TX_VESTING_START", security_id: "sec1", vesting_condition_id: "vc-start", date: "2020-01-01" };
+
+    const actor = startSeeded(contextWith({ stakeholders: [{ id: "sh1" }], transactions: [issuance, vestingStart, cancellationRecord] }));
+    actor.send(ev("TX_EQUITY_COMPENSATION_ISSUANCE", issuance));
+    actor.send(ev("TX_VESTING_START", vestingStart));
+    actor.send(ev("TX_EQUITY_COMPENSATION_CANCELLATION", cancellation()));
+
+    const snapshot = actor.getSnapshot();
+    expect(snapshot.value).toBe("capTable");
+    expect(snapshot.context.findings).toEqual([]);
+    expect(snapshot.context.equityCompensation).toEqual([]);
+  });
 });
 
 // ---------------------------------------------------------------------------

@@ -128,18 +128,22 @@ export function familyChecksFor({ name, collection, issuance, acceptance, vests 
     },
   } satisfies CheckObject<{ security_id: string; date: string }>;
 
+  // The family's name with its article: "a warrant", "an equity compensation".
+  const aName = `${/^[aeiou]/.test(name) ? "an" : "a"} ${name}`;
+
   // What no-other-transactions' description says the scan exempts.
   const exempt = vests
-    ? `a ${name} acceptance or a vesting start, event, or acceleration`
-    : `a ${name} acceptance`;
+    ? `${aName} acceptance or a vesting start, event, or acceleration`
+    : `${aName} acceptance`;
 
   /**
    * Nothing dated on or before this transaction refers to this security except
    * its issuance, acceptances, and the transaction being validated, plus its
    * vesting transactions in a family whose securities can vest. A later
-   * transaction can't make this one invalid. The cancellation, conversion, and
-   * exercise validators run this check; the transfer validator only declares
-   * it, as a gap (see `asGap`).
+   * transaction can't make this one invalid. The cancellation and conversion
+   * validators and the warrant exercise run this check; the transfer validators
+   * and the equity compensation exercise only declare it, as a gap (see
+   * `asGap`).
    */
   const noOtherTransactions = {
     id: "no-other-transactions",
