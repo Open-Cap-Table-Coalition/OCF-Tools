@@ -13,7 +13,7 @@ import {
 } from "../ocf_validator/ocfMachine";
 import type { Finding } from "../types/finding";
 import type { GradedValidator, OcfMachineContext } from "../types/validator";
-import { baseContext, startSeeded, ev } from "./helpers";
+import { baseContext, contextWith, startSeeded, ev } from "./helpers";
 
 // ---------------------------------------------------------------------------
 // Unknown transaction types
@@ -72,10 +72,10 @@ describe("results render an issuer name that isn't a string", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Recognized-but-unhandled transaction types
+// Passthrough transaction types
 // ---------------------------------------------------------------------------
 
-describe("recognized-but-unhandled transaction types are no-ops", () => {
+describe("passthrough transaction types are no-ops unless their security was removed earlier", () => {
   it("leaves capTable and every channel deep-equal after TX_VESTING_START + TX_STOCK_CLASS_SPLIT", () => {
     const seeded = baseContext({
       stockIssuances: [{ id: "si", security_id: "s" }] as any,
@@ -108,6 +108,17 @@ describe("recognized-but-unhandled transaction types are no-ops", () => {
     actor.send(ev("TX_VESTING_START", { id: "vs", security_id: "s" }));
     expect(actor.getSnapshot().context.report).toHaveLength(0);
     expect(actor.getSnapshot().value).toBe("capTable");
+  });
+
+  it("fails one on a security an earlier transaction removed, as a real run does", () => {
+    // The seeded context indexes its history's removals, as START would.
+    const actor = startSeeded(
+      contextWith({ transactions: [{ id: "cc-1", object_type: "TX_CONVERTIBLE_CANCELLATION", security_id: "s", date: "2021-06-01" }] }),
+    );
+    actor.send(ev("TX_VESTING_START", { id: "vs", object_type: "TX_VESTING_START", security_id: "s", date: "2021-07-01" }));
+
+    expect(actor.getSnapshot().value).toBe("validationError");
+    expect(actor.getSnapshot().context.findings.map((f) => f.check)).toEqual(["no-earlier-removal"]);
   });
 });
 
@@ -292,7 +303,7 @@ describe("per-type collection placement", () => {
 //    adds its own transaction (tested above);
 //  - removing only takes things out (tested above).
 // The issuance types are written out by hand on purpose. TX_PLAN_SECURITY_ISSUANCE
-// isn't one of them: the machine currently ignores that type.
+// isn't one of them: the machine appends nothing for that type.
 const ISSUANCE_KEYS = [
   "TX_STOCK_ISSUANCE",
   "TX_CONVERTIBLE_ISSUANCE",

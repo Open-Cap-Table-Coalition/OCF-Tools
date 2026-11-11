@@ -33,6 +33,35 @@ export const stakeholderExists = {
 } satisfies CheckObject<{ stakeholder_id: string }>;
 
 /**
+ * No transaction dated before this one removed its security from the cap
+ * table: no cancellation, conversion, warrant exercise, repurchase,
+ * reissuance, retraction, or transfer of it (see the machine's `removals`).
+ * The run takes transactions in date order and stops at the first that fails,
+ * so a removal dated before this transaction has already run.
+ *
+ * The graded issuances declare it, so a removed security_id can't be issued
+ * again. The machine runs it first on the transactions that can't declare it:
+ * the passthrough types, except the return to pool, and the legacy issuances
+ * (#214).
+ *
+ * A removal dated the same day doesn't count, since a security can be issued,
+ * vest, and be removed on one day. A same-day reuse of the security_id is left
+ * to the removal's own checks, which catch it only in part.
+ */
+export const noEarlierRemoval = {
+  id: "no-earlier-removal",
+  severity: "error",
+  description: "No transaction dated before this one removed its security from the cap table.",
+  run: (context, data) => {
+    const removal = context.removals.get(data.security_id);
+    if (removal === undefined || !(removal.date < data.date)) return [];
+    return [
+      text`The security ${data.security_id} was removed from the cap table by ${removal.id} on ${removal.date}.`,
+    ];
+  },
+} satisfies CheckObject<{ security_id: string; date: string }>;
+
+/**
  * What the shared checks need to know about a family: its name as used in
  * messages ("convertible"), its collection, its issuance and acceptance
  * transaction types, and whether its securities can vest.
@@ -131,8 +160,8 @@ export function familyChecksFor({ name, collection, issuance, acceptance, vests 
 
   // What no-other-transactions' description says the scan exempts.
   const exempt = vests
-    ? `a ${name} acceptance or a vesting start, event, or acceleration`
-    : `a ${name} acceptance`;
+    ? `a ${name} issuance or acceptance, or a vesting start, event, or acceleration`
+    : `a ${name} issuance or acceptance`;
 
   /**
    * Nothing dated on or before this transaction refers to this security except

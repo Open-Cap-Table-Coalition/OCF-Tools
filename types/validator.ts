@@ -5,6 +5,7 @@ import type {
   OCFEquityCompensationIssuance,
 } from "@opencaptablecoalition/ocf-types";
 import type { OcfPackageContent } from "../read_ocf_package";
+import type { OcfTransaction } from "./ocf-input";
 import type { Snapshot } from "./snapshot";
 import type { Finding, Severity } from "./finding";
 
@@ -21,6 +22,14 @@ export type OcfMachineContext = {
   convertibleIssuances: OCFConvertibleIssuance[];
   warrantIssuances: OCFWarrantIssuance[];
   ocfPackageContent: OcfPackageContent;
+  /**
+   * An index of the package, not a record of the run: each security's
+   * earliest transaction in the package that removes it from its collection
+   * (a cancellation, conversion, transfer, and so on), by security_id, even if
+   * the run stops before it. Built when the run starts, for the
+   * no-earlier-removal check.
+   */
+  removals: ReadonlyMap<unknown, DeepReadonly<OcfTransaction>>;
   report: any[];
   findings: Finding[];
   /**
