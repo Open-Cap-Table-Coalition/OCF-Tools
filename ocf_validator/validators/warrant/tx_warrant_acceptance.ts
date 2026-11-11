@@ -1,4 +1,4 @@
-import { defineValidator, type CheckObject } from "../checkKit";
+import { defineValidator, text, type CheckObject } from "../checkKit";
 import { issuanceExists } from "./checks";
 
 const noRetraction = {
@@ -18,7 +18,7 @@ const noRetraction = {
         ele.date <= data.date
       ) {
         messages.push(
-          `A warrant retraction (${ele.id}) references the transaction's security_id.`,
+          text`A warrant retraction (${ele.id}) references the transaction's security_id.`,
         );
       }
     });

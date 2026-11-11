@@ -39,6 +39,24 @@ export type CheckObject<P = unknown> = Pick<Check, "id" | "severity" | "descript
   run?: (context: DeepReadonly<OcfMachineContext>, data: DeepReadonly<P>) => string[];
 };
 
+const show = (value: unknown): string =>
+  typeof value === "object" && value !== null && !(value instanceof Error)
+    ? JSON.stringify(value)
+    : String(value);
+
+/**
+ * Message text built from package values, as a template tag:
+ * text`No issuance with security_id ${id}.` Nothing checks a package against
+ * the OCF schema before its values reach a message, so a value may not be the
+ * string the schema promises, and interpolating an object whose own
+ * `toString` isn't a function throws (#218). A string or other primitive
+ * appears as it is and an error as its name and message, but any other object
+ * appears as its JSON, so a malformed value reads as itself rather than as
+ * "[object Object]".
+ */
+export const text = (strings: TemplateStringsArray, ...values: unknown[]): string =>
+  strings.reduce((message, string, i) => message + show(values[i - 1]) + string);
+
 /**
  * Turns a check into a declared gap by dropping its `run`. Use it when one
  * transaction performs a check and another needs the same check but doesn't
@@ -92,6 +110,12 @@ const toMetadata = (checks: readonly CheckObject<any>[]): readonly Check[] =>
  * transaction's type and id) comes from the transaction being validated. The
  * only thing a check controls is the message text.
  *
+ * A check that throws produces one error finding saying so, whatever the
+ * check's severity: a check that couldn't finish has checked nothing, so the
+ * transaction can't pass on it. The other checks still run. A package value
+ * of the wrong type can make a check throw (#218), and a throw that left the
+ * validator would stop the whole run.
+ *
  * `data` is typed `any` here. That's safe because `defineValidator` has already
  * checked every check against the transaction's type.
  */
@@ -102,9 +126,17 @@ const toValidate =
     const findings: Finding[] = [];
     for (const check of checks) {
       if (!check.run) continue;
-      for (const message of check.run(context, data)) {
+      let severity = check.severity;
+      let messages: string[];
+      try {
+        messages = check.run(context, data);
+      } catch (error) {
+        severity = "error";
+        messages = [text`The check threw ${error}`];
+      }
+      for (const message of messages) {
         findings.push({
-          severity: check.severity,
+          severity,
           check: check.id,
           message,
           subject,

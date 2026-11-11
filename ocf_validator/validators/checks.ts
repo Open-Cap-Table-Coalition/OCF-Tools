@@ -1,7 +1,7 @@
 import type { OCFStockIssuance } from "@opencaptablecoalition/ocf-types";
 import type { DeepReadonly, OcfMachineContext } from "../../types/validator";
 import type { CollectionKey, TxKey } from "../ocfMachine";
-import type { CheckObject } from "./checkKit";
+import { text, type CheckObject } from "./checkKit";
 
 /**
  * The stakeholder named by the transaction's `stakeholder_id` is in the
@@ -24,7 +24,7 @@ export const stakeholderExists = {
     });
     if (!stakeholderExists) {
       messages.push(
-        `The stakeholder ${data.stakeholder_id} referenced by the transaction was not found in the stakeholder file.`,
+        text`The stakeholder ${data.stakeholder_id} referenced by the transaction was not found in the stakeholder file.`,
       );
     }
 
@@ -113,15 +113,15 @@ export function familyChecksFor({ name, collection, issuance, acceptance, vests 
 
       if (firstIssuanceDate === undefined) {
         messages.push(
-          `No ${name} issuance with security_id ${data.security_id} appears in the package.`,
+          text`No ${name} issuance with security_id ${data.security_id} appears in the package.`,
         );
       } else if (onOrBeforeDate === undefined) {
         messages.push(
-          `The ${name} issuance referenced by security_id ${data.security_id} is dated ${firstIssuanceDate}, after this transaction (${data.date}).`,
+          text`The ${name} issuance referenced by security_id ${data.security_id} is dated ${firstIssuanceDate}, after this transaction (${data.date}).`,
         );
       } else {
         messages.push(
-          `The ${name} issuance referenced by security_id ${data.security_id} (dated ${onOrBeforeDate}) is not outstanding as of this transaction's date.`,
+          text`The ${name} issuance referenced by security_id ${data.security_id} (dated ${onOrBeforeDate}) is not outstanding as of this transaction's date.`,
         );
       }
 
@@ -171,7 +171,7 @@ export function familyChecksFor({ name, collection, issuance, acceptance, vests 
           !(ele.object_type === data.object_type && ele.id === data.id)
         ) {
           messages.push(
-            `Another transaction (${ele.id}) references the transaction's security_id.`,
+            text`Another transaction (${ele.id}) references the transaction's security_id.`,
           );
         }
       });
@@ -265,11 +265,11 @@ export function resultingChecksFor({
         const { length } = resultingStockIssuances(context, resultingId);
         if (length === 0) {
           messages.push(
-            `No stock issuance with security_id ${resultingId} appears in the package.`,
+            text`No stock issuance with security_id ${resultingId} appears in the package.`,
           );
         } else if (length > 1) {
           messages.push(
-            `${length} stock issuances have security_id ${resultingId}, so it doesn't name one resulting security.`,
+            text`${length} stock issuances have security_id ${resultingId}, so it doesn't name one resulting security.`,
           );
         }
       });
@@ -292,7 +292,7 @@ export function resultingChecksFor({
         const issuance = resultingStockIssuance(context, resultingId);
         if (issuance !== undefined && issuance.date !== data.date) {
           messages.push(
-            `The resulting stock issuance ${resultingId} is dated ${issuance.date}, which differs from the ${action} date ${data.date}.`,
+            text`The resulting stock issuance ${resultingId} is dated ${issuance.date}, which differs from the ${action} date ${data.date}.`,
           );
         }
       });
@@ -324,7 +324,7 @@ export function resultingChecksFor({
         const issuance = resultingStockIssuance(context, resultingId);
         if (issuance !== undefined && issuance.stakeholder_id !== reference.stakeholder_id) {
           messages.push(
-            `The resulting stock issuance ${resultingId} names stakeholder ${issuance.stakeholder_id}, which differs from the ${name} issuance's stakeholder ${reference.stakeholder_id}.`,
+            text`The resulting stock issuance ${resultingId} names stakeholder ${issuance.stakeholder_id}, which differs from the ${name} issuance's stakeholder ${reference.stakeholder_id}.`,
           );
         }
       });

@@ -1,4 +1,4 @@
-import { defineValidator, type CheckObject } from "../checkKit";
+import { defineValidator, text, type CheckObject } from "../checkKit";
 import { issuanceExists } from "./checks";
 
 const noAcceptance = {
@@ -18,7 +18,7 @@ const noAcceptance = {
         ele.date <= data.date
       ) {
         messages.push(
-          `A convertible acceptance (${ele.id}) references the transaction's security_id.`,
+          text`A convertible acceptance (${ele.id}) references the transaction's security_id.`,
         );
       }
     });

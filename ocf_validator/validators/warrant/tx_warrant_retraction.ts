@@ -1,4 +1,4 @@
-import { defineValidator, type CheckObject } from "../checkKit";
+import { defineValidator, text, type CheckObject } from "../checkKit";
 import { issuanceExists } from "./checks";
 
 const noAcceptance = {
@@ -18,7 +18,7 @@ const noAcceptance = {
         ele.date <= data.date
       ) {
         messages.push(
-          `A warrant acceptance (${ele.id}) references the transaction's security_id.`,
+          text`A warrant acceptance (${ele.id}) references the transaction's security_id.`,
         );
       }
     });

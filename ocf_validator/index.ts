@@ -1,11 +1,24 @@
-import { createActor } from "xstate";
+import { createActor, getInitialSnapshot } from "xstate";
 import { OcfPackageContent, readOcfPackage } from "../read_ocf_package";
 import constants from "./constants/constants";
-import { errorResult, ocfMachine, type OcfMachineContext, type OcfMachineEvent } from "./ocfMachine";
+import { errorResult, malformedResult, ocfMachine, type OcfMachineContext, type OcfMachineEvent } from "./ocfMachine";
 
 export const ocfValidator = (packagePath: string): OcfMachineContext => {
   const ocfPackage: OcfPackageContent = readOcfPackage(packagePath);
   const { manifest, transactions } = ocfPackage;
+
+  // The run sorts transactions by date and sends each to the machine as an
+  // event of its object_type. A transaction where either isn't a string can't
+  // take its place in the run, and can make the sort or the machine throw
+  // (#218), so the run stops on it before it starts.
+  const malformed = transactions.find((ele) => typeof ele?.date !== "string" || typeof ele?.object_type !== "string");
+  if (malformed !== undefined) {
+    return {
+      ...getInitialSnapshot(ocfMachine).context,
+      ocfPackageContent: ocfPackage,
+      result: malformedResult(ocfPackage, malformed),
+    };
+  }
 
   // Same-day sort tiebreaker. `transaction_types` is pinned to cover every
   // transaction type (see types/transaction-types.assert.ts), so an added OCF

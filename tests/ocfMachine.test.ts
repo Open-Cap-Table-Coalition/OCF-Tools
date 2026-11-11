@@ -40,6 +40,38 @@ describe("unknown transaction types", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Results built from a malformed issuer name
+// ---------------------------------------------------------------------------
+
+describe("results render an issuer name that isn't a string", () => {
+  // JSON.parse gives `{ "toString": null }` an own toString that isn't a
+  // function, so interpolating it into a plain template literal throws.
+  const withIssuer = () =>
+    baseContext({
+      ocfPackageContent: {
+        ...baseContext().ocfPackageContent,
+        manifest: { issuer: { legal_name: JSON.parse('{ "toString": null }') } },
+      } as OcfMachineContext["ocfPackageContent"],
+    });
+
+  it("in the completion result", () => {
+    const actor = startSeeded(withIssuer());
+    actor.send({ type: "RUN_END", date: "2021-01-01" });
+    expect(actor.getSnapshot().context.result).toBe(
+      'The validation of the OCF package for {"toString":null} is complete and the package appears valid.',
+    );
+  });
+
+  it("in the unknown-type result", () => {
+    const actor = startSeeded(withIssuer());
+    actor.send(ev("TX_NOT_A_REAL_TYPE"));
+    expect(actor.getSnapshot().context.result).toBe(
+      'The validation of the OCF package for {"toString":null} failed on TX_NOT_A_REAL_TYPE because it is not a valid TX type.',
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Recognized-but-unhandled transaction types
 // ---------------------------------------------------------------------------
 
