@@ -1,4 +1,5 @@
-import type { OcfMachineContext } from "../../types/validator";
+import type { OCFStockIssuance } from "@opencaptablecoalition/ocf-types";
+import type { DeepReadonly, OcfMachineContext } from "../../types/validator";
 import type { CollectionKey, TxKey } from "../ocfMachine";
 import type { CheckObject } from "./checkKit";
 
@@ -180,4 +181,157 @@ export function familyChecksFor({ name, collection, issuance, acceptance, vests 
   } satisfies CheckObject<{ object_type: string; id: string; security_id: string; date: string }>;
 
   return { issuanceExists, noOtherTransactions };
+}
+
+// resulting_security_ids comes straight from the package file, and nothing
+// checks its shape first. The resulting checks read it through this helper so a
+// value that isn't a list can't crash the run: resulting-stock-exists reports
+// it, and the other resulting checks pass over it.
+const resultingIds = (
+  data: DeepReadonly<{ resulting_security_ids: string[] }>,
+): readonly string[] | undefined =>
+  Array.isArray(data.resulting_security_ids) ? data.resulting_security_ids : undefined;
+
+// The TX_STOCK_ISSUANCEs in the package history whose security_id is a
+// resulting id. It should name exactly one: resulting-stock-exists reports an
+// id that names none or several, and the other resulting checks pass over it,
+// so a duplicated security_id is reported as itself, whatever order its
+// issuances come in.
+const resultingStockIssuances = (
+  context: DeepReadonly<OcfMachineContext>,
+  resultingId: string,
+): DeepReadonly<OCFStockIssuance>[] =>
+  context.ocfPackageContent.transactions.filter(
+    (ele): ele is DeepReadonly<OCFStockIssuance> =>
+      ele.object_type === "TX_STOCK_ISSUANCE" && ele.security_id === resultingId,
+  );
+
+// The stock issuance a resulting id names, if it names exactly one.
+const resultingStockIssuance = (
+  context: DeepReadonly<OcfMachineContext>,
+  resultingId: string,
+): DeepReadonly<OCFStockIssuance> | undefined => {
+  const matches = resultingStockIssuances(context, resultingId);
+  return matches.length === 1 ? matches[0] : undefined;
+};
+
+/**
+ * Builds the checks on the stock a transaction turns its security into,
+ * worded for that transaction: a convertible's conversion or a warrant's
+ * exercise. `name` and `collection` are the family's, as for
+ * `familyChecksFor`; `action` names the transaction ("conversion") and
+ * `participle` is its past participle ("converted").
+ *
+ * A convertible's or a warrant's conversion right can only point at a stock
+ * class, so every id in resulting_security_ids names a stock issuance. The
+ * checks look those issuances up in the package transaction history rather
+ * than the live stock collection, so a resulting stock issuance dated the
+ * same day counts whether the driver processes it before or after the
+ * transaction.
+ */
+export function resultingChecksFor({
+  name,
+  collection,
+  action,
+  participle,
+}: Pick<Family, "name" | "collection"> & { action: string; participle: string }) {
+  const resultingSecurityNamed = {
+    id: "resulting-security-named",
+    severity: "warning",
+    description: `The ${action} names at least one resulting security.`,
+    run: (_context, data) => {
+      const ids = resultingIds(data);
+      if (ids === undefined || ids.length > 0) return [];
+      return [`The ${action} names no resulting security.`];
+    },
+  } satisfies CheckObject<{ resulting_security_ids: string[] }>;
+
+  const resultingStockExists = {
+    id: "resulting-stock-exists",
+    severity: "error",
+    description:
+      "Each resulting security is a stock issuance present in the package.",
+    run: (context, data) => {
+      const ids = resultingIds(data);
+      if (ids === undefined) {
+        return [`The ${action}'s resulting_security_ids is not a list of security ids.`];
+      }
+
+      const messages: string[] = [];
+
+      // One finding per resulting id that names no stock issuance in history,
+      // or more than one.
+      ids.forEach((resultingId) => {
+        const { length } = resultingStockIssuances(context, resultingId);
+        if (length === 0) {
+          messages.push(
+            `No stock issuance with security_id ${resultingId} appears in the package.`,
+          );
+        } else if (length > 1) {
+          messages.push(
+            `${length} stock issuances have security_id ${resultingId}, so it doesn't name one resulting security.`,
+          );
+        }
+      });
+
+      return messages;
+    },
+  } satisfies CheckObject<{ resulting_security_ids: string[] }>;
+
+  const resultingStockDated = {
+    id: "resulting-stock-dated",
+    severity: "error",
+    description:
+      `Each resulting stock issuance is dated the same day as the ${action}.`,
+    run: (context, data) => {
+      const messages: string[] = [];
+
+      // Only resulting ids backed by exactly one stock issuance are judged here;
+      // a missing or duplicated id is solely resulting-stock-exists's concern.
+      (resultingIds(data) ?? []).forEach((resultingId) => {
+        const issuance = resultingStockIssuance(context, resultingId);
+        if (issuance !== undefined && issuance.date !== data.date) {
+          messages.push(
+            `The resulting stock issuance ${resultingId} is dated ${issuance.date}, which differs from the ${action} date ${data.date}.`,
+          );
+        }
+      });
+
+      return messages;
+    },
+  } satisfies CheckObject<{ resulting_security_ids: string[]; date: string }>;
+
+  const resultingStockStakeholder = {
+    id: "resulting-stock-stakeholder",
+    severity: "error",
+    description:
+      `Each resulting stock issuance names the stakeholder of the ${participle} ${name} issuance.`,
+    run: (context, data) => {
+      const messages: string[] = [];
+
+      // The reference stakeholder comes from the live issuance this transaction
+      // acts on — the same record issuance-exists matches. With no live record,
+      // issuance-exists already carries the failure and there is no reference
+      // to compare against, so this check stays silent.
+      const reference = context[collection].find(
+        (ele) => ele.security_id === data.security_id,
+      );
+      if (reference === undefined) return messages;
+
+      // As with the date check, only resulting ids backed by exactly one stock
+      // issuance are judged.
+      (resultingIds(data) ?? []).forEach((resultingId) => {
+        const issuance = resultingStockIssuance(context, resultingId);
+        if (issuance !== undefined && issuance.stakeholder_id !== reference.stakeholder_id) {
+          messages.push(
+            `The resulting stock issuance ${resultingId} names stakeholder ${issuance.stakeholder_id}, which differs from the ${name} issuance's stakeholder ${reference.stakeholder_id}.`,
+          );
+        }
+      });
+
+      return messages;
+    },
+  } satisfies CheckObject<{ security_id: string; resulting_security_ids: string[] }>;
+
+  return { resultingSecurityNamed, resultingStockExists, resultingStockDated, resultingStockStakeholder };
 }
