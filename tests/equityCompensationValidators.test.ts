@@ -469,6 +469,16 @@ describe("equity compensation release validity", () => {
     expectFindingShape(findings[0], "issuance-exists", subject);
     expect(findings[0].message).toContain("sec1");
   });
+
+  it("passes a second full release, which quantity-outstanding would flag once it's written", () => {
+    const grant = { ...issuanceRecord("sec1"), quantity: "100" };
+    const context = contextWith({
+      equityCompensation: [grant] as any,
+      transactions: [grant, { id: "rel-all", object_type: "TX_EQUITY_COMPENSATION_RELEASE", security_id: "sec1", quantity: "100", date: "2020-07-01" }],
+    });
+    expect(runValidator("TX_EQUITY_COMPENSATION_RELEASE", context, release({ quantity: "100" }))).toEqual([]);
+    expect(declaredChecks("TX_EQUITY_COMPENSATION_RELEASE").find((c) => c.id === "quantity-outstanding")?.implemented).toBe(false);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -476,9 +486,11 @@ describe("equity compensation release validity", () => {
 // ---------------------------------------------------------------------------
 
 // The exercise diverges from warrant exercise: its effect is `none`, so it
-// removes nothing, and every resulting-security check is a declared gap rather
-// than an implemented check.
+// removes nothing, and its only implemented check is issuance-exists. Every
+// resulting-security check is a declared gap, and so are the family's
+// no-other-transactions and quantity-outstanding.
 const EXERCISE_GAP_IDS = [
+  "quantity-outstanding",
   "resulting-stock-exists",
   "no-other-transactions",
   "resulting-stock-dated",
@@ -531,21 +543,24 @@ describe("equity compensation exercise validity", () => {
     expect(findings[0].message).toContain("sec1");
   });
 
-  it("declares its four resulting-security checks and no-other-transactions as gaps and emits none, even when their conditions are unmet", () => {
-    // resulting_security_ids names a security with no backing stock issuance and
-    // another transaction references the exercised security — conditions the gap
-    // checks would flag if written. None is, so the transaction stays valid.
+  it("declares its gaps and emits none of them, even when their conditions are unmet", () => {
+    // resulting_security_ids names a security with no backing stock issuance,
+    // another transaction references the exercised security, and an earlier
+    // exercise already used the whole grant — conditions the gap checks would
+    // flag if written. None is, so the transaction stays valid.
+    const grant = { ...issuanceRecord("sec1"), quantity: "100" };
     const context = contextWith({
-      equityCompensation: [issuanceRecord("sec1")] as any,
+      equityCompensation: [grant] as any,
       transactions: [
-        issuanceRecord("sec1"),
+        grant,
         { id: "ret-x", object_type: "TX_EQUITY_COMPENSATION_RETRACTION", security_id: "sec1", date: "2020-06-01" },
+        { id: "ex-all", object_type: "TX_EQUITY_COMPENSATION_EXERCISE", security_id: "sec1", quantity: "100", date: "2020-07-01" },
       ],
     });
     const findings = runValidator(
       "TX_EQUITY_COMPENSATION_EXERCISE",
       context,
-      exercise({ resulting_security_ids: ["absent"] }),
+      exercise({ resulting_security_ids: ["absent"], quantity: "100" }),
     );
     expect(findings).toEqual([]);
 
@@ -808,6 +823,16 @@ describe("declared and emitted checks stay consistent across the family", () => 
     // The gap is declared on the descriptor with implemented: false.
     const declared = declaredChecks("TX_EQUITY_COMPENSATION_TRANSFER");
     expect(declared.some((c) => c.id === "no-other-transactions" && c.implemented === false)).toBe(true);
+  });
+
+  it.each([
+    "TX_EQUITY_COMPENSATION_EXERCISE",
+    "TX_EQUITY_COMPENSATION_RELEASE",
+    "TX_EQUITY_COMPENSATION_CANCELLATION",
+    "TX_EQUITY_COMPENSATION_TRANSFER",
+  ])("%s, which has a quantity, declares quantity-outstanding as a gap", (key) => {
+    const declared = declaredChecks(key);
+    expect(declared.some((c) => c.id === "quantity-outstanding" && c.implemented === false)).toBe(true);
   });
 
   it("carries release on the graded convention with no legacy validator", () => {

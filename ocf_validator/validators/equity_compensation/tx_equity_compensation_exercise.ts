@@ -1,5 +1,5 @@
 import { defineValidator, asGap, type CheckObject } from "../checkKit";
-import { issuanceExists, noOtherTransactions } from "./checks";
+import { issuanceExists, noOtherTransactions, quantityOutstanding } from "./checks";
 
 // The exercise documents these resulting-security checks but implements none of
 // them: each is metadata with no run, so it reports as a gap and contributes no
@@ -40,6 +40,7 @@ export const TX_EQUITY_COMPENSATION_EXERCISE = defineValidator({
   effect: "none",
   checks: [
     issuanceExists,
+    quantityOutstanding,
     resultingStockExists,
     // The exercise doesn't perform the family's no-other-transactions yet, so
     // it's listed as a gap. It reuses cancellation's definition so the two stay

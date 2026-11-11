@@ -207,9 +207,11 @@ export const TX_DESCRIPTORS = {
   TX_CONVERTIBLE_ACCEPTANCE,
   TX_WARRANT_ACCEPTANCE,
   TX_EQUITY_COMPENSATION_ACCEPTANCE,
-  // TX_EQUITY_COMPENSATION_EXERCISE removes nothing today, asymmetric with
-  // TX_WARRANT_EXERCISE which removes. That asymmetry is PRESERVED pending
-  // investigation, not endorsed.
+  // An equity compensation exercise or release removes nothing, unlike
+  // TX_WARRANT_EXERCISE: it has a quantity but no balance security, so after a
+  // partial one the rest stays outstanding under the same security_id. Nothing
+  // reduces the security's quantity yet, so a fully exercised or released grant
+  // also stays in the collection; the quantity-outstanding gap records that.
   TX_EQUITY_COMPENSATION_EXERCISE,
   TX_EQUITY_COMPENSATION_RELEASE,
 
