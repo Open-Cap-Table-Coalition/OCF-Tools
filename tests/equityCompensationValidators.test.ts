@@ -471,6 +471,20 @@ describe("equity compensation release validity", () => {
     expect(findings[0].message).toContain("sec1");
   });
 
+  // Release used to be passthrough, which would leave the machine in capTable
+  // here; now an invalid release stops the run.
+  it("halts an invalid release in validationError with the error finding recorded", () => {
+    // In the package history but not the live collection.
+    const actor = startSeeded(contextWith({ transactions: [issuanceRecord("sec1")] }));
+    actor.send(ev("TX_EQUITY_COMPENSATION_RELEASE", release()));
+
+    const snapshot = actor.getSnapshot();
+    expect(snapshot.value).toBe("validationError");
+    expect(snapshot.context.findings).toHaveLength(1);
+    expectFindingShape(snapshot.context.findings[0], "issuance-exists", subject);
+    expect(snapshot.context.result).toContain("failed on rel1");
+  });
+
   it("passes a second full release, which quantity-outstanding would flag once it's written", () => {
     const grant = { ...issuanceRecord("sec1"), quantity: "100" };
     const context = contextWith({
