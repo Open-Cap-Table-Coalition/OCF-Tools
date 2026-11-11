@@ -556,7 +556,7 @@ const EXERCISE_GAP_IDS = [
   "no-other-transactions",
   "resulting-stock-dated",
   "resulting-stock-stakeholder",
-  "resulting-quantity-sum",
+  "quantity-reconciles",
 ];
 
 describe("equity compensation exercise validity", () => {

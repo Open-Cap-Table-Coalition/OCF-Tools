@@ -28,11 +28,13 @@ const resultingStockStakeholder = {
     "Each resulting stock issuance names the stakeholder of the exercised equity compensation issuance.",
 } satisfies CheckObject;
 
-const resultingQuantitySum = {
-  id: "resulting-quantity-sum",
+// The same check as convertible conversion's quantity-reconciles, worded for
+// an exercise, so the coverage report lists the two under one id.
+const quantityReconciles = {
+  id: "quantity-reconciles",
   severity: "error",
   description:
-    "The exercised quantity_converted equals the sum of the resulting stock issuances' quantities.",
+    "The exercised quantity equals the sum of the resulting stock issuances' quantities.",
 } satisfies CheckObject;
 
 export const TX_EQUITY_COMPENSATION_EXERCISE = defineValidator({
@@ -48,6 +50,6 @@ export const TX_EQUITY_COMPENSATION_EXERCISE = defineValidator({
     asGap(noOtherTransactions),
     resultingStockDated,
     resultingStockStakeholder,
-    resultingQuantitySum,
+    quantityReconciles,
   ],
 });
