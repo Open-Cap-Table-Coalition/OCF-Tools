@@ -27,6 +27,7 @@ import { TX_EQUITY_COMPENSATION_ISSUANCE } from "./validators/equity_compensatio
 import { TX_EQUITY_COMPENSATION_ACCEPTANCE } from "./validators/equity_compensation/tx_equity_compensation_acceptance";
 import { TX_EQUITY_COMPENSATION_EXERCISE } from "./validators/equity_compensation/tx_equity_compensation_exercise";
 import { TX_EQUITY_COMPENSATION_RELEASE } from "./validators/equity_compensation/tx_equity_compensation_release";
+import { TX_EQUITY_COMPENSATION_REPRICING } from "./validators/equity_compensation/tx_equity_compensation_repricing";
 import { TX_EQUITY_COMPENSATION_RETRACTION } from "./validators/equity_compensation/tx_equity_compensation_retraction";
 import { TX_EQUITY_COMPENSATION_CANCELLATION } from "./validators/equity_compensation/tx_equity_compensation_cancellation";
 import { TX_EQUITY_COMPENSATION_TRANSFER } from "./validators/equity_compensation/tx_equity_compensation_transfer";
@@ -202,7 +203,7 @@ export const TX_DESCRIPTORS = {
   TX_WARRANT_ISSUANCE,
   TX_EQUITY_COMPENSATION_ISSUANCE,
 
-  // --- none: validate + report, no collection mutation --------------------
+  // --- none: validate and record, no collection mutation ------------------
   TX_STOCK_ACCEPTANCE: { effect: "none", legacyValidate: validators.valid_tx_stock_acceptance },
   TX_CONVERTIBLE_ACCEPTANCE,
   TX_WARRANT_ACCEPTANCE,
@@ -214,6 +215,7 @@ export const TX_DESCRIPTORS = {
   // also stays in the collection; the quantity-outstanding gap records that.
   TX_EQUITY_COMPENSATION_EXERCISE,
   TX_EQUITY_COMPENSATION_RELEASE,
+  TX_EQUITY_COMPENSATION_REPRICING,
 
   // --- remove: filter the family collection by security_id ---------------
   TX_STOCK_RETRACTION: { effect: "remove", collection: "stockIssuances", legacyValidate: validators.valid_tx_stock_retraction },
@@ -240,7 +242,6 @@ export const TX_DESCRIPTORS = {
   //   contains TX_VESTING_START) is byte-identical. `satisfies DescriptorTable`
   //   below forces any future OCF transaction type to be classified here — a
   //   compile error until it is.
-  TX_EQUITY_COMPENSATION_REPRICING: { effect: "passthrough" },
   TX_ISSUER_AUTHORIZED_SHARES_ADJUSTMENT: { effect: "passthrough" },
   TX_PLAN_SECURITY_ACCEPTANCE: { effect: "passthrough" },
   TX_PLAN_SECURITY_CANCELLATION: { effect: "passthrough" },

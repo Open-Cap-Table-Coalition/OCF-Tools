@@ -26,6 +26,7 @@ const MIGRATED_KEYS = [
   "TX_EQUITY_COMPENSATION_TRANSFER",
   "TX_EQUITY_COMPENSATION_EXERCISE",
   "TX_EQUITY_COMPENSATION_RELEASE",
+  "TX_EQUITY_COMPENSATION_REPRICING",
 ] as const;
 type MigratedKey = (typeof MIGRATED_KEYS)[number];
 
@@ -482,6 +483,66 @@ describe("equity compensation release validity", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Repricing: issuance-exists
+// ---------------------------------------------------------------------------
+
+describe("equity compensation repricing validity", () => {
+  const repricing = (overrides: Record<string, unknown> = {}) => ({
+    id: "rep1",
+    object_type: "TX_EQUITY_COMPENSATION_REPRICING",
+    security_id: "sec1",
+    new_exercise_price: { amount: "0.50", currency: "USD" },
+    date: "2021-01-01",
+    ...overrides,
+  });
+  const subject = { object_type: "TX_EQUITY_COMPENSATION_REPRICING", id: "rep1" };
+
+  it("returns no findings when the issuance is outstanding", () => {
+    const context = contextWith({
+      equityCompensation: [issuanceRecord("sec1")] as any,
+      transactions: [issuanceRecord("sec1")],
+    });
+    expect(runValidator("TX_EQUITY_COMPENSATION_REPRICING", context, repricing())).toEqual([]);
+  });
+
+  it("leaves the machine in capTable without mutating collections on the valid branch", () => {
+    const seeded = contextWith({
+      equityCompensation: [issuanceRecord("sec1")] as any,
+      transactions: [issuanceRecord("sec1")],
+    });
+    const before = structuredClone(seeded.equityCompensation);
+
+    const actor = startSeeded(seeded);
+    actor.send(ev("TX_EQUITY_COMPENSATION_REPRICING", repricing()));
+
+    const snapshot = actor.getSnapshot();
+    expect(snapshot.value).toBe("capTable");
+    expect(snapshot.context.equityCompensation).toEqual(before);
+    expect(snapshot.context.findings).toEqual([]);
+  });
+
+  it("flags a not-outstanding issuance with an error naming the security_id", () => {
+    const context = contextWith({ transactions: [issuanceRecord("sec1")] });
+    const findings = runValidator("TX_EQUITY_COMPENSATION_REPRICING", context, repricing());
+    expect(findings).toHaveLength(1);
+    expectFindingShape(findings[0], "issuance-exists", subject);
+    expect(findings[0].message).toContain("sec1");
+  });
+
+  // A cancellation only looks at transactions dated on or before it, so a
+  // repricing of the cancelled grant has to carry the error itself.
+  it("fails a whole-package run where the grant is repriced after it's cancelled", () => {
+    const grant = { id: "eci-1", object_type: "TX_EQUITY_COMPENSATION_ISSUANCE", security_id: "sec1", stakeholder_id: "sh1", quantity: "1000", date: "2020-01-01" };
+    const cancellation = { id: "can-1", object_type: "TX_EQUITY_COMPENSATION_CANCELLATION", security_id: "sec1", quantity: "1000", reason_text: "Terminated", date: "2021-01-01" };
+
+    const { result, findings } = validatePackage([grant, cancellation, repricing({ date: "2021-06-01" })], [{ id: "sh1" }]);
+    expect(result).toContain("failed on rep1");
+    expect(findings).toHaveLength(1);
+    expectFindingShape(findings[0], "issuance-exists", subject);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Exercise: issuance-exists live, resulting-security checks are declared gaps
 // ---------------------------------------------------------------------------
 
@@ -806,6 +867,9 @@ const failingScenarios: FailingScenarios<MigratedKey> = {
   ],
   TX_EQUITY_COMPENSATION_RELEASE: [
     { context: contextWith({ transactions: [issuanceRecord("sec1")] }), data: txRecord("TX_EQUITY_COMPENSATION_RELEASE", "rel1", "sec1", "2021-01-01") },
+  ],
+  TX_EQUITY_COMPENSATION_REPRICING: [
+    { context: contextWith({ transactions: [issuanceRecord("sec1")] }), data: txRecord("TX_EQUITY_COMPENSATION_REPRICING", "rep1", "sec1", "2021-01-01") },
   ],
 };
 

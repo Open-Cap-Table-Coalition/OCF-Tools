@@ -205,7 +205,7 @@ describe("per-type collection placement", () => {
     const data = { id: "incoming", security_id: "SEC", object_type: key };
 
     if (!("collection" in descriptor)) {
-      // none: validate + report, but mutate nothing.
+      // none: validate and record, but mutate nothing.
       expect(descriptor.effect).toBe("none");
       const result = collectionUpdate(baseContext(), ev(key, data));
       expect(Object.keys(result)).toHaveLength(0);
