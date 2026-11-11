@@ -1,11 +1,15 @@
-// Shared test helpers: a full empty context, an actor seeded straight into
-// `capTable`, the test-only event cast, and the family-agnostic validator
-// helpers every migrated-family suite builds on. Imported by every suite that
-// drives the machine or a graded validator, so each family's tests share one
-// definition.
+// Shared test helpers: a full empty context, a whole-validator run over a
+// temporary package, an actor seeded straight into `capTable`, the test-only
+// event cast, and the family-agnostic validator helpers every migrated-family
+// suite builds on. Imported by every suite that drives the machine or a graded
+// validator, so each family's tests share one definition.
 
+import * as fs from "fs";
+import * as os from "os";
+import * as path from "path";
 import { expect } from "vitest";
 import { createActor } from "xstate";
+import { ocfValidator } from "../ocf_validator";
 import { ocfMachine, TX_DESCRIPTORS, type OcfMachineEvent } from "../ocf_validator/ocfMachine";
 import type { Finding } from "../types/finding";
 import type { Check, GradedValidator, OcfMachineContext } from "../types/validator";
@@ -33,6 +37,38 @@ export const baseContext = (overrides: Partial<OcfMachineContext> = {}): OcfMach
   result: "Incomplete",
   ...overrides,
 });
+
+/**
+ * Runs the whole validator over a package holding the given transactions and
+ * stakeholders, so the run goes through the same-day sort as a real one does.
+ * It writes a minimal package (a manifest, a stakeholders file, and a
+ * transactions file) to a temporary directory and removes it afterwards.
+ */
+export const validatePackage = (
+  transactions: Record<string, unknown>[],
+  stakeholders: { id: string }[] = [],
+): OcfMachineContext => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ocf-tools-test-"));
+  try {
+    const write = (name: string, content: unknown) =>
+      fs.writeFileSync(path.join(dir, name), JSON.stringify(content));
+    write("Stakeholders.ocf.json", { items: stakeholders });
+    write("Transactions.ocf.json", { items: transactions });
+    write("Manifest.ocf.json", {
+      issuer: { legal_name: "Test Co" },
+      stakeholders_files: [{ filepath: "Stakeholders.ocf.json" }],
+      transactions_files: [{ filepath: "Transactions.ocf.json" }],
+      stock_classes_files: [],
+      vesting_terms_files: [],
+      stock_plans_files: [],
+      stock_legend_templates_files: [],
+      valuations_files: [],
+    });
+    return ocfValidator(dir);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+};
 
 /** Start an actor seeded into `capTable` with the given context. */
 export const startSeeded = (context: OcfMachineContext) =>

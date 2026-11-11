@@ -277,6 +277,23 @@ describe("convertible cancellation validity", () => {
       expect(findings[0].message).toContain("vest-x");
     },
   );
+
+  // The equity compensation family exempts a return to pool; this family
+  // doesn't, because a convertible issuance can't name a stock plan.
+  it("still flags a return to pool on the security, since a convertible isn't granted from a stock plan", () => {
+    const context = contextWith({
+      convertibleIssuances: [issuanceRecord("sec1")] as any,
+      transactions: [
+        issuanceRecord("sec1"),
+        { id: "rtp-x", object_type: "TX_STOCK_PLAN_RETURN_TO_POOL", security_id: "sec1", stock_plan_id: "plan-1", date: "2020-06-01" },
+        cancellationRecord,
+      ],
+    });
+    const findings = runValidator("TX_CONVERTIBLE_CANCELLATION", context, cancellation());
+    expect(findings).toHaveLength(1);
+    expectFindingShape(findings[0], "no-other-transactions", subject);
+    expect(findings[0].message).toContain("rtp-x");
+  });
 });
 
 // ---------------------------------------------------------------------------

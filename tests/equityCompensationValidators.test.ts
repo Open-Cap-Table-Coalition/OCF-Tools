@@ -7,6 +7,7 @@ import {
   startSeeded,
   ev,
   contextWith,
+  validatePackage,
   withStakeholder,
   txRecord,
   runValidator,
@@ -318,10 +319,32 @@ describe("equity compensation cancellation validity", () => {
     expectFindingShape(findings[0], "no-other-transactions", subject);
   });
 
+  it.each(["TX_EQUITY_COMPENSATION_EXERCISE", "TX_EQUITY_COMPENSATION_RELEASE", "TX_EQUITY_COMPENSATION_REPRICING"])(
+    "exempts a %s on the security dated on or before, since it leaves the rest of the grant outstanding",
+    (type) => {
+      for (const date of ["2020-06-01", "2021-01-01"]) {
+        const context = contextWith({
+          equityCompensation: [issuanceRecord("sec1")] as any,
+          transactions: [issuanceRecord("sec1"), txRecord(type, "used-x", "sec1", date), cancellationRecord],
+        });
+        expect(runValidator("TX_EQUITY_COMPENSATION_CANCELLATION", context, cancellation())).toEqual([]);
+      }
+    },
+  );
+
+  it("exempts a return to pool of the cancelled shares dated the same day", () => {
+    const returnToPool = { id: "rtp-x", object_type: "TX_STOCK_PLAN_RETURN_TO_POOL", security_id: "sec1", stock_plan_id: "plan-1", date: "2021-01-01" };
+    const context = contextWith({
+      equityCompensation: [issuanceRecord("sec1")] as any,
+      transactions: [issuanceRecord("sec1"), cancellationRecord, returnToPool],
+    });
+    expect(runValidator("TX_EQUITY_COMPENSATION_CANCELLATION", context, cancellation())).toEqual([]);
+  });
+
   it("words no-other-transactions for equity compensation", () => {
     const declared = declaredChecks("TX_EQUITY_COMPENSATION_CANCELLATION");
     expect(declared.find((c) => c.id === "no-other-transactions")?.description).toBe(
-      "No other transaction dated on or before this transaction references its security_id, other than an equity compensation acceptance or a vesting start, event, or acceleration.",
+      "No other transaction dated on or before this transaction references its security_id, other than an equity compensation acceptance, exercise, release, or repricing; a vesting start, event, or acceleration; or a return to pool.",
     );
   });
 
@@ -682,6 +705,53 @@ describe("a conflicting transaction pair flags the later transaction, not the ea
       expect(finding.subject).toEqual({ object_type: "TX_EQUITY_COMPENSATION_ACCEPTANCE", id: "acc1" });
     }
     expect(context.findings.some((f) => f.subject.id === "ret1")).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Whole-package runs: cancelling what's left of a grant
+// ---------------------------------------------------------------------------
+
+// An equity compensation exercise or release has no balance security, so after
+// a partial one the rest stays on the original security_id. These runs go
+// through the whole validator, same-day sort included.
+describe("the validator accepts cancelling what's left of a grant after part of it is used", () => {
+  const stakeholders = [{ id: "sh1" }];
+  const option = { id: "eci-opt", object_type: "TX_EQUITY_COMPENSATION_ISSUANCE", security_id: "opt-1", stakeholder_id: "sh1", quantity: "1000", date: "2020-01-01" };
+  const rsu = { id: "eci-rsu", object_type: "TX_EQUITY_COMPENSATION_ISSUANCE", security_id: "rsu-1", stakeholder_id: "sh1", quantity: "1000", date: "2020-01-01" };
+  const exercise = (date: string) => ({ id: "ex-1", object_type: "TX_EQUITY_COMPENSATION_EXERCISE", security_id: "opt-1", quantity: "400", resulting_security_ids: [], date });
+  const release = (date: string) => ({ id: "rel-1", object_type: "TX_EQUITY_COMPENSATION_RELEASE", security_id: "rsu-1", quantity: "400", resulting_security_ids: [], date });
+  const cancellation = (security_id: string, date: string) => ({ id: "can-1", object_type: "TX_EQUITY_COMPENSATION_CANCELLATION", security_id, quantity: "600", reason_text: "Unvested at termination", date });
+
+  const expectValid = (transactions: Record<string, unknown>[]) => {
+    const { result, findings } = validatePackage(transactions, stakeholders);
+    expect(findings).toEqual([]);
+    expect(result).toBe("The validation of the OCF package for Test Co is complete and the package appears valid.");
+  };
+
+  it("after an earlier partial exercise", () => {
+    expectValid([option, exercise("2020-06-01"), cancellation("opt-1", "2021-01-01")]);
+  });
+
+  // The cancellation is listed first in these two, so they pass only because
+  // the same-day sort runs the exercise or release before it.
+  it("after a partial exercise on the same day", () => {
+    expectValid([option, cancellation("opt-1", "2021-01-01"), exercise("2021-01-01")]);
+  });
+
+  it("after a partial release on the same day", () => {
+    expectValid([rsu, cancellation("rsu-1", "2021-01-01"), release("2021-01-01")]);
+  });
+
+  it("with its shares returned to the pool on the same day", () => {
+    const returnToPool = { id: "rtp-1", object_type: "TX_STOCK_PLAN_RETURN_TO_POOL", security_id: "opt-1", stock_plan_id: "plan-1", quantity: "600", reason_text: "Unvested at termination", date: "2021-01-01" };
+    expectValid([option, cancellation("opt-1", "2021-01-01"), returnToPool]);
+  });
+
+  it("but still fails an exercise dated after the cancellation", () => {
+    const { result, findings } = validatePackage([option, cancellation("opt-1", "2021-01-01"), exercise("2021-06-01")], stakeholders);
+    expect(result).toContain("failed on ex-1");
+    expect(findings.map((f) => f.check)).toEqual(["issuance-exists"]);
   });
 });
 

@@ -7,4 +7,10 @@ export const { issuanceExists, noOtherTransactions } = familyChecksFor({
   issuance: "TX_EQUITY_COMPENSATION_ISSUANCE",
   acceptance: "TX_EQUITY_COMPENSATION_ACCEPTANCE",
   vests: true,
+  returnsToPool: true,
+  leavesOutstanding: [
+    "TX_EQUITY_COMPENSATION_EXERCISE",
+    "TX_EQUITY_COMPENSATION_RELEASE",
+    "TX_EQUITY_COMPENSATION_REPRICING",
+  ],
 });
