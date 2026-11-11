@@ -7,9 +7,14 @@ import {
   startSeeded,
   ev,
   contextWith,
+  withStakeholder,
+  txRecord,
   runValidator,
+  declaredChecks,
   implementedCheckIds,
+  emittedCheckIds,
   expectFindingShape,
+  type FailingScenarios,
 } from "./helpers";
 
 const MIGRATED_KEYS = [
@@ -39,15 +44,7 @@ const issuanceRecord = (security_id: string, date = "2020-01-01") => ({
 // ---------------------------------------------------------------------------
 
 describe("equity compensation issuance validity", () => {
-  const withStakeholder = (id: string) =>
-    baseContext({
-      ocfPackageContent: {
-        ...baseContext().ocfPackageContent,
-        stakeholders: [{ id }],
-      } as OcfMachineContext["ocfPackageContent"],
-    });
-
-  const issuance = (overrides: Record<string, unknown> = {}) => ({
+  const issuance =(overrides: Record<string, unknown> = {}) => ({
     id: "eci1",
     object_type: "TX_EQUITY_COMPENSATION_ISSUANCE",
     security_id: "sec1",
@@ -458,7 +455,7 @@ describe("equity compensation exercise validity", () => {
     expect(findings[0].message).toContain("sec1");
   });
 
-  it("declares its five resulting-security checks as gaps and emits none, even when their conditions are unmet", () => {
+  it("declares its four resulting-security checks and no-other-transactions as gaps and emits none, even when their conditions are unmet", () => {
     // resulting_security_ids names a security with no backing stock issuance and
     // another transaction references the exercised security — conditions the gap
     // checks would flag if written. None is, so the transaction stays valid.
@@ -476,15 +473,10 @@ describe("equity compensation exercise validity", () => {
     );
     expect(findings).toEqual([]);
 
-    const declared = (TX_DESCRIPTORS.TX_EQUITY_COMPENSATION_EXERCISE as { checks: readonly { id: string; implemented?: false }[] }).checks;
-    const gapIds = declared.filter((c) => c.implemented === false).map((c) => c.id);
-    expect(gapIds.sort()).toEqual([...EXERCISE_GAP_IDS].sort());
-    // Every gap declares error severity and none is implemented.
-    for (const id of EXERCISE_GAP_IDS) {
-      const gap = declared.find((c) => c.id === id) as { severity: string; implemented?: false };
-      expect(gap.severity).toBe("error");
-      expect(gap.implemented).toBe(false);
-    }
+    const gaps = declaredChecks("TX_EQUITY_COMPENSATION_EXERCISE").filter((c) => c.implemented === false);
+    expect(gaps.map((c) => c.id).sort()).toEqual([...EXERCISE_GAP_IDS].sort());
+    // Every gap declares error severity.
+    for (const gap of gaps) expect(gap.severity).toBe("error");
   });
 });
 
@@ -644,20 +636,12 @@ describe("a conflicting transaction pair flags the later transaction, not the ea
 // Declared-vs-emitted consistency across the family
 // ---------------------------------------------------------------------------
 
-// A transaction record on `security_id` of the given kind; the offender/exempt
-// building block for the failing scenarios below.
-const txRecord = (object_type: string, id: string, security_id = "sec1", date = "2020-06-01") => ({
-  id,
-  object_type,
-  security_id,
-  date,
-});
-
 // For each migrated type, scenarios that each fail one implemented check. The
 // implemented ids a module declares should be exactly the ids these scenarios
-// emit; a module's declared gaps (transfer's and exercise's resulting-security
-// checks) have no failing scenario because no code path emits them.
-const failingScenarios: Record<MigratedKey, { context: OcfMachineContext; data: Record<string, unknown> }[]> = {
+// emit; a module's declared gaps (transfer's no-other-transactions, and the
+// exercise's resulting-security checks and no-other-transactions) have no
+// failing scenario because no code path emits them.
+const failingScenarios: FailingScenarios<MigratedKey> = {
   TX_EQUITY_COMPENSATION_ISSUANCE: [
     {
       context: baseContext(),
@@ -666,15 +650,15 @@ const failingScenarios: Record<MigratedKey, { context: OcfMachineContext; data: 
   ],
   TX_EQUITY_COMPENSATION_ACCEPTANCE: [
     { context: contextWith({ transactions: [issuanceRecord("sec1")] }), data: txRecord("TX_EQUITY_COMPENSATION_ACCEPTANCE", "a1", "sec1", "2021-01-01") },
-    { context: contextWith({ equityCompensation: [issuanceRecord("sec1")] as any, transactions: [issuanceRecord("sec1"), txRecord("TX_EQUITY_COMPENSATION_RETRACTION", "r1")] }), data: txRecord("TX_EQUITY_COMPENSATION_ACCEPTANCE", "a1", "sec1", "2021-01-01") },
+    { context: contextWith({ equityCompensation: [issuanceRecord("sec1")] as any, transactions: [issuanceRecord("sec1"), txRecord("TX_EQUITY_COMPENSATION_RETRACTION", "r1", "sec1", "2020-06-01")] }), data: txRecord("TX_EQUITY_COMPENSATION_ACCEPTANCE", "a1", "sec1", "2021-01-01") },
   ],
   TX_EQUITY_COMPENSATION_RETRACTION: [
     { context: contextWith({ transactions: [issuanceRecord("sec1")] }), data: txRecord("TX_EQUITY_COMPENSATION_RETRACTION", "r1", "sec1", "2021-01-01") },
-    { context: contextWith({ equityCompensation: [issuanceRecord("sec1")] as any, transactions: [issuanceRecord("sec1"), txRecord("TX_EQUITY_COMPENSATION_ACCEPTANCE", "a1")] }), data: txRecord("TX_EQUITY_COMPENSATION_RETRACTION", "r1", "sec1", "2021-01-01") },
+    { context: contextWith({ equityCompensation: [issuanceRecord("sec1")] as any, transactions: [issuanceRecord("sec1"), txRecord("TX_EQUITY_COMPENSATION_ACCEPTANCE", "a1", "sec1", "2020-06-01")] }), data: txRecord("TX_EQUITY_COMPENSATION_RETRACTION", "r1", "sec1", "2021-01-01") },
   ],
   TX_EQUITY_COMPENSATION_CANCELLATION: [
     { context: contextWith({ transactions: [issuanceRecord("sec1")] }), data: txRecord("TX_EQUITY_COMPENSATION_CANCELLATION", "c1", "sec1", "2021-01-01") },
-    { context: contextWith({ equityCompensation: [issuanceRecord("sec1")] as any, transactions: [issuanceRecord("sec1"), txRecord("TX_EQUITY_COMPENSATION_TRANSFER", "x1")] }), data: txRecord("TX_EQUITY_COMPENSATION_CANCELLATION", "c1", "sec1", "2021-01-01") },
+    { context: contextWith({ equityCompensation: [issuanceRecord("sec1")] as any, transactions: [issuanceRecord("sec1"), txRecord("TX_EQUITY_COMPENSATION_TRANSFER", "x1", "sec1", "2020-06-01")] }), data: txRecord("TX_EQUITY_COMPENSATION_CANCELLATION", "c1", "sec1", "2021-01-01") },
   ],
   TX_EQUITY_COMPENSATION_TRANSFER: [
     { context: contextWith({ transactions: [issuanceRecord("sec1")] }), data: txRecord("TX_EQUITY_COMPENSATION_TRANSFER", "x1", "sec1", "2021-01-01") },
@@ -687,40 +671,27 @@ const failingScenarios: Record<MigratedKey, { context: OcfMachineContext; data: 
   ],
 };
 
-/** Every check id emitted across a module's failing scenarios. */
-const emittedCheckIds = (key: MigratedKey): Set<string> => {
-  const emitted = new Set<string>();
-  for (const { context, data } of failingScenarios[key]) {
-    for (const finding of runValidator(key, context, data)) emitted.add(finding.check);
-  }
-  return emitted;
-};
-
 describe("declared and emitted checks stay consistent across the family", () => {
   // Exact set equality in both directions: no finding is emitted for a check the
   // descriptor does not declare implemented, and every declared implemented check
-  // is emitted by at least one failing scenario.
+  // is emitted by at least one failing scenario. That also covers the declared
+  // gaps: one emitted gap would make the sets differ.
   it.each(MIGRATED_KEYS)("%s emits exactly the check ids its descriptor declares implemented", (key) => {
-    expect([...emittedCheckIds(key)].sort()).toEqual([...implementedCheckIds(key)].sort());
+    expect([...emittedCheckIds(failingScenarios, key)].sort()).toEqual([...implementedCheckIds(key)].sort());
   });
 
   it("never emits transfer's declared-gap check", () => {
-    expect(emittedCheckIds("TX_EQUITY_COMPENSATION_TRANSFER").has("no-other-transactions")).toBe(false);
+    expect(emittedCheckIds(failingScenarios, "TX_EQUITY_COMPENSATION_TRANSFER").has("no-other-transactions")).toBe(false);
     // The gap is declared on the descriptor with implemented: false.
-    const declared = (TX_DESCRIPTORS.TX_EQUITY_COMPENSATION_TRANSFER as { checks: readonly { id: string; implemented?: false }[] }).checks;
+    const declared = declaredChecks("TX_EQUITY_COMPENSATION_TRANSFER");
     expect(declared.some((c) => c.id === "no-other-transactions" && c.implemented === false)).toBe(true);
-  });
-
-  it("never emits any of exercise's declared-gap checks", () => {
-    const emitted = emittedCheckIds("TX_EQUITY_COMPENSATION_EXERCISE");
-    for (const id of EXERCISE_GAP_IDS) expect(emitted.has(id)).toBe(false);
   });
 
   it("carries release on the graded convention with no legacy validator", () => {
     expect("validate" in TX_DESCRIPTORS.TX_EQUITY_COMPENSATION_RELEASE).toBe(true);
     expect("legacyValidate" in TX_DESCRIPTORS.TX_EQUITY_COMPENSATION_RELEASE).toBe(false);
-    // A stray default export would still register a legacy key here, so assert its
-    // absence directly rather than trusting the descriptor swap alone.
+    // The legacy validator index lists its modules by hand, so the release's
+    // entry has to be deleted there too; check it's gone.
     expect("valid_tx_equity_compensation_release" in validators).toBe(false);
   });
 });

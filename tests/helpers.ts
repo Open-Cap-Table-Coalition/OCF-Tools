@@ -8,7 +8,7 @@ import { expect } from "vitest";
 import { createActor } from "xstate";
 import { ocfMachine, TX_DESCRIPTORS, type OcfMachineEvent } from "../ocf_validator/ocfMachine";
 import type { Finding } from "../types/finding";
-import type { GradedValidator, OcfMachineContext } from "../types/validator";
+import type { Check, GradedValidator, OcfMachineContext } from "../types/validator";
 
 /** A full, mostly-empty machine context; `overrides` replace top-level fields. */
 export const baseContext = (overrides: Partial<OcfMachineContext> = {}): OcfMachineContext => ({
@@ -44,19 +44,31 @@ export const startSeeded = (context: OcfMachineContext) =>
 export const ev = (type: string, data: Record<string, unknown> = {}): OcfMachineEvent =>
   ({ type, data } as unknown as OcfMachineEvent);
 
-/** A context whose package `transactions` list is `transactions`. */
+/** A context whose package `transactions` and `stakeholders` lists are the ones given. */
 export const contextWith = (
-  overrides: Partial<OcfMachineContext> & { transactions?: any[] } = {},
+  overrides: Partial<OcfMachineContext> & { transactions?: any[]; stakeholders?: { id: string }[] } = {},
 ): OcfMachineContext => {
-  const { transactions = [], ...rest } = overrides;
+  const { transactions = [], stakeholders = [], ...rest } = overrides;
   return baseContext({
     ...rest,
     ocfPackageContent: {
       ...baseContext().ocfPackageContent,
+      stakeholders,
       transactions,
     } as OcfMachineContext["ocfPackageContent"],
   });
 };
+
+/** A context whose stakeholder file holds one stakeholder, `id`. */
+export const withStakeholder = (id: string): OcfMachineContext => contextWith({ stakeholders: [{ id }] });
+
+/** A transaction record of the given type on `security_id`, for building offenders and exempt records. */
+export const txRecord = (object_type: string, id: string, security_id = "sec1", date = "2021-06-01") => ({
+  id,
+  object_type,
+  security_id,
+  date,
+});
 
 /** Invoke the graded validator a migrated descriptor carries. */
 export const runValidator = (
@@ -71,12 +83,34 @@ export const runValidator = (
   return descriptor.validate(context, data);
 };
 
+/** The checks a descriptor declares, gaps included; empty for a legacy or passthrough descriptor. */
+export const declaredChecks = (key: string): readonly Check[] => {
+  const descriptor = TX_DESCRIPTORS[key as keyof typeof TX_DESCRIPTORS] as { checks?: readonly Check[] };
+  return descriptor.checks ?? [];
+};
+
 /** The check ids a descriptor declares as implemented (drops `implemented: false`). */
-export const implementedCheckIds = (key: string): string[] => {
-  const descriptor = TX_DESCRIPTORS[key as keyof typeof TX_DESCRIPTORS] as {
-    checks?: readonly { id: string; implemented?: false }[];
-  };
-  return (descriptor.checks ?? []).filter((c) => c.implemented !== false).map((c) => c.id);
+export const implementedCheckIds = (key: string): string[] =>
+  declaredChecks(key).filter((c) => c.implemented !== false).map((c) => c.id);
+
+/**
+ * For each of a family's transaction types, scenarios that each fail at least
+ * one implemented check. A family suite pairs these with `emittedCheckIds` to
+ * show that the checks a descriptor declares implemented are exactly the ones
+ * its validator can emit.
+ */
+export type FailingScenarios<K extends string> = Record<
+  K,
+  { context: OcfMachineContext; data: Record<string, unknown> }[]
+>;
+
+/** Every check id emitted across the failing scenarios for `key`. */
+export const emittedCheckIds = <K extends string>(scenarios: FailingScenarios<K>, key: K): Set<string> => {
+  const emitted = new Set<string>();
+  for (const { context, data } of scenarios[key]) {
+    for (const finding of runValidator(key, context, data)) emitted.add(finding.check);
+  }
+  return emitted;
 };
 
 /** Assert a finding carries the declared id, error severity, and the transaction as subject. */
