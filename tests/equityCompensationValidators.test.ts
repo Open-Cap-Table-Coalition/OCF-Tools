@@ -678,6 +678,39 @@ describe("issuance-exists reports why the referenced issuance is unavailable", (
       "The equity compensation issuance referenced by security_id sec1 (dated 2020-01-01) is not outstanding as of this transaction's date.",
     );
   });
+
+  it("names the deprecated type when the security was issued only as a TX_PLAN_SECURITY_ISSUANCE", () => {
+    expectSoleCause(
+      contextWith({ transactions: [{ ...issuanceRecord("sec1"), object_type: "TX_PLAN_SECURITY_ISSUANCE" }] }),
+      "The equity compensation issuance referenced by security_id sec1 uses the deprecated type TX_PLAN_SECURITY_ISSUANCE, which the validator doesn't process.",
+    );
+  });
+
+  it("fails a transaction with no date, even though its issuance is outstanding", () => {
+    const context = contextWith({
+      equityCompensation: [issuanceRecord("sec1")] as any,
+      transactions: [issuanceRecord("sec1")],
+    });
+    const { date: _date, ...undated } = acceptance;
+    const findings = runValidator("TX_EQUITY_COMPENSATION_ACCEPTANCE", context, undated);
+    expect(findings).toHaveLength(1);
+    expectFindingShape(findings[0], "issuance-exists", subject);
+    expect(findings[0].message).toBe(
+      "The transaction has no date, so it can't be checked against the equity compensation issuance with security_id sec1.",
+    );
+  });
+
+  it("fails a whole-package run that releases a security issued as a TX_PLAN_SECURITY_ISSUANCE, saying why", () => {
+    const deprecatedIssuance = { id: "psi-1", object_type: "TX_PLAN_SECURITY_ISSUANCE", security_id: "rsu-1", stakeholder_id: "sh1", quantity: "1000", date: "2020-01-01" };
+    const release = { id: "rel-1", object_type: "TX_EQUITY_COMPENSATION_RELEASE", security_id: "rsu-1", quantity: "400", resulting_security_ids: [], date: "2021-01-01" };
+
+    const { result, findings } = validatePackage([deprecatedIssuance, release], [{ id: "sh1" }]);
+    expect(result).toContain("failed on rel-1");
+    expect(findings).toHaveLength(1);
+    expect(findings[0].message).toBe(
+      "The equity compensation issuance referenced by security_id rsu-1 uses the deprecated type TX_PLAN_SECURITY_ISSUANCE, which the validator doesn't process.",
+    );
+  });
 });
 
 // ---------------------------------------------------------------------------

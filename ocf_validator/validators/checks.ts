@@ -51,6 +51,11 @@ export const stakeholderExists = {
  * the original security, and a repricing only changes the price. The other
  * families' exercises, conversions, and transfers retire the security, so
  * they leave this out.
+ *
+ * `deprecatedIssuance` is an older name OCF still accepts for the family's
+ * issuance (equity compensation's TX_PLAN_SECURITY_ISSUANCE). The machine
+ * doesn't process transactions under it, so a security issued that way is
+ * never outstanding to the validator; issuance-exists says that's the reason.
  */
 type Family = {
   [C in CollectionKey]: {
@@ -61,6 +66,7 @@ type Family = {
     vests: "vesting_terms_id" extends keyof OcfMachineContext[C][number] ? true : false;
     returnsToPool: "stock_plan_id" extends keyof OcfMachineContext[C][number] ? true : false;
     leavesOutstanding?: readonly TxKey[];
+    deprecatedIssuance?: OcfMachineContext[C][number]["object_type"];
   };
 }[CollectionKey];
 
@@ -99,6 +105,7 @@ export function familyChecksFor({
   vests,
   returnsToPool,
   leavesOutstanding = [],
+  deprecatedIssuance,
 }: Family) {
   /**
    * The issuance named by the transaction's `security_id` is outstanding as of
@@ -112,7 +119,10 @@ export function familyChecksFor({
    * after this transaction, or it was issued on or before this date but is no
    * longer outstanding. The reason and any date it shows come from one history
    * record, preferring a match dated on or before the transaction over a later
-   * one.
+   * one. A security issued only under the family's deprecated issuance name
+   * gets its own message, since the machine never processes that issuance.
+   *
+   * A transaction with no date fails: there's no date to be outstanding on.
    */
   const issuanceExists = {
     id: "issuance-exists",
@@ -120,6 +130,16 @@ export function familyChecksFor({
     description: `The ${name} issuance referenced by the transaction's security_id is outstanding as of the transaction's date.`,
     run: (context, data) => {
       const messages: string[] = [];
+
+      // OCF requires a date on every transaction, but nothing checks that
+      // before the validators run, and a live match below doesn't look at
+      // dates. Without this, an undated transaction would pass.
+      if (typeof data.date !== "string") {
+        messages.push(
+          `The transaction has no date, so it can't be checked against the ${name} issuance with security_id ${data.security_id}.`,
+        );
+        return messages;
+      }
 
       let issuanceExists = false;
       context[collection].forEach((ele) => {
@@ -134,6 +154,7 @@ export function familyChecksFor({
       const { transactions } = context.ocfPackageContent;
       let firstIssuanceDate: string | undefined;
       let onOrBeforeDate: string | undefined;
+      let issuedUnderDeprecatedName = false;
       transactions.forEach((ele) => {
         if (ele.object_type === issuance && ele.security_id === data.security_id) {
           if (firstIssuanceDate === undefined) firstIssuanceDate = ele.date;
@@ -141,9 +162,16 @@ export function familyChecksFor({
             onOrBeforeDate = ele.date;
           }
         }
+        if (ele.object_type === deprecatedIssuance && ele.security_id === data.security_id) {
+          issuedUnderDeprecatedName = true;
+        }
       });
 
-      if (firstIssuanceDate === undefined) {
+      if (firstIssuanceDate === undefined && issuedUnderDeprecatedName) {
+        messages.push(
+          `The ${name} issuance referenced by security_id ${data.security_id} uses the deprecated type ${deprecatedIssuance}, which the validator doesn't process.`,
+        );
+      } else if (firstIssuanceDate === undefined) {
         messages.push(
           `No ${name} issuance with security_id ${data.security_id} appears in the package.`,
         );

@@ -742,6 +742,20 @@ describe("issuance-exists reports why the referenced issuance is unavailable", (
       "The warrant issuance referenced by security_id sec1 (dated 2020-01-01) is not outstanding as of this transaction's date.",
     );
   });
+
+  it("fails a transaction with no date, even though its issuance is outstanding", () => {
+    const context = contextWith({
+      warrantIssuances: [issuanceRecord("sec1")] as any,
+      transactions: [issuanceRecord("sec1")],
+    });
+    const { date: _date, ...undated } = acceptance;
+    const findings = runValidator("TX_WARRANT_ACCEPTANCE", context, undated);
+    expect(findings).toHaveLength(1);
+    expectFindingShape(findings[0], "issuance-exists", subject);
+    expect(findings[0].message).toBe(
+      "The transaction has no date, so it can't be checked against the warrant issuance with security_id sec1.",
+    );
+  });
 });
 
 // ---------------------------------------------------------------------------
