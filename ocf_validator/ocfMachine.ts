@@ -277,8 +277,10 @@ const activeDescriptorFor = (type: TxKey): ActiveDescriptor | undefined => {
 // new behavior; they are deleted with `legacyValidate` when the last family
 // migrates, leaving each helper single-armed.
 
-const failureMessage = (context: OcfMachineContext, subject: string, detail: string): string =>
-  `The validation of the OCF package for ${context.ocfPackageContent.manifest.issuer.legal_name} failed on ${subject}: ${detail}`;
+// The driver also builds this message (errorResult), outside the actor, where a
+// throw would escape ocfValidator, so it reads the issuer null-safely.
+const failureMessage = ({ manifest }: OcfPackageContent, subject: string, detail: string): string =>
+  `The validation of the OCF package for ${manifest?.issuer?.legal_name} failed on ${subject}: ${detail}`;
 
 /**
  * The event slice the dispatch helpers read. `data` is `any` for the same
@@ -286,6 +288,12 @@ const failureMessage = (context: OcfMachineContext, subject: string, detail: str
  * descriptor table's concern, not the dispatcher's.
  */
 type ValidatorEvent = { type: string; data?: any };
+
+/** What a failure message names: the transaction's id, or else the event's type. */
+const subjectOf = (event: ValidatorEvent): string =>
+  typeof event.data === "object" && event.data !== null && "id" in event.data
+    ? event.data.id
+    : event.type;
 
 /** The single blocking rule for graded findings: only an error blocks. */
 const isErrorFinding = (finding: Finding): boolean => finding.severity === "error";
@@ -341,17 +349,23 @@ export function failureResult(
   context: OcfMachineContext,
   event: ValidatorEvent,
 ): string {
-  const subject =
-    typeof event.data === "object" && event.data !== null && "id" in event.data
-      ? event.data.id
-      : event.type;
+  const subject = subjectOf(event);
   if (descriptor && "validate" in descriptor) {
-    return failureMessage(context, subject, JSON.stringify(context.lastErrorFindings, null, 2));
+    return failureMessage(context.ocfPackageContent, subject, JSON.stringify(context.lastErrorFindings, null, 2));
   }
   const lastReport = context.report[context.report.length - 1];
   const detail = context.report.length ? JSON.stringify(lastReport, null, 2) : "";
-  return failureMessage(context, subject, detail);
+  return failureMessage(context.ocfPackageContent, subject, detail);
 }
+
+/**
+ * The `result` of a run that stopped because handling `event` threw. A throw
+ * stops the actor before it can record anything, so the driver builds this
+ * result itself. It passes the package it read, since the machine's context
+ * lacks it when no transaction started the run (#184).
+ */
+export const errorResult = (ocfPackageContent: OcfPackageContent, event: ValidatorEvent, error: unknown): string =>
+  failureMessage(ocfPackageContent, subjectOf(event), String(error));
 
 // ---------------------------------------------------------------------------
 // The machine — typed via setup({ types, actions, guards })
