@@ -551,8 +551,14 @@ export const ocfMachine = setup({
         RUN_END: {
           target: "capTable",
           actions: assign({
-            result: ({ context }) =>
-              text`The validation of the OCF package for ${context.ocfPackageContent.manifest.issuer.legal_name} is complete and the package appears valid.`,
+            // Warnings don't stop a run, so a valid package can have them. The
+            // result counts them, so a caller reading only `result` knows to
+            // look at `findings` (#215).
+            result: ({ context }) => {
+              const warnings = context.findings.filter((finding) => finding.severity === "warning").length;
+              const counted = warnings === 0 ? "" : `, with ${warnings} warning${warnings === 1 ? "" : "s"}`;
+              return text`The validation of the OCF package for ${context.ocfPackageContent.manifest.issuer.legal_name} is complete and the package appears valid${counted}.`;
+            },
           }),
         },
         // Fires only for runtime `type` strings outside TxKey (genuinely unknown /

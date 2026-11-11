@@ -55,6 +55,26 @@ describe("a run that throws", () => {
 });
 
 // ---------------------------------------------------------------------------
+// A valid package with warnings
+// ---------------------------------------------------------------------------
+
+describe("a valid package with warnings", () => {
+  // A conversion that names no resulting security passes with a warning.
+  const issuance = (n: number) => ({ id: `ci-${n}`, object_type: "TX_CONVERTIBLE_ISSUANCE", security_id: `safe-${n}`, stakeholder_id: "sh-1", date: "2021-01-01" });
+  const conversion = (n: number) => ({ id: `cv-${n}`, object_type: "TX_CONVERTIBLE_CONVERSION", security_id: `safe-${n}`, resulting_security_ids: [], date: "2021-06-01" });
+
+  it.each([
+    { warnings: 1, transactions: [issuance(1), conversion(1)], counted: "1 warning" },
+    { warnings: 2, transactions: [issuance(1), issuance(2), conversion(1), conversion(2)], counted: "2 warnings" },
+  ])("counts $warnings warning(s) in result", ({ warnings, transactions, counted }) => {
+    const context = validatePackage(transactions, [{ id: "sh-1" }]);
+
+    expect(context.result).toBe(`The validation of the OCF package for Test Co is complete and the package appears valid, with ${counted}.`);
+    expect(context.findings.map((f) => f.severity)).toEqual(Array(warnings).fill("warning"));
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Malformed package values
 // ---------------------------------------------------------------------------
 
