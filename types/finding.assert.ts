@@ -1,7 +1,7 @@
 /**
  * Compile-time assertions for the graded findings model (#156). No runtime —
- * this file is type-checked by `tsc` (the build) because it is not a `*.test.ts`
- * file, so a broken invariant fails the build.
+ * this file is type-checked by `tsc` (the build), so a broken invariant fails
+ * the build.
  */
 import type { OcfMachineContext } from "../ocf_validator/ocfMachine";
 import type { Finding, Severity } from "./finding";

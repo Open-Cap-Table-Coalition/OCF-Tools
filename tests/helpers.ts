@@ -39,26 +39,29 @@ export const baseContext = (overrides: Partial<OcfMachineContext> = {}): OcfMach
 });
 
 /**
- * Runs the whole validator over a package holding the given transactions and
- * stakeholders, so the run goes through the driver as a real one does. It
- * writes a minimal package (a manifest, a stakeholders file, and a
- * transactions file) to a temporary directory and removes it afterwards.
+ * Runs the whole validator over a package holding the given transactions,
+ * stakeholders, and stock classes, so the run goes through the driver as a
+ * real one does. It writes a minimal package (a manifest, a stakeholders file,
+ * a stock classes file, and a transactions file) to a temporary directory and
+ * removes it afterwards.
  */
 export const validatePackage = (
   transactions: Record<string, unknown>[],
   stakeholders: { id: string }[] = [],
+  stockClasses: { id: string }[] = [],
 ): OcfMachineContext => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ocf-tools-test-"));
   try {
     const write = (name: string, content: unknown) =>
       fs.writeFileSync(path.join(dir, name), JSON.stringify(content));
     write("Stakeholders.ocf.json", { items: stakeholders });
+    write("StockClasses.ocf.json", { items: stockClasses });
     write("Transactions.ocf.json", { items: transactions });
     write("Manifest.ocf.json", {
       issuer: { legal_name: "Test Co" },
       stakeholders_files: [{ filepath: "Stakeholders.ocf.json" }],
       transactions_files: [{ filepath: "Transactions.ocf.json" }],
-      stock_classes_files: [],
+      stock_classes_files: [{ filepath: "StockClasses.ocf.json" }],
       vesting_terms_files: [],
       stock_plans_files: [],
       stock_legend_templates_files: [],

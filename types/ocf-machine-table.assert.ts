@@ -1,7 +1,7 @@
 /**
  * Compile-time assertions for the per-transaction descriptors. No runtime — this
- * file is type-checked by `tsc` (the build) because it is not a `*.test.ts` file,
- * so a broken invariant fails the build.
+ * file is type-checked by `tsc` (the build), so a broken invariant fails the
+ * build.
  *
  * Covers:
  *  - the descriptors are exhaustive over every `TxKey` (dropping any key fails);
