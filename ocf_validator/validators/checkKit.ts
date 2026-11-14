@@ -39,10 +39,15 @@ export type CheckObject<P = unknown> = Pick<Check, "id" | "severity" | "descript
   run?: (context: DeepReadonly<OcfMachineContext>, data: DeepReadonly<P>) => string[];
 };
 
-const show = (value: unknown): string =>
-  typeof value === "object" && value !== null && !(value instanceof Error)
-    ? JSON.stringify(value)
-    : String(value);
+const show = (value: unknown): string => {
+  try {
+    return typeof value === "object" && value !== null && !(value instanceof Error)
+      ? JSON.stringify(value) ?? "[Unserializable value]"
+      : String(value);
+  } catch {
+    return "[Unserializable value]";
+  }
+};
 
 /**
  * Message text built from package values, as a template tag:
