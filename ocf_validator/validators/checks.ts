@@ -146,7 +146,7 @@ export function familyChecksFor({
       // dates. Without this, an undated transaction would pass.
       if (typeof data.date !== "string") {
         messages.push(
-          `The transaction has no date, so it can't be checked against the ${name} issuance with security_id ${data.security_id}.`,
+          text`The transaction has no date, so it can't be checked against the ${name} issuance with security_id ${data.security_id}.`,
         );
         return messages;
       }
@@ -179,7 +179,7 @@ export function familyChecksFor({
 
       if (firstIssuanceDate === undefined && issuedUnderDeprecatedName) {
         messages.push(
-          `The ${name} issuance referenced by security_id ${data.security_id} uses the deprecated type ${deprecatedIssuance}, which the validator doesn't process.`,
+          text`The ${name} issuance referenced by security_id ${data.security_id} uses the deprecated type ${deprecatedIssuance}, which the validator doesn't process.`,
         );
       } else if (firstIssuanceDate === undefined) {
         messages.push(

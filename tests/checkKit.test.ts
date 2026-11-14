@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { defineValidator, text, type CheckObject } from "../ocf_validator/validators/checkKit";
 import { stakeholderExists } from "../ocf_validator/validators/checks";
+import { issuanceExists } from "../ocf_validator/validators/equity_compensation/checks";
 import { baseContext, contextWith, runValidator } from "./helpers";
 
 // JSON.parse gives `{ "toString": null }` an own toString that isn't a function,
@@ -56,6 +57,18 @@ describe("every check message renders a malformed package value", () => {
     contextWith({ convertibleIssuances: [convertible] as any, transactions: [convertible, ...transactions] });
   const withWarrant = (...transactions: Record<string, unknown>[]) =>
     contextWith({ warrantIssuances: [warrant] as any, transactions: [warrant, ...transactions] });
+
+  it("renders a malformed security id in the undated and deprecated issuance messages", () => {
+    expect(issuanceExists.run(contextWith(), { security_id: unprintable } as any)).toEqual([
+      `The transaction has no date, so it can't be checked against the equity compensation issuance with security_id {"toString":null}.`,
+    ]);
+    const context = contextWith({
+      transactions: [{ object_type: "TX_PLAN_SECURITY_ISSUANCE", security_id: unprintable }],
+    });
+    expect(issuanceExists.run(context, { security_id: unprintable, date: "2021-01-01" })).toEqual([
+      `The equity compensation issuance referenced by security_id {"toString":null} uses the deprecated type TX_PLAN_SECURITY_ISSUANCE, which the validator doesn't process.`,
+    ]);
+  });
 
   it.each([
     { check: "stakeholder-exists", data: tx("TX_CONVERTIBLE_ISSUANCE", { stakeholder_id: unprintable }), context: contextWith() },
