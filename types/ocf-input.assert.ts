@@ -1,8 +1,8 @@
 /**
  * Compile-time assertions for the boundary types. No runtime — this file is
- * type-checked by `tsc` (the build) because it is not a `*.test.ts` file, so a
- * broken invariant fails the build. Covers acceptance criteria B2 (ocf_version
- * widening) and B3 (TransactionFor mapping) until a test runner is settled.
+ * type-checked by `tsc` (the build), so a broken invariant fails the build.
+ * Covers acceptance criteria B2 (ocf_version widening) and B3 (TransactionFor
+ * mapping).
  */
 import type { InputManifest, TransactionFor } from "./ocf-input";
 import type {

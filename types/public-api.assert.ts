@@ -1,6 +1,6 @@
 /**
  * Compile-time assertions for the public API return shapes. No runtime —
- * type-checked by `tsc` (the build) because it is not a `*.test.ts` file.
+ * type-checked by `tsc` (the build).
  *
  * These pin the *resolved* return type of each public entry point, guarding
  * against a return drifting to `any`. The machine is typed via `setup()`, so

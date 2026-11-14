@@ -712,7 +712,6 @@ describe("issuance-exists reports why the referenced issuance is unavailable", (
     expect(findings).toHaveLength(1);
     expectFindingShape(findings[0], "issuance-exists", subject);
     expect(findings[0].message).toBe(message);
-    expect(findings.some((f) => f.check === "date-order")).toBe(false);
   };
 
   it("names a security that was never issued in the package", () => {
