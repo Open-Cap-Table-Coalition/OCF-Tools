@@ -680,7 +680,7 @@ describe("convertible conversion drives the machine to completion", () => {
     expect(snapshot.context.convertibleIssuances).toEqual([]);
   });
 
-  // A run used to stop at every conversion, so it never reached the legacy equity
+  // A run used to stop at every conversion, so it never reached the equity
   // compensation validators after one. Now that conversions pass, the run goes on
   // to them, and they must validate rather than crash the machine.
   it.each(["TX_EQUITY_COMPENSATION_ACCEPTANCE", "TX_EQUITY_COMPENSATION_RETRACTION"])(
@@ -689,8 +689,8 @@ describe("convertible conversion drives the machine to completion", () => {
       const issuance = { id: "ci-z", object_type: "TX_CONVERTIBLE_ISSUANCE", security_id: "conv-sec", stakeholder_id: "holder-a", date: "2020-01-01" };
       const conversion = { id: "cv-z", object_type: "TX_CONVERTIBLE_CONVERSION", security_id: "conv-sec", resulting_security_ids: ["stock-sec"], date: "2020-01-02" };
       const resultingStock = { id: "si-z", object_type: "TX_STOCK_ISSUANCE", security_id: "stock-sec", stakeholder_id: "holder-a", date: "2020-01-02" };
-      // Seeded straight into its collection, so the legacy equity issuance
-      // validator stays out of the run just as the stock one does.
+      // Seeded straight into its collection, so the equity compensation
+      // issuance validator stays out of the run just as the stock one does.
       const option = { id: "ec-z", object_type: "TX_EQUITY_COMPENSATION_ISSUANCE", security_id: "opt-sec", stakeholder_id: "holder-a", date: "2020-01-03" };
       const optionTx = { id: "ec-tx", object_type: txType, security_id: "opt-sec", date: "2020-01-04" };
 
@@ -720,7 +720,7 @@ describe("convertible conversion through ocfValidator", () => {
   // transactions newest first, so the run depends on the sort, including its
   // same-day order by type (the option's issuance before its acceptance). The
   // resulting stock issuance is a real event here, and the run goes on to the
-  // legacy stock and equity compensation validators; the equity compensation
+  // stock and equity compensation validators; the equity compensation
   // acceptance once crashed a run that got past a conversion (#203).
   it("converts into same-day stock and validates the transactions after it", () => {
     const context = validatePackage(
