@@ -122,10 +122,11 @@ const toMetadata = (checks: readonly CheckObject<any>[]): readonly Check[] =>
  * of the wrong type can make a check throw (#218), and a throw that left the
  * validator would stop the whole run.
  *
- * `data` is typed `any` here. That's safe because `defineValidator` has already
- * checked every check against the transaction's type.
+ * `data` is typed `any` here. `defineValidator` checks every check against the
+ * transaction's type before building one; any other caller must make sure its
+ * checks can read the transactions it gives them.
  */
-const toValidate =
+export const toValidate =
   (checks: readonly CheckObject<any>[]): GradedValidator<any> =>
   (context, data: any) => {
     const subject = { object_type: data.object_type, id: data.id };

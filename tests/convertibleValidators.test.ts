@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { TX_DESCRIPTORS } from "../ocf_validator/ocfMachine";
+import type { OcfMachineContext } from "../types/validator";
 import {
   baseContext,
   startSeeded,
@@ -955,6 +956,17 @@ const failingScenarios: FailingScenarios<MigratedKey> = {
     {
       context: baseContext(),
       data: { id: "i1", object_type: "TX_CONVERTIBLE_ISSUANCE", security_id: "sec1", stakeholder_id: "nobody", date: "2021-01-01" },
+    },
+    // Reuses the security_id of a security cancelled before it.
+    {
+      context: baseContext({
+        ocfPackageContent: {
+          ...baseContext().ocfPackageContent,
+          stakeholders: [{ id: "sh1" }],
+          transactions: [txRecord("TX_CONVERTIBLE_CANCELLATION", "c0", "sec1", "2020-06-01")],
+        } as OcfMachineContext["ocfPackageContent"],
+      }),
+      data: { id: "i1", object_type: "TX_CONVERTIBLE_ISSUANCE", security_id: "sec1", stakeholder_id: "sh1", date: "2021-01-01" },
     },
   ],
   TX_CONVERTIBLE_ACCEPTANCE: [

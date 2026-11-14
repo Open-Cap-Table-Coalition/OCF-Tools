@@ -875,6 +875,17 @@ const failingScenarios: FailingScenarios<MigratedKey> = {
       context: baseContext(),
       data: { id: "i1", object_type: "TX_WARRANT_ISSUANCE", security_id: "sec1", stakeholder_id: "nobody", date: "2021-01-01" },
     },
+    // Reuses the security_id of a security cancelled before it.
+    {
+      context: baseContext({
+        ocfPackageContent: {
+          ...baseContext().ocfPackageContent,
+          stakeholders: [{ id: "sh1" }],
+          transactions: [txRecord("TX_WARRANT_CANCELLATION", "c0", "sec1", "2020-06-01")],
+        } as OcfMachineContext["ocfPackageContent"],
+      }),
+      data: { id: "i1", object_type: "TX_WARRANT_ISSUANCE", security_id: "sec1", stakeholder_id: "sh1", date: "2021-01-01" },
+    },
   ],
   TX_WARRANT_ACCEPTANCE: [
     { context: contextWith({ transactions: [issuanceRecord("sec1")] }), data: txRecord("TX_WARRANT_ACCEPTANCE", "a1", "sec1", "2021-01-01") },

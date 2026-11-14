@@ -18,7 +18,7 @@ const ocfPackage = readOcfPackage(ocfPackageFolderDir);
 
 ## OCF Validator
 
-This tool tests the logical and structural validity of an OCF package. We are continuing to build out the rules set for validity but have good coverage for stock transactions and basic validations for convertible, warrant, and equity compensation transactions. Other transactions, such as vesting and stock class transactions, aren't validated yet.
+This tool tests the logical and structural validity of an OCF package. We are continuing to build out the rules set for validity but have good coverage for stock transactions and basic validations for convertible, warrant, and equity compensation transactions. Other transactions, such as vesting transactions, are only checked for naming a security removed earlier, if at all.
 
 ```ts
 const ocfValidation = ocfValidator(ocfPackageFolderDir);
@@ -27,8 +27,8 @@ const ocfValidation = ocfValidator(ocfPackageFolderDir);
 Validation goes through the transactions in date order and stops at the first one that fails. The tool outputs an object whose fields include:
 
 - `result: string` says whether the package appears valid, or what made the validation fail: usually the transaction that failed and why. It's the one field that says whether the package is valid. A valid package can still have warnings, and the result counts them: "…appears valid, with 1 warning."
-- `findings` lists the problems found by the validators that report findings, today those for convertible, warrant, and equity compensation transactions. Each finding has a `severity` (`"error"` or `"warning"`), the id of the `check` that produced it, a `message`, and a `subject`: the `object_type` and `id` of the transaction it's about. An error fails its transaction; a warning doesn't.
-- `report` lists, for each stock transaction the tool validates, the checks it did and whether each passed. The stock validators haven't moved to findings yet.
+- `findings` lists the problems found by the checks that report findings. Today those are the convertible, warrant, and equity compensation validators' checks, plus one run on every issuance and on the transactions nothing else validates, except a return to pool: that no earlier transaction removed the security. Each finding has a `severity` (`"error"` or `"warning"`), the id of the `check` that produced it, a `message`, and a `subject`: the `object_type` and `id` of the transaction it's about. An error fails its transaction; a warning doesn't.
+- `report` lists, for each stock transaction the tool validates, the checks it did and whether each passed. The stock validators haven't moved to findings yet; a stock issuance that reuses a removed security fails with a finding instead.
 - `snapshots` holds the cap table at the end of each day with transactions, up to the last day validated in full.
 
 ## OCF Snapshot

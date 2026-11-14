@@ -10,33 +10,43 @@ import * as path from "path";
 import { expect } from "vitest";
 import { createActor } from "xstate";
 import { ocfValidator } from "../ocf_validator";
-import { ocfMachine, TX_DESCRIPTORS, type OcfMachineEvent } from "../ocf_validator/ocfMachine";
+import { earliestRemovals, ocfMachine, TX_DESCRIPTORS, type OcfMachineEvent } from "../ocf_validator/ocfMachine";
 import type { Finding } from "../types/finding";
 import type { Check, GradedValidator, OcfMachineContext } from "../types/validator";
 
-/** A full, mostly-empty machine context; `overrides` replace top-level fields. */
-export const baseContext = (overrides: Partial<OcfMachineContext> = {}): OcfMachineContext => ({
-  stockIssuances: [],
-  convertibleIssuances: [],
-  warrantIssuances: [],
-  equityCompensation: [],
-  ocfPackageContent: {
-    manifest: { issuer: { legal_name: "Test Co" } },
-    stakeholders: [],
-    stockClasses: [],
-    transactions: [],
-    stockLegends: [],
-    stockPlans: [],
-    vestingTerms: [],
-    valuations: [],
-  } as OcfMachineContext["ocfPackageContent"],
-  report: [],
-  findings: [],
-  lastErrorFindings: [],
-  snapshots: [],
-  result: "Incomplete",
-  ...overrides,
-});
+/**
+ * A full, mostly-empty machine context; `overrides` replace top-level fields.
+ * Unless overridden, `removals` indexes the package's transactions, as START
+ * builds it, so a seeded actor sees the same removals a real run would.
+ */
+export const baseContext = (overrides: Partial<OcfMachineContext> = {}): OcfMachineContext => {
+  const ocfPackageContent =
+    overrides.ocfPackageContent ??
+    ({
+      manifest: { issuer: { legal_name: "Test Co" } },
+      stakeholders: [],
+      stockClasses: [],
+      transactions: [],
+      stockLegends: [],
+      stockPlans: [],
+      vestingTerms: [],
+      valuations: [],
+    } as OcfMachineContext["ocfPackageContent"]);
+  return {
+    stockIssuances: [],
+    convertibleIssuances: [],
+    warrantIssuances: [],
+    equityCompensation: [],
+    ocfPackageContent,
+    removals: earliestRemovals(ocfPackageContent.transactions),
+    report: [],
+    findings: [],
+    lastErrorFindings: [],
+    snapshots: [],
+    result: "Incomplete",
+    ...overrides,
+  };
+};
 
 /**
  * Runs the whole validator over a package holding the given transactions,

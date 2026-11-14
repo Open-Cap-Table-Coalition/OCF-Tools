@@ -345,7 +345,7 @@ describe("equity compensation cancellation validity", () => {
   it("words no-other-transactions for equity compensation", () => {
     const declared = declaredChecks("TX_EQUITY_COMPENSATION_CANCELLATION");
     expect(declared.find((c) => c.id === "no-other-transactions")?.description).toBe(
-      "No other transaction dated on or before this transaction references its security_id, other than an equity compensation acceptance, exercise, release, or repricing; a vesting start, event, or acceleration; or a return to pool.",
+      "No other transaction dated on or before this transaction references its security_id, other than an equity compensation issuance, acceptance, exercise, release, or repricing; a vesting start, event, or acceleration; or a return to pool.",
     );
   });
 
@@ -909,6 +909,16 @@ const failingScenarios: FailingScenarios<MigratedKey> = {
     {
       context: baseContext(),
       data: { id: "i1", object_type: "TX_EQUITY_COMPENSATION_ISSUANCE", security_id: "sec1", stakeholder_id: "nobody", date: "2021-01-01" },
+    },
+    {
+      context: contextWith({
+        stakeholders: [{ id: "sh1" }],
+        transactions: [
+          issuanceRecord("sec1"),
+          txRecord("TX_EQUITY_COMPENSATION_RETRACTION", "r1", "sec1", "2020-06-01"),
+        ],
+      }),
+      data: { id: "i1", object_type: "TX_EQUITY_COMPENSATION_ISSUANCE", security_id: "sec1", stakeholder_id: "sh1", date: "2021-01-01" },
     },
   ],
   TX_EQUITY_COMPENSATION_ACCEPTANCE: [
