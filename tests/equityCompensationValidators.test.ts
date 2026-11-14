@@ -363,6 +363,23 @@ describe("equity compensation cancellation validity", () => {
     expect(snapshot.context.findings).toEqual([]);
     expect(snapshot.context.equityCompensation).toEqual([]);
   });
+
+  it("clears a cancellation of a v2 grant after a v2 vesting event, removing it and recording no findings", () => {
+    // A v2 grant names a vesting template and carries its own start date, and a
+    // v2 vesting event names the template's event rather than a vesting condition.
+    const issuance = { ...issuanceRecord("sec1"), stakeholder_id: "sh1", vesting_template_id: "tmpl-1", vesting_start_date: "2020-01-01" };
+    const vestingEvent = { id: "ve-1", object_type: "TX_VESTING_EVENT", security_id: "sec1", event_id: "milestone-1", date: "2020-06-01" };
+
+    const actor = startSeeded(contextWith({ stakeholders: [{ id: "sh1" }], transactions: [issuance, vestingEvent, cancellationRecord] }));
+    actor.send(ev("TX_EQUITY_COMPENSATION_ISSUANCE", issuance));
+    actor.send(ev("TX_VESTING_EVENT", vestingEvent));
+    actor.send(ev("TX_EQUITY_COMPENSATION_CANCELLATION", cancellation()));
+
+    const snapshot = actor.getSnapshot();
+    expect(snapshot.value).toBe("capTable");
+    expect(snapshot.context.findings).toEqual([]);
+    expect(snapshot.context.equityCompensation).toEqual([]);
+  });
 });
 
 // ---------------------------------------------------------------------------
