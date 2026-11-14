@@ -27,7 +27,10 @@ export const ocfValidator = (packagePath: string): OcfMachineContext => {
   // accepts the parsed `object_type`, which is a plain string.
   const transactionTypes: readonly string[] = constants.transaction_types;
 
-  const sortedTransactions = transactions.sort((a: { date: string; object_type: string }, b: { date: string; object_type: string }) => a.date.localeCompare(b.date) || transactionTypes.indexOf(a.object_type) - transactionTypes.indexOf(b.object_type));
+  // Dates are compared the way the checks compare them, with < and <=, so a
+  // transaction a check sees as earlier has already run. localeCompare can
+  // order a noncanonical date differently: it puts 2021-06_01 before 2021-06-01.
+  const sortedTransactions = transactions.sort((a: { date: string; object_type: string }, b: { date: string; object_type: string }) => Number(a.date > b.date) - Number(a.date < b.date) || transactionTypes.indexOf(a.object_type) - transactionTypes.indexOf(b.object_type));
 
   // `ocfMachine` is already a configured machine (built with setup()), so it is
   // passed straight to createActor — no createMachine() wrapping.

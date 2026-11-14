@@ -17,8 +17,9 @@ describe("ocfValidator over testPackage", () => {
     const context = ocfValidator(testPackagePath);
 
     // `ocfPackageContent` is just the input package echoed back onto the machine
-    // context; exclude it so the snapshot captures derived behavior, not the fixture.
-    const { ocfPackageContent, ...output } = context;
+    // context, and `removals` indexes it; exclude both so the snapshot captures
+    // derived behavior, not the fixture.
+    const { ocfPackageContent, removals, ...output } = context;
 
     expect(output).toMatchSnapshot();
   });

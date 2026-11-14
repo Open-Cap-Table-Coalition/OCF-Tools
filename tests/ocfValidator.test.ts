@@ -55,6 +55,117 @@ describe("a run that throws", () => {
 });
 
 // ---------------------------------------------------------------------------
+// A valid package with warnings
+// ---------------------------------------------------------------------------
+
+describe("a valid package with warnings", () => {
+  // A conversion that names no resulting security passes with a warning.
+  const issuance = (n: number) => ({ id: `ci-${n}`, object_type: "TX_CONVERTIBLE_ISSUANCE", security_id: `safe-${n}`, stakeholder_id: "sh-1", date: "2021-01-01" });
+  const conversion = (n: number) => ({ id: `cv-${n}`, object_type: "TX_CONVERTIBLE_CONVERSION", security_id: `safe-${n}`, resulting_security_ids: [], date: "2021-06-01" });
+
+  it.each([
+    { warnings: 1, transactions: [issuance(1), conversion(1)], counted: "1 warning" },
+    { warnings: 2, transactions: [issuance(1), issuance(2), conversion(1), conversion(2)], counted: "2 warnings" },
+  ])("counts $warnings warning(s) in result", ({ warnings, transactions, counted }) => {
+    const context = validatePackage(transactions, [{ id: "sh-1" }]);
+
+    expect(context.result).toBe(`The validation of the OCF package for Test Co is complete and the package appears valid, with ${counted}.`);
+    expect(context.findings.map((f) => f.severity)).toEqual(Array(warnings).fill("warning"));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Transactions on a removed security
+// ---------------------------------------------------------------------------
+
+describe("a transaction on a security an earlier transaction removed", () => {
+  const issuance = { id: "ci-1", object_type: "TX_CONVERTIBLE_ISSUANCE", security_id: "safe-1", stakeholder_id: "sh-1", date: "2021-01-01" };
+  const cancellation = { id: "cc-1", object_type: "TX_CONVERTIBLE_CANCELLATION", security_id: "safe-1", date: "2021-06-01" };
+  const validateAfter = (...transactions: Record<string, unknown>[]) =>
+    validatePackage([issuance, cancellation, ...transactions], [{ id: "sh-1" }]);
+  const removed = (transaction: Record<string, unknown>) => ({
+    severity: "error",
+    check: "no-earlier-removal",
+    message: "The security safe-1 was removed from the cap table by cc-1 on 2021-06-01.",
+    subject: { object_type: transaction.object_type, id: transaction.id },
+  });
+
+  // A passthrough transaction has no validator, and an issuance would
+  // otherwise reuse the security_id unnoticed.
+  it.each([
+    { id: "ve-1", object_type: "TX_VESTING_EVENT", security_id: "safe-1", vesting_condition_id: "vc-1", date: "2021-07-01" },
+    { id: "psr-1", object_type: "TX_PLAN_SECURITY_RELEASE", security_id: "safe-1", date: "2021-07-01" },
+    { id: "ci-2", object_type: "TX_CONVERTIBLE_ISSUANCE", security_id: "safe-1", stakeholder_id: "sh-1", date: "2021-07-01" },
+    { id: "wi-1", object_type: "TX_WARRANT_ISSUANCE", security_id: "safe-1", stakeholder_id: "sh-1", date: "2021-07-01" },
+    { id: "si-1", object_type: "TX_STOCK_ISSUANCE", security_id: "safe-1", stakeholder_id: "sh-1", date: "2021-07-01" },
+    { id: "eci-1", object_type: "TX_EQUITY_COMPENSATION_ISSUANCE", security_id: "safe-1", stakeholder_id: "sh-1", date: "2021-07-01" },
+  ])("fails a later $object_type on it", (transaction) => {
+    const context = validateAfter(transaction);
+
+    expect(context.findings).toEqual([removed(transaction)]);
+    expect(context.result).toBe(
+      `The validation of the OCF package for Test Co failed on ${transaction.id}: ${JSON.stringify([removed(transaction)], null, 2)}`,
+    );
+  });
+
+  it("names the first removal of a security removed twice", () => {
+    // The second cancellation would fail on its own, but the run stops at the
+    // vesting event between the two.
+    const vesting = { id: "ve-1", object_type: "TX_VESTING_EVENT", security_id: "safe-1", vesting_condition_id: "vc-1", date: "2021-07-01" };
+    const context = validateAfter(vesting, { ...cancellation, id: "cc-2", date: "2021-08-01" });
+
+    expect(context.findings).toEqual([removed(vesting)]);
+  });
+
+  it("runs a removal before a transaction it's dated before, even on a noncanonical date", () => {
+    // The check compares dates with <, which puts the cancellation's
+    // 2021-06-01 first. Sorting with localeCompare puts 2021-06_01 first, so
+    // the vesting event would fail on a cancellation the run hadn't reached.
+    const vesting = { id: "ve-1", object_type: "TX_VESTING_EVENT", security_id: "safe-1", vesting_condition_id: "vc-1", date: "2021-06_01" };
+    const context = validateAfter(vesting);
+
+    expect(context.findings).toEqual([removed(vesting)]);
+    expect(context.snapshots.map((s) => s.date)).toEqual(["2021-01-01", "2021-06-01"]);
+  });
+
+  it("reports an issuance's own failures along with the reuse", () => {
+    const context = validateAfter({ id: "ci-2", object_type: "TX_CONVERTIBLE_ISSUANCE", security_id: "safe-1", stakeholder_id: "nobody", date: "2021-07-01" });
+
+    expect(context.findings.map((f) => f.check)).toEqual(["stakeholder-exists", "no-earlier-removal"]);
+  });
+
+  it("passes a return to pool, which records where a removed security's shares went", () => {
+    // A grant from a stock plan is retracted, and its shares go back to the
+    // plan's pool.
+    const context = validatePackage(
+      [
+        { id: "eci-1", object_type: "TX_EQUITY_COMPENSATION_ISSUANCE", security_id: "option-1", stakeholder_id: "sh-1", stock_plan_id: "plan-1", quantity: "100", date: "2021-01-01" },
+        { id: "ecr-1", object_type: "TX_EQUITY_COMPENSATION_RETRACTION", security_id: "option-1", date: "2021-06-01" },
+        { id: "rtp-1", object_type: "TX_STOCK_PLAN_RETURN_TO_POOL", security_id: "option-1", stock_plan_id: "plan-1", quantity: "100", date: "2021-07-01" },
+      ],
+      [{ id: "sh-1" }],
+    );
+
+    expect(context.result).toBe("The validation of the OCF package for Test Co is complete and the package appears valid.");
+  });
+
+  it("allows a vesting event on the day its warrant is cancelled", () => {
+    // A removal on the same day doesn't count, and the cancellation's
+    // no-other-transactions exempts vesting in a family that vests.
+    const context = validatePackage(
+      [
+        { id: "wi-1", object_type: "TX_WARRANT_ISSUANCE", security_id: "war-1", stakeholder_id: "sh-1", date: "2021-01-01" },
+        { id: "wc-1", object_type: "TX_WARRANT_CANCELLATION", security_id: "war-1", date: "2021-06-01" },
+        { id: "ve-1", object_type: "TX_VESTING_EVENT", security_id: "war-1", vesting_condition_id: "vc-1", date: "2021-06-01" },
+      ],
+      [{ id: "sh-1" }],
+    );
+
+    expect(context.result).toBe("The validation of the OCF package for Test Co is complete and the package appears valid.");
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Malformed package values
 // ---------------------------------------------------------------------------
 

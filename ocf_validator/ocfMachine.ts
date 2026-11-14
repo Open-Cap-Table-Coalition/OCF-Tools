@@ -6,7 +6,7 @@ import type {
   OCFWarrantIssuance,
   OCFEquityCompensationIssuance,
 } from "@opencaptablecoalition/ocf-types";
-import type { TransactionFor } from "../types/ocf-input";
+import type { OcfTransaction, TransactionFor } from "../types/ocf-input";
 import type { OcfPackageContent } from "../read_ocf_package";
 import type { Finding } from "../types/finding";
 import type { Check, GradedValidator, OcfMachineContext } from "../types/validator";
@@ -23,7 +23,8 @@ import { TX_WARRANT_RETRACTION } from "./validators/warrant/tx_warrant_retractio
 import { TX_WARRANT_CANCELLATION } from "./validators/warrant/tx_warrant_cancellation";
 import { TX_WARRANT_TRANSFER } from "./validators/warrant/tx_warrant_transfer";
 import { TX_WARRANT_EXERCISE } from "./validators/warrant/tx_warrant_exercise";
-import { text } from "./validators/checkKit";
+import { text, toValidate } from "./validators/checkKit";
+import { noEarlierRemoval } from "./validators/checks";
 import { TX_EQUITY_COMPENSATION_ISSUANCE } from "./validators/equity_compensation/tx_equity_compensation_issuance";
 import { TX_EQUITY_COMPENSATION_ACCEPTANCE } from "./validators/equity_compensation/tx_equity_compensation_acceptance";
 import { TX_EQUITY_COMPENSATION_EXERCISE } from "./validators/equity_compensation/tx_equity_compensation_exercise";
@@ -134,10 +135,12 @@ type Validator<T> = (
  * `legacyValidate` arms exist only while families migrate; the union collapses
  * to the graded arms when the last one does.
  *
- *  - `passthrough`: received and silently ignored — no validator, record, or mutation.
+ *  - `passthrough`: no validator or mutation. The machine checks only that its
+ *                   security wasn't removed earlier (see buildTransactionHandlers).
  *  - `none`:        validate and record, but mutate no collection.
  *  - `remove`:      validate, record, and filter `collection` by `security_id`.
  *  - `append`:      validate, record, and append the issuance to `collection`.
+ *                   An issuance's security mustn't have been removed earlier.
  *
  * The `none`/`remove` graded arms take `GradedValidator<any>`, not
  * `GradedValidator<unknown>`: the payload is contravariant, so `unknown` would
@@ -237,12 +240,14 @@ export const TX_DESCRIPTORS = {
   TX_EQUITY_COMPENSATION_CANCELLATION,
   TX_EQUITY_COMPENSATION_TRANSFER,
 
-  // --- passthrough: received and silently ignored today ------------------
-  //   No validator, no report entry, no collection mutation. They stay in
-  //   `capTable` so today's behavior (and the characterization snapshot, which
-  //   contains TX_VESTING_START) is byte-identical. `satisfies DescriptorTable`
-  //   below forces any future OCF transaction type to be classified here — a
-  //   compile error until it is.
+  // --- passthrough: no validator of their own ----------------------------
+  //   No report entry, no collection mutation. Except for the return to pool,
+  //   the machine fails one on a security an earlier transaction removed (see
+  //   buildTransactionHandlers); otherwise they stay in `capTable` with nothing
+  //   recorded, so the characterization snapshot (which contains
+  //   TX_VESTING_START) records nothing for it.
+  //   `satisfies DescriptorTable` below forces any future OCF transaction type
+  //   to be classified here — a compile error until it is.
   TX_ISSUER_AUTHORIZED_SHARES_ADJUSTMENT: { effect: "passthrough" },
   TX_PLAN_SECURITY_ACCEPTANCE: { effect: "passthrough" },
   TX_PLAN_SECURITY_CANCELLATION: { effect: "passthrough" },
@@ -449,9 +454,41 @@ export function collectionUpdate(
   return {};
 }
 
+// ---------------------------------------------------------------------------
+// Removed securities
+// ---------------------------------------------------------------------------
+
 /**
- * Build the `on` map for every key in `TX_DESCRIPTORS`: active keys share the
- * two-branch transition; passthrough keys are an explicit no-op (`{}`).
+ * The earliest transaction in `transactions` that removes each security from
+ * its collection (an effect of "remove"), by security_id: the machine's
+ * `removals`, which no-earlier-removal reads. START builds it, once per run.
+ */
+export const earliestRemovals = (transactions: readonly OcfTransaction[]): OcfMachineContext["removals"] => {
+  const removals = new Map<unknown, OcfTransaction>();
+  for (const ele of transactions) {
+    // An object_type with no descriptor stops the run when it's reached.
+    if ("security_id" in ele && TX_DESCRIPTORS[ele.object_type]?.effect === "remove") {
+      const earlier = removals.get(ele.security_id);
+      if (earlier === undefined || ele.date < earlier.date) removals.set(ele.security_id, ele);
+    }
+  }
+  return removals;
+};
+
+/** noEarlierRemoval in the shape the dispatch helpers take. */
+const notRemoved = {
+  effect: "none",
+  validate: toValidate([noEarlierRemoval]),
+  checks: [noEarlierRemoval],
+} satisfies ActiveDescriptor;
+
+/**
+ * Build the `on` map for every key in `TX_DESCRIPTORS`. Active keys share the
+ * two-branch transition. Graded validators declare no-earlier-removal where it
+ * applies; for the transactions that can't declare it, the machine runs it
+ * first. A legacy issuance runs it before its own validator, and a
+ * passthrough type runs only it and is otherwise a no-op. The return to pool
+ * is exempt: it records where a removed security's shares went.
  */
 function buildTransactionHandlers() {
   const activeTransitions = [
@@ -465,14 +502,29 @@ function buildTransactionHandlers() {
       actions: ["recordOutcome", "setValidationError"],
     },
   ] as const;
-  const passthrough = {} as const;
+  const afterRemoval = {
+    guard: "followsRemoval",
+    target: "validationError",
+    actions: ["recordRemoval", "setRemovalError"],
+  } as const;
+
+  const handlerFor = (type: TxKey) => {
+    const descriptor = TX_DESCRIPTORS[type];
+    if (descriptor.effect === "passthrough") {
+      return type === "TX_STOCK_PLAN_RETURN_TO_POOL" ? {} : [afterRemoval];
+    }
+    if (descriptor.effect === "append" && "legacyValidate" in descriptor) {
+      return [afterRemoval, ...activeTransitions];
+    }
+    return activeTransitions;
+  };
 
   return (Object.keys(TX_DESCRIPTORS) as TxKey[]).reduce(
     (handlers, type) => {
-      handlers[type] = TX_DESCRIPTORS[type].effect === "passthrough" ? passthrough : activeTransitions;
+      handlers[type] = handlerFor(type);
       return handlers;
     },
-    {} as Record<TxKey, typeof activeTransitions | typeof passthrough>,
+    {} as Record<TxKey, ReturnType<typeof handlerFor>>,
   );
 }
 
@@ -491,6 +543,10 @@ export const ocfMachine = setup({
       const descriptor = activeDescriptorFor(event.type);
       return descriptor ? isValidOutcome(descriptor, context, event) : false;
     },
+    // A passthrough transaction or issuance on a removed security (see
+    // noEarlierRemoval and buildTransactionHandlers).
+    followsRemoval: ({ context, event }) =>
+      !isControlEvent(event) && !isValidOutcome(notRemoved, context, event),
   },
   actions: {
     // Record the validator's outcome on its shape's channel — legacy report
@@ -512,6 +568,13 @@ export const ocfMachine = setup({
     // Valid branch collection mutation, driven by the descriptor's `effect` and
     // `collection`. `none` descriptors (and control events) mutate nothing.
     mutateCollection: assign(({ context, event }) => collectionUpdate(context, event)),
+
+    // The followsRemoval branch's record and failure message, as for a
+    // graded validator's invalid branch.
+    recordRemoval: assign(({ context, event }) => outcomeUpdate(notRemoved, context, event)),
+    setRemovalError: assign({
+      result: ({ context, event }) => failureResult(notRemoved, context, event),
+    }),
   },
 }).createMachine({
   id: "OCF-xstate",
@@ -533,6 +596,7 @@ export const ocfMachine = setup({
       vestingTerms: [],
       valuations: [],
     },
+    removals: new Map(),
     report: [],
     findings: [],
     lastErrorFindings: [],
@@ -542,14 +606,16 @@ export const ocfMachine = setup({
   states: {
     capTable: {
       on: {
-        // Active handlers all share this two-branch shape; the descriptor-driven
-        // actions resolve the per-type validator and effect. Passthrough handlers
-        // are explicit no-ops so the `'*'` wildcard never catches a known type.
+        // One handler per transaction type (see buildTransactionHandlers); the
+        // descriptor-driven actions resolve the per-type validator and effect.
+        // Every known type has a handler, so the `'*'` wildcard never catches
+        // one, even when none of its guards passes.
         ...buildTransactionHandlers(),
         START: {
           target: "capTable",
           actions: assign({
             ocfPackageContent: ({ event }) => event.data,
+            removals: ({ event }) => earliestRemovals(event.data.transactions),
           }),
         },
         RUN_EOD: {
@@ -561,8 +627,14 @@ export const ocfMachine = setup({
         RUN_END: {
           target: "capTable",
           actions: assign({
-            result: ({ context }) =>
-              text`The validation of the OCF package for ${context.ocfPackageContent.manifest.issuer.legal_name} is complete and the package appears valid.`,
+            // Warnings don't stop a run, so a valid package can have them. The
+            // result counts them, so a caller reading only `result` knows to
+            // look at `findings` (#215).
+            result: ({ context }) => {
+              const warnings = context.findings.filter((finding) => finding.severity === "warning").length;
+              const counted = warnings === 0 ? "" : `, with ${warnings} warning${warnings === 1 ? "" : "s"}`;
+              return text`The validation of the OCF package for ${context.ocfPackageContent.manifest.issuer.legal_name} is complete and the package appears valid${counted}.`;
+            },
           }),
         },
         // Fires only for runtime `type` strings outside TxKey (genuinely unknown /
