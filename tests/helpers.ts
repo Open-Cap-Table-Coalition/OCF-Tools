@@ -40,8 +40,8 @@ export const baseContext = (overrides: Partial<OcfMachineContext> = {}): OcfMach
 
 /**
  * Runs the whole validator over a package holding the given transactions and
- * stakeholders, so the run goes through the same-day sort as a real one does.
- * It writes a minimal package (a manifest, a stakeholders file, and a
+ * stakeholders, so the run goes through the driver and same-day sort as a
+ * real one does. It writes a minimal package (a manifest, a stakeholders file, and a
  * transactions file) to a temporary directory and removes it afterwards.
  */
 export const validatePackage = (
