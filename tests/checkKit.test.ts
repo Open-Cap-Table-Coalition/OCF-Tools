@@ -14,6 +14,12 @@ describe("text", () => {
       'sec-1 3 NaN null undefined TypeError: boom {"toString":null} {} [1]',
     );
   });
+
+  it("renders an object it can't serialize as a placeholder instead of throwing", () => {
+    const circular: Record<string, unknown> = {};
+    circular.self = circular;
+    expect(text`${circular} ${{ big: 1n }}`).toBe("[Unserializable value] [Unserializable value]");
+  });
 });
 
 describe("a check that throws", () => {
@@ -49,7 +55,8 @@ describe("every check message renders a malformed package value", () => {
   const live = (object_type: string) => ({ id: "issuance-1", object_type, security_id: "sec1", stakeholder_id: "sh-1", date: "2020-01-01" });
   const convertible = live("TX_CONVERTIBLE_ISSUANCE");
   const warrant = live("TX_WARRANT_ISSUANCE");
-  const tx = (object_type: string, fields: Record<string, unknown> = {}) => ({ id: "tx-1", object_type, security_id: "sec1", date: "2021-06-01", ...fields });
+  const equityCompensation = live("TX_EQUITY_COMPENSATION_ISSUANCE");
+  const tx =(object_type: string, fields: Record<string, unknown> = {}) => ({ id: "tx-1", object_type, security_id: "sec1", date: "2021-06-01", ...fields });
   const offender = (object_type: string) => ({ id: unprintable, object_type, security_id: "sec1", date: "2021-01-01" });
   const conversion = tx("TX_CONVERTIBLE_CONVERSION", { resulting_security_ids: ["stock-1"] });
   const stock = (fields: Record<string, unknown>) => ({ id: "si-1", object_type: "TX_STOCK_ISSUANCE", security_id: "stock-1", stakeholder_id: "sh-1", date: "2021-06-01", ...fields });
@@ -57,6 +64,8 @@ describe("every check message renders a malformed package value", () => {
     contextWith({ convertibleIssuances: [convertible] as any, transactions: [convertible, ...transactions] });
   const withWarrant = (...transactions: Record<string, unknown>[]) =>
     contextWith({ warrantIssuances: [warrant] as any, transactions: [warrant, ...transactions] });
+  const withEquityCompensation = (...transactions: Record<string, unknown>[]) =>
+    contextWith({ equityCompensation: [equityCompensation] as any, transactions: [equityCompensation, ...transactions] });
 
   it("renders a malformed security id in the undated and deprecated issuance messages", () => {
     expect(issuanceExists.run(contextWith(), { security_id: unprintable } as any)).toEqual([
@@ -78,6 +87,8 @@ describe("every check message renders a malformed package value", () => {
     { check: "no-acceptance", data: tx("TX_CONVERTIBLE_RETRACTION"), context: withConvertible(offender("TX_CONVERTIBLE_ACCEPTANCE")) },
     { check: "no-retraction", data: tx("TX_WARRANT_ACCEPTANCE"), context: withWarrant(offender("TX_WARRANT_RETRACTION")) },
     { check: "no-acceptance", data: tx("TX_WARRANT_RETRACTION"), context: withWarrant(offender("TX_WARRANT_ACCEPTANCE")) },
+    { check: "no-retraction", data: tx("TX_EQUITY_COMPENSATION_ACCEPTANCE"), context: withEquityCompensation(offender("TX_EQUITY_COMPENSATION_RETRACTION")) },
+    { check: "no-acceptance", data: tx("TX_EQUITY_COMPENSATION_RETRACTION"), context: withEquityCompensation(offender("TX_EQUITY_COMPENSATION_ACCEPTANCE")) },
     { check: "resulting-stock-exists", data: { ...conversion, resulting_security_ids: [unprintable] }, context: withConvertible() },
     { check: "resulting-stock-dated", data: conversion, context: withConvertible(stock({ date: unprintable })) },
     { check: "resulting-stock-stakeholder", data: conversion, context: withConvertible(stock({ stakeholder_id: unprintable })) },

@@ -57,7 +57,8 @@ const show = (value: unknown): string => {
  * `toString` isn't a function throws (#218). A string or other primitive
  * appears as it is and an error as its name and message, but any other object
  * appears as its JSON, so a malformed value reads as itself rather than as
- * "[object Object]".
+ * "[object Object]". A value that can't be rendered (e.g. one holding a BigInt)
+ * appears as "[Unserializable value]", so rendering a message never throws.
  */
 export const text = (strings: TemplateStringsArray, ...values: unknown[]): string =>
   strings.reduce((message, string, i) => message + show(values[i - 1]) + string);

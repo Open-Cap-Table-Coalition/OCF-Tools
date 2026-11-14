@@ -1,4 +1,4 @@
-import { defineValidator, type CheckObject } from "../checkKit";
+import { defineValidator, text, type CheckObject } from "../checkKit";
 import { issuanceExists } from "./checks";
 
 const noAcceptance = {
@@ -20,7 +20,7 @@ const noAcceptance = {
         ele.date <= data.date
       ) {
         messages.push(
-          `An equity compensation acceptance (${ele.id}) references the transaction's security_id.`,
+          text`An equity compensation acceptance (${ele.id}) references the transaction's security_id.`,
         );
       }
     });
