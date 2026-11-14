@@ -39,10 +39,15 @@ export type CheckObject<P = unknown> = Pick<Check, "id" | "severity" | "descript
   run?: (context: DeepReadonly<OcfMachineContext>, data: DeepReadonly<P>) => string[];
 };
 
-const show = (value: unknown): string =>
-  typeof value === "object" && value !== null && !(value instanceof Error)
-    ? JSON.stringify(value)
-    : String(value);
+const show = (value: unknown): string => {
+  try {
+    return typeof value === "object" && value !== null && !(value instanceof Error)
+      ? JSON.stringify(value) ?? "[Unserializable value]"
+      : String(value);
+  } catch {
+    return "[Unserializable value]";
+  }
+};
 
 /**
  * Message text built from package values, as a template tag:
@@ -52,7 +57,8 @@ const show = (value: unknown): string =>
  * `toString` isn't a function throws (#218). A string or other primitive
  * appears as it is and an error as its name and message, but any other object
  * appears as its JSON, so a malformed value reads as itself rather than as
- * "[object Object]".
+ * "[object Object]". A value that can't be rendered (e.g. one holding a BigInt)
+ * appears as "[Unserializable value]", so rendering a message never throws.
  */
 export const text = (strings: TemplateStringsArray, ...values: unknown[]): string =>
   strings.reduce((message, string, i) => message + show(values[i - 1]) + string);

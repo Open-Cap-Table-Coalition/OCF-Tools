@@ -2,7 +2,7 @@
 // VENDORED — temporary transport for OCF types (#153; roadmap #145, Phase 2).
 //
 // Source  : Open-Cap-Table-Coalition/Open-Cap-Format-OCF
-// Ref     : main (d5226fb5)
+// Ref     : main (dd84bdb6)
 // Built by: npm run schema:gen-types -- --experimental compatibility
 //           (regenerate: npm run ocf:refresh-types)
 //
@@ -69,6 +69,7 @@ export type OCFAddressType =
  *   5.  Front Loaded to Single Tranche (6 - 4 - 4 - 4)
  *   6.  Back Loaded to Single Tranche (4 - 4 - 4 - 6)
  *   7.  Fractional (4.5 - 4.5 - 4.5 - 4.5)
+ * 🗓️ PLANNED DEPRECATION — Planned for deprecation — **not deprecated yet**: still fully supported in the current/stable surface, but slated for removal and therefore omitted from the forward-looking `unstable` preview.
  */
 export type OCFAllocationType =
   | "CUMULATIVE_ROUNDING"
@@ -432,6 +433,7 @@ export type OCFValuationType =
  *  - `01` - `28` : Day 1, 2... 28 of the month; e.g. `03` means vesting occurs on the 3rd of the month.
  *  - `29_OR_LAST_DAY_OF_MONTH` - `31_OR_LAST_DAY_OF_MONTH` : Day 29, 30, or 31 of the month, defaulting to the last day of the month for shorter months; e.g. `31_OR_LAST_DAY_OF_MONTH` means monthly vesting occurs on Jan 31, Feb 28/29, Mar 31, Apr 30, etc.
  *  - `VESTING_START_DAY_OR_LAST_DAY_OF_MONTH` vests on the same day of month as the day of the `VESTING_START` condition; e.g. if vesting commences on Jan 15 then any vesting will accrue on the 15th of future vesting months. If vesting commencement occurs on days 29-31, this has the same behavior as the other `*_LAST_DAY_OF_MONTH` values.
+ * 🗓️ PLANNED DEPRECATION — Planned for deprecation — **not deprecated yet**: still fully supported in the current/stable surface, but slated for removal and therefore omitted from the forward-looking `unstable` preview.
  */
 export type OCFVestingDayOfMonth =
   | "01"
@@ -468,8 +470,24 @@ export type OCFVestingDayOfMonth =
   | "VESTING_START_DAY_OR_LAST_DAY_OF_MONTH";
 
 /**
+ * Enum - Vesting Day of Month Policy
+ * Enumeration representing a vesting "day of month". The v2 successor to the 32-value `VestingDayOfMonth` enum in v1.
+ *  - `VESTING_START_DAY` vests on the same day of the month as the `vesting_start_date`, clamping down to the last day of the month in months that are too short; e.g. a Jan 31 start accrues on Feb 28/29, Mar 31, Apr 30, etc. (default).
+ *  - `FIRST_DAY_OF_MONTH` always vests on the 1st of the month.
+ *  - `LAST_DAY_OF_MONTH` always vests on the calendar last day of the month (28/29/30/31).
+ *  - `VESTING_START_DAY_MINUS_ONE` vests one calendar day before `VESTING_START_DAY`. The start-day anchor is clamped first, then a single day is subtracted; e.g. a Jan 31 start accrues on Feb 27/28, Mar 30, Apr 29.
+ * ⚠️ ALPHA — Pre-release — this shape is **not final** and may change or be withdrawn. Do not treat it as stable.
+ */
+export type OCFVestingDayOfMonthPolicy =
+  | "VESTING_START_DAY"
+  | "FIRST_DAY_OF_MONTH"
+  | "LAST_DAY_OF_MONTH"
+  | "VESTING_START_DAY_MINUS_ONE";
+
+/**
  * Enum - Vesting Trigger Type
  * Enumeration of vesting trigger types
+ * 🗓️ PLANNED DEPRECATION — Planned for deprecation — **not deprecated yet**: still fully supported in the current/stable surface, but slated for removal and therefore omitted from the forward-looking `unstable` preview.
  */
 export type OCFVestingTriggerType =
   | "VESTING_START_DATE"
@@ -881,6 +899,27 @@ export interface OCFInterestRate {
 export type OCFMd5 = string;
 
 /**
+ * Type - Milestone Vesting Statement
+ * A pure-milestone vesting statement: no time schedule, so it vests entirely when its `event_condition` fires. `additionalProperties: false` and the omission of `schedule` make a stray schedule unrepresentable on this shape. One of the two shapes a `VestingTerms` (v2) statement can take.
+ * ⚠️ ALPHA — Pre-release — this shape is **not final** and may change or be withdrawn. Do not treat it as stable.
+ */
+export interface OCFMilestoneVestingStatement {
+  /**
+   * 1-indexed position of this statement within the template. Despite having a position within the template, this Milestone Vesting Statement does not impact the timing of other vesting statements because it has no `schedule` (it carries no `VestingScheduleSegment`).
+   * @minimum 1
+   */
+  order: number;
+  /**
+   * Named-event axis: the statement vests when this event fires.
+   */
+  event_condition: OCFVestingEventCondition;
+  /**
+   * The share of the grant this statement covers, as an OCF Numeric decimal (e.g. "0.25").
+   */
+  percentage: OCFNumeric;
+}
+
+/**
  * Type - Monetary
  * Type representation of an amount of money in a specified currency
  */
@@ -1103,6 +1142,31 @@ export interface OCFSAFEConversionMechanism {
 }
 
 /**
+ * Type - Scheduled Vesting Statement
+ * A vesting statement that vests on a time grid: it always carries a `schedule`, and may also carry an `event_condition` (DATE when bare, HYBRID when gated). One of the two shapes a `VestingTerms` (v2) statement can take.
+ * ⚠️ ALPHA — Pre-release — this shape is **not final** and may change or be withdrawn. Do not treat it as stable.
+ */
+export interface OCFScheduledVestingStatement {
+  /**
+   * 1-indexed position of this statement within the template. Scheduled Vesting Statements chain implicitly in this order.
+   * @minimum 1
+   */
+  order: number;
+  /**
+   * Time-schedule axis.
+   */
+  schedule: OCFVestingScheduleSegment;
+  /**
+   * Optional named-event axis. When present, the grid is gated on this event (HYBRID).
+   */
+  event_condition?: OCFVestingEventCondition;
+  /**
+   * The share of the grant this statement covers, as an OCF Numeric decimal (e.g. "0.25").
+   */
+  percentage: OCFNumeric;
+}
+
+/**
  * Type - Security Exemption
  * Type representation of a securities issuance exemption that includes an unstructured description and a country code for ease of processing and analysis
  */
@@ -1285,6 +1349,7 @@ export interface OCFVesting {
 /**
  * Type - Vesting Condition
  * Describes condition / triggers to be satisfied for vesting to occur
+ * 🗓️ PLANNED DEPRECATION — Planned for deprecation — **not deprecated yet**: still fully supported in the current/stable surface, but slated for removal and therefore omitted from the forward-looking `unstable` preview.
  */
 export interface OCFVestingCondition {
   /**
@@ -1319,6 +1384,7 @@ export interface OCFVestingCondition {
 /**
  * Type - Vesting Condition Portion
  * Describes a fractional portion (ratio) of shares associated with a Vesting Condition
+ * 🗓️ PLANNED DEPRECATION — Planned for deprecation — **not deprecated yet**: still fully supported in the current/stable surface, but slated for removal and therefore omitted from the forward-looking `unstable` preview.
  */
 export interface OCFVestingConditionPortion {
   /**
@@ -1339,8 +1405,22 @@ export interface OCFVestingConditionPortion {
 }
 
 /**
+ * Type - Vesting Event Condition
+ * The named-event axis of a VestingStatement: a gating event (referenced by `event_id`) that must fire before the statement releases. Its firing is recorded by a v2 vesting-event transaction. Present ⟺ the statement is gated.
+ * ⚠️ ALPHA — Pre-release — this shape is **not final** and may change or be withdrawn. Do not treat it as stable.
+ */
+export interface OCFVestingEventCondition {
+  /**
+   * Identifier of the gating event. Matches `event_id` on a v2 vesting-event transaction.
+   * @minLength 1
+   */
+  event_id: string;
+}
+
+/**
  * Type - Vesting Event Trigger
  * Describes a vesting condition satisfied when a particular unscheduled event occurs
+ * 🗓️ PLANNED DEPRECATION — Planned for deprecation — **not deprecated yet**: still fully supported in the current/stable surface, but slated for removal and therefore omitted from the forward-looking `unstable` preview.
  */
 export interface OCFVestingEventTrigger {
   type: "VESTING_EVENT";
@@ -1349,6 +1429,7 @@ export interface OCFVestingEventTrigger {
 /**
  * Type - Vesting Period in Days
  * Describes a period of time expressed in days (e.g. 365 days) for use in Vesting Terms
+ * 🗓️ PLANNED DEPRECATION — Planned for deprecation — **not deprecated yet**: still fully supported in the current/stable surface, but slated for removal and therefore omitted from the forward-looking `unstable` preview.
  */
 export interface OCFVestingPeriodInDays {
   /**
@@ -1372,6 +1453,7 @@ export interface OCFVestingPeriodInDays {
 /**
  * Type - Vesting Period in Months
  * Describes a period of time expressed in months (e.g. 3 months) for use in Vesting Terms.
+ * 🗓️ PLANNED DEPRECATION — Planned for deprecation — **not deprecated yet**: still fully supported in the current/stable surface, but slated for removal and therefore omitted from the forward-looking `unstable` preview.
  */
 export interface OCFVestingPeriodInMonths {
   /**
@@ -1399,6 +1481,7 @@ export interface OCFVestingPeriodInMonths {
 /**
  * Type - Vesting Schedule Absolute Trigger
  * Describes a vesting condition satisfied on an absolute date.
+ * 🗓️ PLANNED DEPRECATION — Planned for deprecation — **not deprecated yet**: still fully supported in the current/stable surface, but slated for removal and therefore omitted from the forward-looking `unstable` preview.
  */
 export interface OCFVestingScheduleAbsoluteTrigger {
   type: "VESTING_SCHEDULE_ABSOLUTE";
@@ -1409,8 +1492,30 @@ export interface OCFVestingScheduleAbsoluteTrigger {
 }
 
 /**
+ * Type - Vesting Schedule Cliff
+ * A cliff on a v2 vesting schedule, expressed as a duration. `length`/`period_type` give the time until the cliff; `percentage` is the share that vests at the cliff. Expressing the cliff as a duration (rather than an installment index) lets it fall between installments.
+ * ⚠️ ALPHA — Pre-release — this shape is **not final** and may change or be withdrawn. Do not treat it as stable.
+ */
+export interface OCFVestingScheduleCliff {
+  /**
+   * Duration until the cliff, in `period_type` units.
+   * @minimum 0
+   */
+  length: number;
+  /**
+   * The cliff's own time unit, independent of the schedule's `period_type`.
+   */
+  period_type: OCFPeriodType;
+  /**
+   * Share of the grant that vests at the cliff, as an OCF Numeric decimal.
+   */
+  percentage: OCFNumeric;
+}
+
+/**
  * Type - Vesting Schedule Relative Trigger
  * Describes a vesting condition satisfied when a period of time, relative to another vesting condition, has elapsed.
+ * 🗓️ PLANNED DEPRECATION — Planned for deprecation — **not deprecated yet**: still fully supported in the current/stable surface, but slated for removal and therefore omitted from the forward-looking `unstable` preview.
  */
 export interface OCFVestingScheduleRelativeTrigger {
   type: "VESTING_SCHEDULE_RELATIVE";
@@ -1425,8 +1530,39 @@ export interface OCFVestingScheduleRelativeTrigger {
 }
 
 /**
+ * Type - Vesting Schedule Segment
+ * The time-schedule axis of a VestingStatement. Present ⟺ the statement vests on a time grid; absent ⟺ a pure milestone that vests only when its `event_condition` fires. Total segment duration is `occurrences * period` in `period_type` units.
+ * ⚠️ ALPHA — Pre-release — this shape is **not final** and may change or be withdrawn. Do not treat it as stable.
+ */
+export interface OCFVestingScheduleSegment {
+  /**
+   * Number of installments in this segment.
+   * @minimum 1
+   */
+  occurrences: number;
+  /**
+   * Length of one installment, in `period_type` units. Total segment duration is `occurrences * period`.
+   * @minimum 0
+   */
+  period: number;
+  /**
+   * Time unit for `period`.
+   */
+  period_type: OCFPeriodType;
+  /**
+   * Day-of-month policy each of this segment's periodic installments lands on (meaningful only when `period_type` is `MONTHS` or `YEARS`). When omitted, the default VESTING_START_DAY applies.
+   */
+  vesting_day_of_month?: OCFVestingDayOfMonthPolicy;
+  /**
+   * Optional cliff on this schedule.
+   */
+  cliff?: OCFVestingScheduleCliff;
+}
+
+/**
  * Type - Vesting Start Trigger
  * Describes a vesting condition satisfied at the security's vesting commencement date
+ * 🗓️ PLANNED DEPRECATION — Planned for deprecation — **not deprecated yet**: still fully supported in the current/stable surface, but slated for removal and therefore omitted from the forward-looking `unstable` preview.
  */
 export interface OCFVestingStartTrigger {
   type: "VESTING_START_DATE";
@@ -1842,9 +1978,15 @@ export interface OCFEquityCompensationExercise {
 
 /**
  * Object - Equity Compensation Issuance Transaction
+ * Version dispatcher for the equity-compensation issuance transaction. The stable public `$id` accepts either the current shape (v1, which references vesting via `vesting_terms_id`) or the forward-looking shape (v2, which references a v2 vesting template via `vesting_template_id` and carries the per-grant `vesting_start_date`) during the transition window.
+ */
+export type OCFEquityCompensationIssuance = OCFEquityCompensationIssuanceV1 | OCFEquityCompensationIssuanceV2;
+
+/**
+ * Object - Equity Compensation Issuance Transaction (v1)
  * Object describing securities issuance transaction by the issuer and held by a stakeholder as a form of compensation (as noted elsewhere, RSAs are not included here intentionally and should be modelled using Stock Issuances).
  */
-export interface OCFEquityCompensationIssuance {
+export interface OCFEquityCompensationIssuanceV1 {
   /**
    * Identifier for the object
    */
@@ -1936,6 +2078,111 @@ export interface OCFEquityCompensationIssuance {
   expiration_date: null | OCFDate;
   /**
    * Exercise periods applicable to plan security after a termination for a given, enumerated reason
+   */
+  termination_exercise_windows: OCFTerminationWindow[];
+}
+
+/**
+ * Object - Equity Compensation Issuance Transaction (v2)
+ * Forward-looking equity-compensation issuance. Field-for-field equivalent to v1 except that the DAG-based `vesting_terms_id` is replaced with `vesting_template_id` (refs a v2 vesting template) and the per-grant vesting commencement date is carried here as `vesting_start_date` (absorbing the role of the now-planned-for-deprecation vesting-start transaction). Self-contained (no `allOf` inheritance) per the version-shape convention.
+ * ⚠️ ALPHA — Pre-release — this shape is **not final** and may change or be withdrawn. Do not treat it as stable.
+ */
+export interface OCFEquityCompensationIssuanceV2 {
+  /**
+   * Identifier for this transaction.
+   */
+  id: string;
+  /**
+   * Unstructured text comments related to and stored for the object.
+   */
+  comments?: string[];
+  /**
+   * This is done to avoid a breaking change as we work towards a bigger restructure of the equity types in v2.0.0. `TX_PLAN_SECURITY_ISSUANCE` will be deprecated in v2.0.0
+   */
+  object_type: "TX_PLAN_SECURITY_ISSUANCE" | "TX_EQUITY_COMPENSATION_ISSUANCE";
+  /**
+   * Date on which the issuance transaction occurred. Distinct from the vesting commencement date, which is carried separately as `vesting_start_date`.
+   */
+  date: OCFDate;
+  /**
+   * Identifier for the security created by this issuance. Other transactions (vesting event, exercise, cancellation, etc.) reference this id.
+   */
+  security_id: string;
+  /**
+   * Human-readable identifier for the security (e.g. 'CN-1').
+   */
+  custom_id: string;
+  /**
+   * Identifier of the stakeholder holding legal title to the security.
+   */
+  stakeholder_id: string;
+  /**
+   * Date of board approval for the security, when applicable.
+   */
+  board_approval_date?: OCFDate;
+  /**
+   * Date of stockholder approval for the security, when applicable.
+   */
+  stockholder_approval_date?: OCFDate;
+  /**
+   * Unstructured text description of consideration provided in exchange for the issuance.
+   */
+  consideration_text?: string;
+  /**
+   * Security law exemptions (and applicable jurisdictions) for this security.
+   */
+  security_law_exemptions: OCFSecurityExemption[];
+  /**
+   * If the security was issued from a stock plan, the plan's id. Plan-less options are valid and omit this field.
+   */
+  stock_plan_id?: string;
+  /**
+   * The stock class the security exercises/settles into. Important for plan-less options and plans that support multiple share classes.
+   */
+  stock_class_id?: string;
+  /**
+   * The kind of equity compensation. Determines which type-specific fields are required.
+   */
+  compensation_type: OCFCompensationType;
+  /**
+   * If the security is an option, what kind. Retained from v1 for compatibility; in the new model this has been incorporated into CompensationType.
+   */
+  option_grant_type?: OCFOptionType;
+  /**
+   * Number of shares subject to this security.
+   */
+  quantity: OCFNumeric;
+  /**
+   * Required for option compensation types. The price per share at which the option can be exercised.
+   */
+  exercise_price?: OCFMonetary;
+  /**
+   * Required for stock appreciation right compensation types (CSAR, SSAR). The base price used to calculate appreciation.
+   */
+  base_price?: OCFMonetary;
+  /**
+   * If true, the security is exercisable prior to completion of vesting; the schedule then governs a right-of-repurchase lapse rather than the right-to-exercise.
+   */
+  early_exercisable?: boolean;
+  /**
+   * The per-grant vesting commencement date — the anchor every statement of the referenced template grids from. Required whenever `vesting_template_id` is present and always supplied with the grant: when the real commencement date is not yet known (a contingent start), a far-future placeholder date (e.g. 9999-12-31) is supplied rather than omitting the field or modeling the start as an event. Lives on the issuance, not the template, because the template is reusable across grants.
+   */
+  vesting_start_date?: OCFDate;
+  /**
+   * Identifier of the v2 vesting template the security is subject to. If neither `vesting_template_id` nor `vestings` is present, the security is fully vested at issuance. The template's statements anchor to `vesting_start_date` (carried on this same transaction); a statement may additionally carry an `event_condition` whose firing is recorded by a v2 vesting-event transaction.
+   */
+  vesting_template_id?: string;
+  /**
+   * Optional materialized projection of exact vesting dates and amounts. A grant may be described by the declarative template (`vesting_template_id`), by this imperative event list, or by both; when both are present an external tool confirms they agree.
+   * @minItems 1
+   */
+  vestings?: OCFVesting[];
+  /**
+   * Expiration date of the security, or null if it does not expire.
+   */
+  expiration_date: null | OCFDate;
+  /**
+   * Exercise periods applicable after a termination, by reason.
    */
   termination_exercise_windows: OCFTerminationWindow[];
 }
@@ -3139,9 +3386,15 @@ export interface OCFVestingAcceleration {
 
 /**
  * Object - Vesting Event Transaction
+ * Version dispatcher for the vesting-event transaction. The stable public `$id` accepts either the current DAG-condition shape (v1) or the forward-looking named-event shape (v2) during the transition window.
+ */
+export type OCFVestingEvent = OCFVestingEventV1 | OCFVestingEventV2;
+
+/**
+ * Object - Vesting Event Transaction (v1)
  * Object describing the transaction of an non-schedule-driven vesting event associated with a security
  */
-export interface OCFVestingEvent {
+export interface OCFVestingEventV1 {
   /**
    * Identifier for the object
    */
@@ -3166,10 +3419,47 @@ export interface OCFVestingEvent {
 }
 
 /**
- * Object - Vesting Start Transaction
- * Object describing the transaction of vesting schedule start / commencement associated with a security
+ * Object - Vesting Event Transaction (v2)
+ * Forward-looking vesting-event shape. Witnesses that a named vesting event has fired for a given security on a given date. Any VestingStatement on the security's template whose `event_condition.event_id` matches this transaction's `event_id` resolves its anchor at this firing. Self-contained (no `allOf` inheritance) per the version-shape convention.
+ * ⚠️ ALPHA — Pre-release — this shape is **not final** and may change or be withdrawn. Do not treat it as stable.
  */
-export interface OCFVestingStart {
+export interface OCFVestingEventV2 {
+  /**
+   * Identifier for this transaction.
+   */
+  id: string;
+  /**
+   * Unstructured text comments related to and stored for the object.
+   */
+  comments?: string[];
+  object_type: "TX_VESTING_EVENT";
+  /**
+   * Date the event fired.
+   */
+  date: OCFDate;
+  /**
+   * Identifier of the security whose VestingStatement(s) reference this event. The firing is scoped to a single security; cross-grant fan-out of one underlying event is represented by emitting one transaction per affected security.
+   */
+  security_id: string;
+  /**
+   * Identifier of the named event that fired. Matches `event_id` on the `event_condition` of some VestingStatement on this security's template.
+   * @minLength 1
+   */
+  event_id: string;
+}
+
+/**
+ * Object - Vesting Start Transaction
+ * Version dispatcher for the vesting-start transaction. Its single shape (v1) is marked `planned_deprecation`: still fully supported in the current/stable surface, but the vesting commencement date it carried moves onto the issuance (`EquityCompensationIssuance.vesting_start_date`) in the shape OCF is moving toward, so this transaction is omitted from the `unstable` preview.
+ */
+export type OCFVestingStart = OCFVestingStartV1;
+
+/**
+ * Object - Vesting Start Transaction (v1)
+ * Object describing the transaction of vesting schedule start / commencement associated with a security
+ * 🗓️ PLANNED DEPRECATION — Planned for deprecation — **not deprecated yet**: still fully supported in the current/stable surface, but slated for removal and therefore omitted from the forward-looking `unstable` preview.
+ */
+export interface OCFVestingStartV1 {
   /**
    * Identifier for the object
    */
@@ -3195,9 +3485,15 @@ export interface OCFVestingStart {
 
 /**
  * Object - Vesting Terms
+ * Version dispatcher for vesting terms. The stable public `$id` accepts either the current condition-DAG shape (v1) or the forward-looking ordered-statement template shape (v2) during the transition window.
+ */
+export type OCFVestingTerms = OCFVestingTermsV1 | OCFVestingTermsV2;
+
+/**
+ * Object - Vesting Terms (v1)
  * Object describing the terms under which a security vests
  */
-export interface OCFVestingTerms {
+export interface OCFVestingTermsV1 {
   /**
    * Identifier for the object
    */
@@ -3224,6 +3520,28 @@ export interface OCFVestingTerms {
    * @minItems 1
    */
   vesting_conditions: OCFVestingCondition[];
+}
+
+/**
+ * Object - Vesting Terms (v2)
+ * Forward-looking vesting terms: a reusable schedule expressed as an ordered list of vesting statements that together describe how a grant vests over time, anchored at the issuance's `vesting_start_date`. Replaces the v1 condition-DAG with a flat, ordered template and assumes CUMULATIVE_ROUND_DOWN allocation throughout. Self-contained (no `allOf` inheritance) per the version-shape convention.
+ * ⚠️ ALPHA — Pre-release — this shape is **not final** and may change or be withdrawn. Do not treat it as stable.
+ */
+export interface OCFVestingTermsV2 {
+  /**
+   * Identifier the issuance's `vesting_template_id` references.
+   */
+  id: string;
+  /**
+   * Unstructured text comments related to and stored for the object.
+   */
+  comments?: string[];
+  object_type: "VESTING_TERMS";
+  /**
+   * Ordered list of vesting statements. They chain implicitly by their `order` field rather than via explicit graph edges.
+   * @minItems 1
+   */
+  statements: (OCFScheduledVestingStatement | OCFMilestoneVestingStatement)[];
 }
 
 /**

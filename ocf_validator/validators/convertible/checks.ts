@@ -7,4 +7,5 @@ export const { issuanceExists, noOtherTransactions } = familyChecksFor({
   issuance: "TX_CONVERTIBLE_ISSUANCE",
   acceptance: "TX_CONVERTIBLE_ACCEPTANCE",
   vests: false,
+  returnsToPool: false,
 });
