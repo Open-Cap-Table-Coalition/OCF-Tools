@@ -1,4 +1,4 @@
-import { defineValidator, type CheckObject } from "../checkKit";
+import { defineValidator, text, type CheckObject } from "../checkKit";
 import { issuanceExists } from "./checks";
 
 const noRetraction = {
@@ -20,7 +20,7 @@ const noRetraction = {
         ele.date <= data.date
       ) {
         messages.push(
-          `An equity compensation retraction (${ele.id}) references the transaction's security_id.`,
+          text`An equity compensation retraction (${ele.id}) references the transaction's security_id.`,
         );
       }
     });

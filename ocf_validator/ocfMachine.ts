@@ -23,6 +23,7 @@ import { TX_WARRANT_RETRACTION } from "./validators/warrant/tx_warrant_retractio
 import { TX_WARRANT_CANCELLATION } from "./validators/warrant/tx_warrant_cancellation";
 import { TX_WARRANT_TRANSFER } from "./validators/warrant/tx_warrant_transfer";
 import { TX_WARRANT_EXERCISE } from "./validators/warrant/tx_warrant_exercise";
+import { text } from "./validators/checkKit";
 import { TX_EQUITY_COMPENSATION_ISSUANCE } from "./validators/equity_compensation/tx_equity_compensation_issuance";
 import { TX_EQUITY_COMPENSATION_ACCEPTANCE } from "./validators/equity_compensation/tx_equity_compensation_acceptance";
 import { TX_EQUITY_COMPENSATION_EXERCISE } from "./validators/equity_compensation/tx_equity_compensation_exercise";
@@ -287,10 +288,11 @@ const activeDescriptorFor = (type: TxKey): ActiveDescriptor | undefined => {
 // new behavior; they are deleted with `legacyValidate` when the last family
 // migrates, leaving each helper single-armed.
 
-// The driver also builds this message (errorResult), outside the actor, where a
-// throw would escape ocfValidator, so it reads the issuer null-safely.
-const failureMessage = ({ manifest }: OcfPackageContent, subject: string, detail: string): string =>
-  `The validation of the OCF package for ${manifest?.issuer?.legal_name} failed on ${subject}: ${detail}`;
+// The driver also builds this message (errorResult, malformedResult), outside
+// the actor, where a throw would escape ocfValidator, so it reads the issuer
+// null-safely.
+const failureMessage = ({ manifest }: OcfPackageContent, subject: unknown, detail: unknown): string =>
+  text`The validation of the OCF package for ${manifest?.issuer?.legal_name} failed on ${subject}: ${detail}`;
 
 /**
  * The event slice the dispatch helpers read. `data` is `any` for the same
@@ -375,7 +377,22 @@ export function failureResult(
  * lacks it when no transaction started the run (#184).
  */
 export const errorResult = (ocfPackageContent: OcfPackageContent, event: ValidatorEvent, error: unknown): string =>
-  failureMessage(ocfPackageContent, subjectOf(event), String(error));
+  failureMessage(ocfPackageContent, subjectOf(event), error);
+
+/**
+ * The `result` of a run that never starts because a transaction's date or
+ * object_type isn't a string: the run sorts transactions by date and sends
+ * each to the machine as an event of its object_type (#218). It names the
+ * transaction by its id, or shows the whole item if it has none.
+ */
+export const malformedResult = (ocfPackageContent: OcfPackageContent, transaction: unknown): string => {
+  const { id, date, object_type } = (transaction ?? {}) as { id?: unknown; date?: unknown; object_type?: unknown };
+  return failureMessage(
+    ocfPackageContent,
+    id ?? transaction,
+    text`its date (${date}) and object_type (${object_type}) must both be strings.`,
+  );
+};
 
 // ---------------------------------------------------------------------------
 // The machine — typed via setup({ types, actions, guards })
@@ -499,7 +516,9 @@ export const ocfMachine = setup({
 }).createMachine({
   id: "OCF-xstate",
   initial: "capTable",
-  context: {
+  // A function, so each run starts with its own arrays: a caller that changes
+  // one in a run's returned context can't change the next run's.
+  context: () => ({
     stockIssuances: [],
     equityCompensation: [],
     convertibleIssuances: [],
@@ -519,7 +538,7 @@ export const ocfMachine = setup({
     lastErrorFindings: [],
     snapshots: [],
     result: "Incomplete",
-  },
+  }),
   states: {
     capTable: {
       on: {
@@ -543,7 +562,7 @@ export const ocfMachine = setup({
           target: "capTable",
           actions: assign({
             result: ({ context }) =>
-              `The validation of the OCF package for ${context.ocfPackageContent.manifest.issuer.legal_name} is complete and the package appears valid.`,
+              text`The validation of the OCF package for ${context.ocfPackageContent.manifest.issuer.legal_name} is complete and the package appears valid.`,
           }),
         },
         // Fires only for runtime `type` strings outside TxKey (genuinely unknown /
@@ -552,7 +571,7 @@ export const ocfMachine = setup({
           target: "validationError",
           actions: assign({
             result: ({ context, event }) =>
-              `The validation of the OCF package for ${context.ocfPackageContent.manifest?.issuer?.legal_name} failed on ${event.type} because it is not a valid TX type.`,
+              text`The validation of the OCF package for ${context.ocfPackageContent.manifest?.issuer?.legal_name} failed on ${event.type} because it is not a valid TX type.`,
           }),
         },
       },
