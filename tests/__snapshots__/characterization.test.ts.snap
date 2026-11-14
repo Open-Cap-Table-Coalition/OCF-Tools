@@ -36,14 +36,7 @@ exports[`ocfValidator over testPackage > produces a stable validation result and
   ],
   "findings": [],
   "lastErrorFindings": [],
-  "report": [
-    {
-      "stakeholder_validity": true,
-      "transaction_date": "2019-06-01",
-      "transaction_id": "eci_01",
-      "transaction_type": "TX_EQUITY_COMPENSATION_ISSUANCE",
-    },
-  ],
+  "report": [],
   "result": "The validation of the OCF package for Acme Holdings Limited is complete and the package appears valid.",
   "snapshots": [
     {

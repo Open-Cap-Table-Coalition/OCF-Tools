@@ -1,15 +1,19 @@
 import { describe, it, expect } from "vitest";
 import { TX_DESCRIPTORS } from "../ocf_validator/ocfMachine";
-import type { OcfMachineContext } from "../types/validator";
 import {
   baseContext,
   startSeeded,
   ev,
   contextWith,
   validatePackage,
+  withStakeholder,
+  txRecord,
   runValidator,
+  declaredChecks,
   implementedCheckIds,
+  emittedCheckIds,
   expectFindingShape,
+  type FailingScenarios,
 } from "./helpers";
 
 const MIGRATED_KEYS = [
@@ -38,14 +42,6 @@ const issuanceRecord = (security_id: string, date = "2020-01-01") => ({
 // ---------------------------------------------------------------------------
 
 describe("convertible issuance validity", () => {
-  const withStakeholder = (id: string) =>
-    baseContext({
-      ocfPackageContent: {
-        ...baseContext().ocfPackageContent,
-        stakeholders: [{ id }],
-      } as OcfMachineContext["ocfPackageContent"],
-    });
-
   const issuance = (overrides: Record<string, unknown> = {}) => ({
     id: "conv1",
     object_type: "TX_CONVERTIBLE_ISSUANCE",
@@ -281,6 +277,23 @@ describe("convertible cancellation validity", () => {
       expect(findings[0].message).toContain("vest-x");
     },
   );
+
+  // The equity compensation family exempts a return to pool; this family
+  // doesn't, because a convertible issuance can't name a stock plan.
+  it("still flags a return to pool on the security, since a convertible isn't granted from a stock plan", () => {
+    const context = contextWith({
+      convertibleIssuances: [issuanceRecord("sec1")] as any,
+      transactions: [
+        issuanceRecord("sec1"),
+        { id: "rtp-x", object_type: "TX_STOCK_PLAN_RETURN_TO_POOL", security_id: "sec1", stock_plan_id: "plan-1", date: "2020-06-01" },
+        cancellationRecord,
+      ],
+    });
+    const findings = runValidator("TX_CONVERTIBLE_CANCELLATION", context, cancellation());
+    expect(findings).toHaveLength(1);
+    expectFindingShape(findings[0], "no-other-transactions", subject);
+    expect(findings[0].message).toContain("rtp-x");
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -617,7 +630,7 @@ describe("convertible conversion validity", () => {
   });
 
   it("declares quantity-reconciles and balance-security-exists as unimplemented gaps", () => {
-    const declared = (TX_DESCRIPTORS.TX_CONVERTIBLE_CONVERSION as { checks: readonly { id: string; implemented?: false }[] }).checks;
+    const declared = declaredChecks("TX_CONVERTIBLE_CONVERSION");
     for (const id of ["quantity-reconciles", "balance-security-exists"]) {
       expect(declared.some((c) => c.id === id && c.implemented === false)).toBe(true);
     }
@@ -632,14 +645,8 @@ describe("convertible conversion drives the machine to completion", () => {
   // The resulting stock stays history-only — never sent as an event — so the
   // legacy stock validator is not dragged into these runs; the conversion checks
   // find it in history regardless.
-  const seedPackage = (transactions: any[]) =>
-    baseContext({
-      ocfPackageContent: {
-        ...baseContext().ocfPackageContent,
-        stakeholders: [{ id: "holder-a" }],
-        transactions,
-      } as OcfMachineContext["ocfPackageContent"],
-    });
+  const seedPackage = (transactions: Record<string, unknown>[]) =>
+    contextWith({ stakeholders: [{ id: "holder-a" }], transactions });
 
   it("clears a fully valid conversion, removing the converted convertible and recording no findings", () => {
     const issuance = { id: "ci-x", object_type: "TX_CONVERTIBLE_ISSUANCE", security_id: "conv-sec", stakeholder_id: "holder-a", date: "2020-01-01" };
@@ -939,20 +946,11 @@ describe("a conflicting transaction pair flags the later transaction, not the ea
 // Declared-vs-emitted consistency across the family
 // ---------------------------------------------------------------------------
 
-// A transaction record on `security_id` of the given kind; the offender/exempt
-// building block for the failing scenarios below.
-const txRecord = (object_type: string, id: string, security_id = "sec1", date = "2021-06-01") => ({
-  id,
-  object_type,
-  security_id,
-  date,
-});
-
 // For each migrated type, scenarios that each fail one implemented check. The
 // implemented ids a module declares should be exactly the ids these scenarios
 // emit; a module's declared gap (transfer's no-other-transactions) has no
 // failing scenario because no code path emits it.
-const failingScenarios: Record<MigratedKey, { context: OcfMachineContext; data: Record<string, unknown> }[]> = {
+const failingScenarios: FailingScenarios<MigratedKey> = {
   TX_CONVERTIBLE_ISSUANCE: [
     {
       context: baseContext(),
@@ -999,27 +997,18 @@ const failingScenarios: Record<MigratedKey, { context: OcfMachineContext; data: 
   ],
 };
 
-/** Every check id emitted across a module's failing scenarios. */
-const emittedCheckIds = (key: MigratedKey): Set<string> => {
-  const emitted = new Set<string>();
-  for (const { context, data } of failingScenarios[key]) {
-    for (const finding of runValidator(key, context, data)) emitted.add(finding.check);
-  }
-  return emitted;
-};
-
 describe("declared and emitted checks stay consistent across the family", () => {
   // Exact set equality in both directions: no finding is emitted for a check the
   // descriptor does not declare implemented, and every declared implemented check
   // is emitted by at least one failing scenario.
   it.each(MIGRATED_KEYS)("%s emits exactly the check ids its descriptor declares implemented", (key) => {
-    expect([...emittedCheckIds(key)].sort()).toEqual([...implementedCheckIds(key)].sort());
+    expect([...emittedCheckIds(failingScenarios, key)].sort()).toEqual([...implementedCheckIds(key)].sort());
   });
 
   it("never emits transfer's declared-gap check", () => {
-    expect(emittedCheckIds("TX_CONVERTIBLE_TRANSFER").has("no-other-transactions")).toBe(false);
+    expect(emittedCheckIds(failingScenarios, "TX_CONVERTIBLE_TRANSFER").has("no-other-transactions")).toBe(false);
     // The gap is declared on the descriptor with implemented: false.
-    const declared = (TX_DESCRIPTORS.TX_CONVERTIBLE_TRANSFER as { checks: readonly { id: string; implemented?: false }[] }).checks;
+    const declared = declaredChecks("TX_CONVERTIBLE_TRANSFER");
     expect(declared.some((c) => c.id === "no-other-transactions" && c.implemented === false)).toBe(true);
   });
 });

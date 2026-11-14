@@ -1,27 +1,9 @@
-const valid_tx_equity_compensation_issuance = (context: any, event: any, isGuard: any) => {
-  let validity = false;
-  const { stakeholders } = context.ocfPackageContent;
-  let report: any = {transaction_type: "TX_EQUITY_COMPENSATION_ISSUANCE", transaction_id: event.data.id, transaction_date: event.data.date};
-  
-  // Check if the stakeholder referenced by the transaction exists in the stakeholder file.
-  let stakeholder_validity = false;
-  stakeholders.forEach((ele: any) => {
-    if (ele.id === event.data.stakeholder_id) {
-      stakeholder_validity = true;
-      report.stakeholder_validity = true
-    }
-  });
-  if (!stakeholder_validity) {
-    report.stakeholder_validity = false
-  }
+import { defineValidator } from "../checkKit";
+import { stakeholderExists } from "../checks";
 
-  if (stakeholder_validity) {
-    validity = true;
-  }
-
-  const result = isGuard ? validity : report;
-  
-  return result;
-};
-
-export default valid_tx_equity_compensation_issuance;
+export const TX_EQUITY_COMPENSATION_ISSUANCE = defineValidator({
+  transaction: "TX_EQUITY_COMPENSATION_ISSUANCE",
+  effect: "append",
+  collection: "equityCompensation",
+  checks: [stakeholderExists],
+});
