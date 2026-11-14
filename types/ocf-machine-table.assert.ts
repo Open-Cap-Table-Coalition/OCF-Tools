@@ -20,8 +20,10 @@
  *  - a descriptor listed under another transaction's key is rejected, and the
  *    real table is checked against `DescriptorTable` directly;
  *  - `familyChecksFor` rejects an issuance type that doesn't match the
- *    collection, a misspelled acceptance type, and a `vests` flag that
- *    contradicts whether the issuance type has vesting terms.
+ *    collection, a misspelled acceptance type, a `vests` flag that
+ *    contradicts whether the issuance type has vesting terms, a
+ *    `returnsToPool` flag that contradicts whether it can name a stock plan,
+ *    and a misspelled type in `leavesOutstanding`.
  */
 import type {
   OCFWarrantIssuance,
@@ -231,14 +233,22 @@ const _realTable: DescriptorTable = TX_DESCRIPTORS;
 // --- familyChecksFor: family vocabulary --------------------------------------
 
 // A consistent family compiles…
-const _warrantFamily = familyChecksFor({ name: "warrant", collection: "warrantIssuances", issuance: "TX_WARRANT_ISSUANCE", acceptance: "TX_WARRANT_ACCEPTANCE", vests: true });
+const _warrantFamily = familyChecksFor({ name: "warrant", collection: "warrantIssuances", issuance: "TX_WARRANT_ISSUANCE", acceptance: "TX_WARRANT_ACCEPTANCE", vests: true, returnsToPool: false });
 // …but an issuance the collection does not hold does not…
 // @ts-expect-error — the warrant collection holds TX_WARRANT_ISSUANCE, not TX_CONVERTIBLE_ISSUANCE.
-const _mismatchedIssuance = familyChecksFor({ name: "warrant", collection: "warrantIssuances", issuance: "TX_CONVERTIBLE_ISSUANCE", acceptance: "TX_WARRANT_ACCEPTANCE", vests: true });
+const _mismatchedIssuance = familyChecksFor({ name: "warrant", collection: "warrantIssuances", issuance: "TX_CONVERTIBLE_ISSUANCE", acceptance: "TX_WARRANT_ACCEPTANCE", vests: true, returnsToPool: false });
 // …and neither does a mistyped acceptance key…
 // @ts-expect-error — TX_WARRANT_ACCEPTENCE is not a transaction key.
-const _mistypedAcceptance = familyChecksFor({ name: "warrant", collection: "warrantIssuances", issuance: "TX_WARRANT_ISSUANCE", acceptance: "TX_WARRANT_ACCEPTENCE", vests: true });
+const _mistypedAcceptance = familyChecksFor({ name: "warrant", collection: "warrantIssuances", issuance: "TX_WARRANT_ISSUANCE", acceptance: "TX_WARRANT_ACCEPTENCE", vests: true, returnsToPool: false });
 // …or a vests flag that contradicts the issuance type, which would let the
 // no-other-transactions scan flag a warrant's own vesting records.
 // @ts-expect-error — OCFWarrantIssuance has vesting_terms_id, so the warrant family vests.
-const _wrongVests = familyChecksFor({ name: "warrant", collection: "warrantIssuances", issuance: "TX_WARRANT_ISSUANCE", acceptance: "TX_WARRANT_ACCEPTANCE", vests: false });
+const _wrongVests = familyChecksFor({ name: "warrant", collection: "warrantIssuances", issuance: "TX_WARRANT_ISSUANCE", acceptance: "TX_WARRANT_ACCEPTANCE", vests: false, returnsToPool: false });
+// …or a returnsToPool flag that contradicts it, which would let the scan skip a
+// return to pool on a security that can't come from a stock plan…
+// @ts-expect-error — OCFWarrantIssuance has no stock_plan_id, so warrants don't return to a pool.
+const _wrongPool = familyChecksFor({ name: "warrant", collection: "warrantIssuances", issuance: "TX_WARRANT_ISSUANCE", acceptance: "TX_WARRANT_ACCEPTANCE", vests: true, returnsToPool: true });
+// …or a misspelled transaction type in leavesOutstanding, which would never
+// match and so would exempt nothing.
+// @ts-expect-error — TX_EQUITY_COMPENSATION_EXCERCISE is not a transaction key.
+const _mistypedLeavesOutstanding = familyChecksFor({ name: "equity compensation", collection: "equityCompensation", issuance: "TX_EQUITY_COMPENSATION_ISSUANCE", acceptance: "TX_EQUITY_COMPENSATION_ACCEPTANCE", vests: true, returnsToPool: true, leavesOutstanding: ["TX_EQUITY_COMPENSATION_EXCERCISE"] });
