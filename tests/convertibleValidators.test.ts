@@ -429,6 +429,31 @@ describe("convertible conversion validity", () => {
     ]);
   });
 
+  it("reports a resulting id that names more than one stock issuance, whatever their order", () => {
+    // Stock issuances that share the resulting id: the right one, an earlier
+    // one, and a same-day one held by another stakeholder. The driver sorts by
+    // date, so only same-day issuances can come in either order.
+    const right = { ...stockIssuance("result-stock", "holder-a", CONVERSION_DATE), id: "si-right" };
+    const early = { ...stockIssuance("result-stock", "holder-a", "2021-05-01"), id: "si-early" };
+    const otherHolder = { ...stockIssuance("result-stock", "holder-b", CONVERSION_DATE), id: "si-other" };
+    const findingsFor = (...stockIssuances: Record<string, unknown>[]) =>
+      runValidator(
+        "TX_CONVERTIBLE_CONVERSION",
+        contextWith({
+          convertibleIssuances: [liveConvertible("conv-sec", "holder-a")] as any,
+          transactions: [liveConvertible("conv-sec", "holder-a"), ...stockIssuances],
+        }),
+        conversion(),
+      );
+    const duplicated = (count: number) => [
+      errorFinding("resulting-stock-exists", `${count} stock issuances have security_id result-stock, so it doesn't name one resulting security.`),
+    ];
+    expect(findingsFor(early, right)).toEqual(duplicated(2));
+    expect(findingsFor(right, otherHolder)).toEqual(duplicated(2));
+    expect(findingsFor(otherHolder, right)).toEqual(duplicated(2));
+    expect(findingsFor(early, otherHolder, right)).toEqual(duplicated(3));
+  });
+
   it("doesn't accept a convertible issuance as a resulting security", () => {
     // Dated the same day and held by the same stakeholder, so only its type
     // keeps it from counting as the resulting stock.
