@@ -117,6 +117,17 @@ describe("a transaction on a security an earlier transaction removed", () => {
     expect(context.findings).toEqual([removed(vesting)]);
   });
 
+  it("runs a removal before a transaction it's dated before, even on a noncanonical date", () => {
+    // The check compares dates with <, which puts the cancellation's
+    // 2021-06-01 first. Sorting with localeCompare puts 2021-06_01 first, so
+    // the vesting event would fail on a cancellation the run hadn't reached.
+    const vesting = { id: "ve-1", object_type: "TX_VESTING_EVENT", security_id: "safe-1", vesting_condition_id: "vc-1", date: "2021-06_01" };
+    const context = validateAfter(vesting);
+
+    expect(context.findings).toEqual([removed(vesting)]);
+    expect(context.snapshots.map((s) => s.date)).toEqual(["2021-01-01", "2021-06-01"]);
+  });
+
   it("reports an issuance's own failures along with the reuse", () => {
     const context = validateAfter({ id: "ci-2", object_type: "TX_CONVERTIBLE_ISSUANCE", security_id: "safe-1", stakeholder_id: "nobody", date: "2021-07-01" });
 
