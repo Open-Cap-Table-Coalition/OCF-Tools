@@ -41,8 +41,9 @@ export const stakeholderExists = {
  * The types catch mix-ups: `issuance` must be the transaction type that
  * `collection` actually holds, `acceptance` must be a real transaction type,
  * `vests` must be true exactly when that issuance type has vesting terms
- * (`vesting_terms_id`), and `returnsToPool` must be true exactly when it can
- * name a stock plan (`stock_plan_id`), so a typo or a wrong flag won't compile.
+ * (`vesting_terms_id`, or a v2 grant's `vesting_template_id`), and
+ * `returnsToPool` must be true exactly when it can name a stock plan
+ * (`stock_plan_id`), so a typo or a wrong flag won't compile.
  *
  * `leavesOutstanding` lists the family's transactions that act on a security
  * without retiring it, so that it's still outstanding under the same
@@ -63,12 +64,20 @@ type Family = {
     collection: C;
     issuance: OcfMachineContext[C][number]["object_type"];
     acceptance: Extract<TxKey, `TX_${string}_ACCEPTANCE`>;
-    vests: "vesting_terms_id" extends keyof OcfMachineContext[C][number] ? true : false;
-    returnsToPool: "stock_plan_id" extends keyof OcfMachineContext[C][number] ? true : false;
+    vests: HasKey<OcfMachineContext[C][number], "vesting_terms_id" | "vesting_template_id">;
+    returnsToPool: HasKey<OcfMachineContext[C][number], "stock_plan_id">;
     leavesOutstanding?: readonly TxKey[];
     deprecatedIssuance?: OcfMachineContext[C][number]["object_type"];
   };
 }[CollectionKey];
+
+/**
+ * Whether some member of `T` has one of the keys `K`. An issuance type can be a
+ * union of schema versions (equity compensation's v1 | v2), and `keyof` on a
+ * union keeps only the keys every member shares.
+ */
+type HasKey<T, K extends PropertyKey> =
+  [Extract<K, T extends unknown ? keyof T : never>] extends [never] ? false : true;
 
 /**
  * The transactions that record a security's vesting. None of them transfers,
