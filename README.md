@@ -18,7 +18,7 @@ const ocfPackage = readOcfPackage(ocfPackageFolderDir);
 
 ## OCF Validator
 
-This tool tests the logical and structural validity of an OCF package. We are continuing to build out the rules set for validity but have good coverage for stock transactions and basic validations for convertible, warrant, and equity compensation transactions. Other transactions, such as vesting transactions, are only checked for naming a security removed earlier, if at all.
+This tool tests the logical and structural validity of an OCF package. We are continuing to build out the rules set for validity but have good coverage for stock transactions and basic validations for convertible, warrant, and equity compensation transactions. A transaction under one of the older `TX_PLAN_SECURITY_*` names is validated as the equity compensation transaction it stands for. Other transactions, such as vesting transactions, are only checked for naming a security removed earlier, if at all.
 
 ```ts
 const ocfValidation = ocfValidator(ocfPackageFolderDir);

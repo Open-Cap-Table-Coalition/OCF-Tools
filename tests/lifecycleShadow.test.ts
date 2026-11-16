@@ -21,7 +21,7 @@ import { disagreements, explain, expectShadowExplained, shadowRows, EXPLANATIONS
 // Across the suite, the charts and the two checks disagree on three
 // transactions, of two kinds. Each is reproduced below from the test that has
 // it. A third kind is the gap the chart is meant to close; no existing package
-// has it, so it's shown on packages written for it.
+// has it, so it's shown on a package written for it.
 
 /** A package's shadow rows: its transactions in run order, as the validator leaves them. */
 const shadow = (transactions: Record<string, unknown>[], stakeholders = [{ id: "sh-1" }]): ShadowRow[] =>
@@ -100,6 +100,19 @@ describe("where the chart and the checks agree", () => {
     expect(row.removedBy).toMatchObject({ id: "ct-1" });
   });
 
+  it("both refuse a vesting event on a grant cancelled under the plan security name", () => {
+    // A plan security cancellation is an equity compensation cancellation, so
+    // the `removals` index holds it like any other removal.
+    const rows = shadow([
+      { id: "psi-1", object_type: "TX_PLAN_SECURITY_ISSUANCE", security_id: "opt-1", stakeholder_id: "sh-1", date: "2021-01-01" },
+      { id: "psc-1", object_type: "TX_PLAN_SECURITY_CANCELLATION", security_id: "opt-1", date: "2021-06-01" },
+      { id: "ve-1", object_type: "TX_VESTING_EVENT", security_id: "opt-1", vesting_condition_id: "vc-1", date: "2021-07-01" },
+    ]);
+
+    expect(rowsOf(rows, "ve-1")).toMatchObject([{ state: "removed", allowed: false, reported: ["no-earlier-removal"], removedBy: { id: "psc-1" } }]);
+    expect(disagreements(rows)).toEqual([]);
+  });
+
   it("both allow a return to pool on a retracted grant, which neither check runs on", () => {
     const rows = shadow([
       { id: "eci-1", object_type: "TX_EQUITY_COMPENSATION_ISSUANCE", security_id: "option-1", stakeholder_id: "sh-1", stock_plan_id: "plan-1", quantity: "100", date: "2021-01-01" },
@@ -156,7 +169,7 @@ describe("where the chart and the checks disagree", () => {
     expect(disagreements(rows).map(explain)).toEqual(["removed earlier the same day"]);
   });
 
-  // The gap the chart closes: removals the `removals` index leaves out. No
+  // The gap the chart closes: a removal the `removals` index leaves out. No
   // existing package has one.
   it("the chart refuses a vesting event on consolidated stock, which no-earlier-removal doesn't know was removed", () => {
     // Driven straight through the walker: the legacy stock issuance validator
@@ -176,17 +189,6 @@ describe("where the chart and the checks disagree", () => {
       ["stock-2", "outstanding", true],
     ]);
     expect(disagreements(rows)).toMatchObject([{ id: "ve-1", state: "removed", allowed: false, reported: [], removedBy: { id: "sc-1" } }]);
-    expect(disagreements(rows).map(explain)).toEqual(["removed by a transaction the removals index doesn't hold"]);
-  });
-
-  it("the chart refuses a vesting event on a grant cancelled under the plan security name, which no-earlier-removal doesn't know was removed", () => {
-    const rows = shadow([
-      { id: "psi-1", object_type: "TX_PLAN_SECURITY_ISSUANCE", security_id: "opt-1", stakeholder_id: "sh-1", date: "2021-01-01" },
-      { id: "psc-1", object_type: "TX_PLAN_SECURITY_CANCELLATION", security_id: "opt-1", date: "2021-06-01" },
-      { id: "ve-1", object_type: "TX_VESTING_EVENT", security_id: "opt-1", vesting_condition_id: "vc-1", date: "2021-07-01" },
-    ]);
-
-    expect(disagreements(rows)).toMatchObject([{ id: "ve-1", state: "removed", allowed: false, reported: [], removedBy: { id: "psc-1" } }]);
     expect(disagreements(rows).map(explain)).toEqual(["removed by a transaction the removals index doesn't hold"]);
   });
 

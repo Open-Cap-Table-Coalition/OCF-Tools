@@ -67,15 +67,16 @@ describe("every check message renders a malformed package value", () => {
   const withEquityCompensation = (...transactions: Record<string, unknown>[]) =>
     contextWith({ equityCompensation: [equityCompensation] as any, transactions: [equityCompensation, ...transactions] });
 
-  it("renders a malformed security id in the undated and deprecated issuance messages", () => {
+  it("renders a malformed security id in the undated and no-longer-outstanding issuance messages", () => {
     expect(issuanceExists.run(contextWith(), { security_id: unprintable } as any)).toEqual([
       `The transaction has no date, so it can't be checked against the equity compensation issuance with security_id {"toString":null}.`,
     ]);
+    // An issuance in the history, under the older name, and not in the live collection.
     const context = contextWith({
-      transactions: [{ object_type: "TX_PLAN_SECURITY_ISSUANCE", security_id: unprintable }],
+      transactions: [{ object_type: "TX_PLAN_SECURITY_ISSUANCE", security_id: unprintable, date: "2020-01-01" }],
     });
     expect(issuanceExists.run(context, { security_id: unprintable, date: "2021-01-01" })).toEqual([
-      `The equity compensation issuance referenced by security_id {"toString":null} uses the deprecated type TX_PLAN_SECURITY_ISSUANCE, which the validator doesn't process.`,
+      `The equity compensation issuance referenced by security_id {"toString":null} (dated 2020-01-01) is not outstanding as of this transaction's date.`,
     ]);
   });
 

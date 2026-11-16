@@ -212,6 +212,7 @@ const EXPECTED_COLLECTION: Record<string, CollectionKey> = {
   TX_CONVERTIBLE_ISSUANCE: "convertibleIssuances",
   TX_WARRANT_ISSUANCE: "warrantIssuances",
   TX_EQUITY_COMPENSATION_ISSUANCE: "equityCompensation",
+  TX_PLAN_SECURITY_ISSUANCE: "equityCompensation",
   // remove
   TX_STOCK_RETRACTION: "stockIssuances",
   TX_STOCK_CANCELLATION: "stockIssuances",
@@ -230,6 +231,9 @@ const EXPECTED_COLLECTION: Record<string, CollectionKey> = {
   TX_EQUITY_COMPENSATION_RETRACTION: "equityCompensation",
   TX_EQUITY_COMPENSATION_CANCELLATION: "equityCompensation",
   TX_EQUITY_COMPENSATION_TRANSFER: "equityCompensation",
+  TX_PLAN_SECURITY_RETRACTION: "equityCompensation",
+  TX_PLAN_SECURITY_CANCELLATION: "equityCompensation",
+  TX_PLAN_SECURITY_TRANSFER: "equityCompensation",
 };
 
 describe("per-type collection placement", () => {
@@ -299,20 +303,22 @@ describe("per-type collection placement", () => {
 // That's only safe if the collections never hold anything but issuances, which
 // is true because:
 //  - they start empty (tested here);
-//  - only the four family issuance types add to them (tested here), and each
-//    adds its own transaction (tested above);
+//  - only the family issuance types add to them (tested here), and each adds
+//    its own transaction (tested above);
 //  - removing only takes things out (tested above).
-// The issuance types are written out by hand on purpose. TX_PLAN_SECURITY_ISSUANCE
-// isn't one of them: the machine appends nothing for that type.
+// The issuance types are written out by hand on purpose. Equity compensation
+// has two: TX_PLAN_SECURITY_ISSUANCE is the older name for its issuance, and
+// lands in the same collection.
 const ISSUANCE_KEYS = [
   "TX_STOCK_ISSUANCE",
   "TX_CONVERTIBLE_ISSUANCE",
   "TX_WARRANT_ISSUANCE",
   "TX_EQUITY_COMPENSATION_ISSUANCE",
+  "TX_PLAN_SECURITY_ISSUANCE",
 ];
 
 describe("family collections hold only issuances", () => {
-  it("appends for exactly the four family issuance keys", () => {
+  it("appends for exactly the family issuance keys", () => {
     const appendKeys = (Object.keys(TX_DESCRIPTORS) as TxKey[]).filter(
       (key) => TX_DESCRIPTORS[key].effect === "append",
     );

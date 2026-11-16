@@ -201,11 +201,12 @@ export const EXPLANATIONS = {
    * hold, so no-earlier-removal doesn't know it's gone. The index keeps
    * transactions whose effect is "remove", by their `security_id`. That
    * leaves out a consolidation, which is passthrough and names its securities
-   * in `security_ids`, and the plan security removals, which are passthrough.
-   * This is the gap #224 left and #233 says the chart closes.
+   * in `security_ids`. This is the gap #224 left and #233 says the chart
+   * closes. (The plan security removals were the other half of it until they
+   * became equity compensation removals.)
    */
   "removed by a transaction the removals index doesn't hold":
-    "The chart removed the security on a consolidation or a plan security removal, which no-earlier-removal's index leaves out.",
+    "The chart removed the security on a consolidation, which no-earlier-removal's index leaves out.",
 } as const;
 
 export type Explanation = keyof typeof EXPLANATIONS;

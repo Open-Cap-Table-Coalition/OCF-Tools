@@ -25,14 +25,14 @@ import { TX_WARRANT_TRANSFER } from "./validators/warrant/tx_warrant_transfer";
 import { TX_WARRANT_EXERCISE } from "./validators/warrant/tx_warrant_exercise";
 import { text, toValidate } from "./validators/checkKit";
 import { noEarlierRemoval } from "./validators/checks";
-import { TX_EQUITY_COMPENSATION_ISSUANCE } from "./validators/equity_compensation/tx_equity_compensation_issuance";
-import { TX_EQUITY_COMPENSATION_ACCEPTANCE } from "./validators/equity_compensation/tx_equity_compensation_acceptance";
-import { TX_EQUITY_COMPENSATION_EXERCISE } from "./validators/equity_compensation/tx_equity_compensation_exercise";
-import { TX_EQUITY_COMPENSATION_RELEASE } from "./validators/equity_compensation/tx_equity_compensation_release";
+import { TX_EQUITY_COMPENSATION_ISSUANCE, TX_PLAN_SECURITY_ISSUANCE } from "./validators/equity_compensation/tx_equity_compensation_issuance";
+import { TX_EQUITY_COMPENSATION_ACCEPTANCE, TX_PLAN_SECURITY_ACCEPTANCE } from "./validators/equity_compensation/tx_equity_compensation_acceptance";
+import { TX_EQUITY_COMPENSATION_EXERCISE, TX_PLAN_SECURITY_EXERCISE } from "./validators/equity_compensation/tx_equity_compensation_exercise";
+import { TX_EQUITY_COMPENSATION_RELEASE, TX_PLAN_SECURITY_RELEASE } from "./validators/equity_compensation/tx_equity_compensation_release";
 import { TX_EQUITY_COMPENSATION_REPRICING } from "./validators/equity_compensation/tx_equity_compensation_repricing";
-import { TX_EQUITY_COMPENSATION_RETRACTION } from "./validators/equity_compensation/tx_equity_compensation_retraction";
-import { TX_EQUITY_COMPENSATION_CANCELLATION } from "./validators/equity_compensation/tx_equity_compensation_cancellation";
-import { TX_EQUITY_COMPENSATION_TRANSFER } from "./validators/equity_compensation/tx_equity_compensation_transfer";
+import { TX_EQUITY_COMPENSATION_RETRACTION, TX_PLAN_SECURITY_RETRACTION } from "./validators/equity_compensation/tx_equity_compensation_retraction";
+import { TX_EQUITY_COMPENSATION_CANCELLATION, TX_PLAN_SECURITY_CANCELLATION } from "./validators/equity_compensation/tx_equity_compensation_cancellation";
+import { TX_EQUITY_COMPENSATION_TRANSFER, TX_PLAN_SECURITY_TRANSFER } from "./validators/equity_compensation/tx_equity_compensation_transfer";
 import run_EOD from "./eod";
 
 // The validator contract types are defined in types/validator.ts; re-exported
@@ -243,11 +243,16 @@ export const VESTING_FAMILIES = [
 ] as const satisfies readonly VestingFamily[];
 
 export const TX_DESCRIPTORS = {
+  // The seven TX_PLAN_SECURITY_* types are the equity compensation types
+  // under their older names. Each entry is its equivalent's, filed again
+  // under the older name (see `underOlderName`), so it sits in the same group.
+
   // --- append: issuance appended to its family collection -----------------
   TX_STOCK_ISSUANCE: { effect: "append", lifecycle: "issue", collection: "stockIssuances", legacyValidate: validators.valid_tx_stock_issuance },
   TX_CONVERTIBLE_ISSUANCE,
   TX_WARRANT_ISSUANCE,
   TX_EQUITY_COMPENSATION_ISSUANCE,
+  TX_PLAN_SECURITY_ISSUANCE,
 
   // --- none: validate and record, no collection mutation ------------------
   TX_STOCK_ACCEPTANCE: { effect: "none", lifecycle: "stays", families: ["stockIssuances"], legacyValidate: validators.valid_tx_stock_acceptance },
@@ -262,6 +267,9 @@ export const TX_DESCRIPTORS = {
   TX_EQUITY_COMPENSATION_EXERCISE,
   TX_EQUITY_COMPENSATION_RELEASE,
   TX_EQUITY_COMPENSATION_REPRICING,
+  TX_PLAN_SECURITY_ACCEPTANCE,
+  TX_PLAN_SECURITY_EXERCISE,
+  TX_PLAN_SECURITY_RELEASE,
 
   // --- remove: filter the family collection by security_id ---------------
   TX_STOCK_RETRACTION: { effect: "remove", lifecycle: "removes", collection: "stockIssuances", legacyValidate: validators.valid_tx_stock_retraction },
@@ -281,6 +289,9 @@ export const TX_DESCRIPTORS = {
   TX_EQUITY_COMPENSATION_RETRACTION,
   TX_EQUITY_COMPENSATION_CANCELLATION,
   TX_EQUITY_COMPENSATION_TRANSFER,
+  TX_PLAN_SECURITY_RETRACTION,
+  TX_PLAN_SECURITY_CANCELLATION,
+  TX_PLAN_SECURITY_TRANSFER,
 
   // --- passthrough: no validator of their own ----------------------------
   //   No report entry, no collection mutation. Except for the return to pool,
@@ -293,15 +304,6 @@ export const TX_DESCRIPTORS = {
   //
   //   Their lifecycle words are assigned here, since no `effect` implies one.
   //
-  //   The plan security types are the equity compensation types under their
-  //   older names, so each takes its equivalent's word.
-  TX_PLAN_SECURITY_ISSUANCE: { effect: "passthrough", lifecycle: "issue", families: ["equityCompensation"] },
-  TX_PLAN_SECURITY_ACCEPTANCE: { effect: "passthrough", lifecycle: "stays", families: ["equityCompensation"] },
-  TX_PLAN_SECURITY_EXERCISE: { effect: "passthrough", lifecycle: "stays", families: ["equityCompensation"] },
-  TX_PLAN_SECURITY_RELEASE: { effect: "passthrough", lifecycle: "stays", families: ["equityCompensation"] },
-  TX_PLAN_SECURITY_RETRACTION: { effect: "passthrough", lifecycle: "removes", families: ["equityCompensation"] },
-  TX_PLAN_SECURITY_CANCELLATION: { effect: "passthrough", lifecycle: "removes", families: ["equityCompensation"] },
-  TX_PLAN_SECURITY_TRANSFER: { effect: "passthrough", lifecycle: "removes", families: ["equityCompensation"] },
   //   A vesting transaction records vesting and leaves its security
   //   outstanding. It can name a security of any family whose issuance carries
   //   vesting terms, which a convertible's doesn't.
@@ -495,6 +497,7 @@ export function collectionUpdate(
       case "TX_WARRANT_ISSUANCE":
         return { warrantIssuances: appendToCollection("warrantIssuances", context.warrantIssuances, event.data) };
       case "TX_EQUITY_COMPENSATION_ISSUANCE":
+      case "TX_PLAN_SECURITY_ISSUANCE":
         return { equityCompensation: appendToCollection("equityCompensation", context.equityCompensation, event.data) };
       default:
         return {};

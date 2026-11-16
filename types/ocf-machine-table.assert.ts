@@ -27,7 +27,11 @@
  *  - every descriptor carries a lifecycle word, an active descriptor's word is
  *    the one its `effect` implies, `defineValidator` fills that word in, a
  *    "none" declaration must list its `families`, and the vesting
- *    transactions' families are exactly the families that vest.
+ *    transactions' families are exactly the families that vest;
+ *  - each older name in `OLDER_NAMES` carries the payload of the type it
+ *    stands for, the table files each under the same effect and lifecycle
+ *    word, and `underOlderName` rejects a name whose payload the validator
+ *    doesn't accept.
  */
 import type {
   OCFWarrantIssuance,
@@ -42,8 +46,9 @@ import {
   type DescriptorTable,
   type VestingFamily,
 } from "../ocf_validator/ocfMachine";
-import { defineValidator, type CheckObject } from "../ocf_validator/validators/checkKit";
-import { familyChecksFor } from "../ocf_validator/validators/checks";
+import { defineValidator, underOlderName, type CheckObject } from "../ocf_validator/validators/checkKit";
+import { familyChecksFor, type OLDER_NAMES } from "../ocf_validator/validators/checks";
+import type { TransactionFor } from "./ocf-input";
 import type { Check, GradedValidator, LifecycleWord, OcfMachineContext } from "./validator";
 import type { Expect, Equal } from "./type-assert";
 
@@ -292,3 +297,40 @@ const _noneSpecNoFamilies = defineValidator({ transaction: "TX_CONVERTIBLE_ACCEP
 // dropped.
 type _VestingFamilies = Expect<Equal<(typeof VESTING_FAMILIES)[number], VestingFamily>>;
 type _ConvertiblesDontVest = Expect<Equal<Extract<VestingFamily, "convertibleIssuances">, never>>;
+
+// --- Older names ---------------------------------------------------------------
+
+type OlderName = keyof typeof OLDER_NAMES;
+
+// Every older name's payload is its current type's payload with the
+// `object_type` narrowed, so a validator written for the current type accepts
+// it. An entry that paired two unrelated types would turn this false.
+type _OlderNamesCarryTheirTypesPayload = Expect<
+  Equal<
+    { [K in OlderName]: TransactionFor<K> extends TransactionFor<(typeof OLDER_NAMES)[K]> ? true : false }[OlderName],
+    true
+  >
+>;
+
+// The table files each older name with its current type's effect and word.
+type _OlderNamesShareEffect = Expect<
+  Equal<
+    { [K in OlderName]: Equal<(typeof TX_DESCRIPTORS)[K]["effect"], (typeof TX_DESCRIPTORS)[(typeof OLDER_NAMES)[K]]["effect"]> }[OlderName],
+    true
+  >
+>;
+type _OlderNamesShareWord = Expect<
+  Equal<
+    { [K in OlderName]: Equal<(typeof TX_DESCRIPTORS)[K]["lifecycle"], (typeof TX_DESCRIPTORS)[(typeof OLDER_NAMES)[K]]["lifecycle"]> }[OlderName],
+    true
+  >
+>;
+
+// An equity compensation retraction's validator can be filed under the plan
+// security retraction, whose payload it accepts…
+const _equityCompensationRetraction = defineValidator({ transaction: "TX_EQUITY_COMPENSATION_RETRACTION", effect: "remove", collection: "equityCompensation", checks: [] });
+const _underOlderName = underOlderName(_equityCompensationRetraction, "TX_PLAN_SECURITY_RETRACTION");
+type _FiledUnderOlderName = Expect<Equal<(typeof _underOlderName)["transaction"], "TX_PLAN_SECURITY_RETRACTION">>;
+// …but not under a type whose payload it doesn't.
+// @ts-expect-error — a warrant retraction isn't an equity compensation retraction under another name.
+const _underUnrelatedName = underOlderName(_equityCompensationRetraction, "TX_WARRANT_RETRACTION");

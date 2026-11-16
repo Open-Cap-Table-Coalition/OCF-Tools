@@ -203,3 +203,21 @@ type Defined<S extends Spec> = Omit<S, "checks"> & {
   validate: GradedValidator<TransactionFor<S["transaction"]>>;
   checks: readonly Check[];
 };
+
+/**
+ * A validator's table entry again, filed under an older name OCF still
+ * accepts for its transaction (see `OLDER_NAMES` in `checks.ts`). Everything
+ * but `transaction` is the same object's: the validator function, the checks,
+ * the effect, the collection or families, and the lifecycle word. So the two
+ * names can't drift apart, and a transaction under the older name is validated
+ * and applied exactly as its equivalent is.
+ *
+ * It won't compile unless the older name's payload is one the validator
+ * already accepts.
+ */
+export function underOlderName<D extends { transaction: TxKey }, const K extends TxKey>(
+  descriptor: D,
+  olderName: TransactionFor<K> extends TransactionFor<D["transaction"]> ? K : never,
+): Omit<D, "transaction"> & { transaction: K } {
+  return { ...descriptor, transaction: olderName };
+}
