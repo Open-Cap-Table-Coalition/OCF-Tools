@@ -25,9 +25,10 @@ import { lifecycleFamilies, TX_DESCRIPTORS, type CollectionKey, type Descriptor 
 // write across several securities, and separate actors could apply one side
 // and silently ignore the other.
 //
-// Nothing in the validator calls this yet. The charts run in shadow, in the
-// test suite, against the two checks they are meant to replace
-// (tests/lifecycleShadow.test.ts).
+// The validator doesn't decide anything by a chart yet. The charts run in
+// shadow, in the test suite, against the two checks they are meant to replace
+// (tests/lifecycleShadow.test.ts). The one thing the validator asks a chart is
+// which securities the end-of-day snapshot shows (`isOnCapTable`, in eod.ts).
 
 /** Where a security is in its life. The state value a caller stores. */
 export type LifecycleState = "notIssued" | "outstanding" | "removed";
@@ -116,9 +117,9 @@ export function buildLifecycleChart(
 export type LifecycleChart = ReturnType<typeof buildLifecycleChart>;
 
 // The charts of the real table, built the first time each is asked for. Built
-// on demand because this module and `ocfMachine.ts` will import each other
-// once the machine consults the charts, and the table isn't there to read
-// while the modules are still loading.
+// on demand because this module and `ocfMachine.ts` import each other (the
+// machine's end-of-day snapshot asks a chart which securities to show), and
+// the table isn't there to read while the modules are still loading.
 const charts = new Map<CollectionKey, LifecycleChart>();
 
 /** The lifecycle chart of a family, built from `TX_DESCRIPTORS`. */

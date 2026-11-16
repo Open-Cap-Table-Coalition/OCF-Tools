@@ -10,19 +10,47 @@ import * as path from "path";
 import { expect } from "vitest";
 import { createActor } from "xstate";
 import { ocfValidator } from "../ocf_validator";
-import { earliestRemovals, ocfMachine, TX_DESCRIPTORS, type OcfMachineEvent } from "../ocf_validator/ocfMachine";
+import { applyTransaction, emptyNodes, outstanding, type NodeMap } from "../ocf_validator/nodes";
+import { earliestRemovals, ocfMachine, TX_DESCRIPTORS, type CollectionKey, type Descriptor, type OcfMachineEvent } from "../ocf_validator/ocfMachine";
 import type { Finding } from "../types/finding";
 import { expectShadowExplained } from "./lifecycleShadow";
 import type { Check, GradedValidator, OcfMachineContext } from "../types/validator";
 
+/** The four security families, by the names of the arrays the context once held for them. */
+const FAMILIES = ["stockIssuances", "convertibleIssuances", "warrantIssuances", "equityCompensation"] as const satisfies readonly CollectionKey[];
+
 /**
- * A full, mostly-empty machine context; `overrides` replace top-level fields.
+ * What a test can seed a context with: any of its fields, and, per family,
+ * the issuances to start with outstanding. The context held those four arrays
+ * until the node map replaced them (#228); a test still states its starting
+ * cap table the same way, and `baseContext` puts it in the map.
+ */
+export type ContextSeed = Partial<OcfMachineContext> & { [C in CollectionKey]?: readonly unknown[] };
+
+/** An "append" descriptor for a family: all the reducer reads off one to issue a security. */
+const issues = (collection: CollectionKey) => ({ effect: "append", collection }) as unknown as Descriptor;
+
+/**
+ * A node map holding the seeded issuances as outstanding securities, built by
+ * the same reducer the machine uses. Added to `nodes` if the seed has one.
+ */
+const seededNodes = (seed: ContextSeed): NodeMap =>
+  FAMILIES.reduce(
+    (nodes, family) =>
+      (seed[family] ?? []).reduce<NodeMap>((map, issuance) => applyTransaction(map, issues(family), issuance as any), nodes),
+    seed.nodes ?? emptyNodes(),
+  );
+
+/**
+ * A full, mostly-empty machine context; `overrides` replace top-level fields,
+ * and a family's array of issuances seeds the node map (see `ContextSeed`).
  * Unless overridden, `removals` indexes the package's transactions, as START
  * builds it, so a seeded actor sees the same removals a real run would.
  */
-export const baseContext = (overrides: Partial<OcfMachineContext> = {}): OcfMachineContext => {
+export const baseContext = (overrides: ContextSeed = {}): OcfMachineContext => {
+  const { stockIssuances, convertibleIssuances, warrantIssuances, equityCompensation, ...fields } = overrides;
   const ocfPackageContent =
-    overrides.ocfPackageContent ??
+    fields.ocfPackageContent ??
     ({
       manifest: { issuer: { legal_name: "Test Co" } },
       stakeholders: [],
@@ -34,10 +62,6 @@ export const baseContext = (overrides: Partial<OcfMachineContext> = {}): OcfMach
       valuations: [],
     } as OcfMachineContext["ocfPackageContent"]);
   return {
-    stockIssuances: [],
-    convertibleIssuances: [],
-    warrantIssuances: [],
-    equityCompensation: [],
     ocfPackageContent,
     removals: earliestRemovals(ocfPackageContent.transactions),
     report: [],
@@ -45,9 +69,17 @@ export const baseContext = (overrides: Partial<OcfMachineContext> = {}): OcfMach
     lastErrorFindings: [],
     snapshots: [],
     result: "Incomplete",
-    ...overrides,
+    ...fields,
+    nodes: seededNodes(overrides),
   };
 };
+
+/**
+ * The issuances outstanding in a family, in the order issued: what the
+ * context's array of that name held before the node map (#228).
+ */
+export const collection = <C extends CollectionKey>(context: OcfMachineContext, family: C) =>
+  outstanding(context.nodes, family);
 
 /**
  * Runs the whole validator over a package holding the given transactions,
@@ -93,10 +125,14 @@ export const validatePackage = (
   }
 };
 
-/** Start an actor seeded into `capTable` with the given context. */
-export const startSeeded = (context: OcfMachineContext) =>
+/**
+ * Start an actor seeded into `capTable` with the given context. A family's
+ * array of issuances spread onto the context is put in its node map, as
+ * `baseContext` does.
+ */
+export const startSeeded = (context: OcfMachineContext & ContextSeed) =>
   createActor(ocfMachine, {
-    snapshot: ocfMachine.resolveState({ value: "capTable", context }),
+    snapshot: ocfMachine.resolveState({ value: "capTable", context: baseContext(context) }),
   }).start();
 
 /** Cast a hand-built event to the typed event union (test-only boundary). */
@@ -105,7 +141,7 @@ export const ev = (type: string, data: Record<string, unknown> = {}): OcfMachine
 
 /** A context whose package `transactions` and `stakeholders` lists are the ones given. */
 export const contextWith = (
-  overrides: Partial<OcfMachineContext> & { transactions?: any[]; stakeholders?: { id: string }[] } = {},
+  overrides: ContextSeed & { transactions?: any[]; stakeholders?: { id: string }[] } = {},
 ): OcfMachineContext => {
   const { transactions = [], stakeholders = [], ...rest } = overrides;
   return baseContext({

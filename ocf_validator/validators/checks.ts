@@ -1,7 +1,8 @@
 import type { OCFStockIssuance } from "@opencaptablecoalition/ocf-types";
 import type { OcfTransaction, TransactionFor } from "../../types/ocf-input";
 import type { DeepReadonly, OcfMachineContext } from "../../types/validator";
-import type { CollectionKey, TxKey } from "../ocfMachine";
+import { outstandingSecurity } from "../nodes";
+import type { CollectionElement, CollectionKey, TxKey } from "../ocfMachine";
 import { text, type CheckObject } from "./checkKit";
 
 /**
@@ -100,7 +101,7 @@ export const noEarlierRemoval = {
 
 /**
  * What the shared checks need to know about a family: its name as used in
- * messages ("convertible"), its collection, its issuance and acceptance
+ * messages ("convertible"), its collection key, its issuance and acceptance
  * transaction types, whether its securities can vest, whether they can be
  * granted from a stock plan, and which of its transactions leave a security
  * outstanding.
@@ -128,10 +129,10 @@ type Family = {
   [C in CollectionKey]: {
     name: string;
     collection: C;
-    issuance: OcfMachineContext[C][number]["object_type"];
+    issuance: CollectionElement[C]["object_type"];
     acceptance: Extract<TxKey, `TX_${string}_ACCEPTANCE`>;
-    vests: HasKey<OcfMachineContext[C][number], "vesting_terms_id" | "vesting_template_id">;
-    returnsToPool: HasKey<OcfMachineContext[C][number], "stock_plan_id">;
+    vests: HasKey<CollectionElement[C], "vesting_terms_id" | "vesting_template_id">;
+    returnsToPool: HasKey<CollectionElement[C], "stock_plan_id">;
     leavesOutstanding?: readonly TxKey[];
   };
 }[CollectionKey];
@@ -182,10 +183,9 @@ export function familyChecksFor({
 }: Family) {
   /**
    * The issuance named by the transaction's `security_id` is outstanding as of
-   * the transaction's date. Passes if the family's collection holds a record
-   * with that `security_id`. Matching on `security_id` alone is enough because
-   * the collection only ever holds issuances, which tests/ocfMachine.test.ts
-   * checks.
+   * the transaction's date. Passes if the node map holds an outstanding
+   * security of the family under that `security_id`. Only an issuance puts a
+   * security in the map, which tests/ocfMachine.test.ts checks.
    *
    * When there's no match, the message says why, worked out from the package's
    * full transaction history: the security was never issued, it's only issued
@@ -214,13 +214,7 @@ export function familyChecksFor({
         return messages;
       }
 
-      let issuanceExists = false;
-      context[collection].forEach((ele) => {
-        if (ele.security_id === data.security_id) {
-          issuanceExists = true;
-        }
-      });
-      if (issuanceExists) return messages;
+      if (outstandingSecurity(context.nodes, collection, data.security_id) !== undefined) return messages;
 
       // The type comparison comes first because it tells TypeScript this is an
       // issuance, which is what allows reading `security_id` and `date` next.
@@ -464,13 +458,11 @@ export function resultingChecksFor({
     run: (context, data) => {
       const messages: string[] = [];
 
-      // The reference stakeholder comes from the live issuance this transaction
-      // acts on — the same record issuance-exists matches. With no live record,
+      // The reference stakeholder comes from the outstanding issuance this
+      // transaction acts on — the same security issuance-exists matches. With none,
       // issuance-exists already carries the failure and there is no reference
       // to compare against, so this check stays silent.
-      const reference = context[collection].find(
-        (ele) => ele.security_id === data.security_id,
-      );
+      const reference = outstandingSecurity(context.nodes, collection, data.security_id)?.issuance.value;
       if (reference === undefined) return messages;
 
       // As with the date check, only resulting ids backed by exactly one stock

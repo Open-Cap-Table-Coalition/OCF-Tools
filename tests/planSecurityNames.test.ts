@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import constants from "../ocf_validator/constants/constants";
 import { lifecycleFamilies, TX_DESCRIPTORS, type TxKey } from "../ocf_validator/ocfMachine";
 import { currentName, OLDER_NAMES } from "../ocf_validator/validators/checks";
-import { validatePackage } from "./helpers";
+import { validatePackage, collection } from "./helpers";
 
 // ---------------------------------------------------------------------------
 // The TX_PLAN_SECURITY_* names
@@ -86,7 +86,7 @@ describe("a history under the older names runs as the same history under the cur
     expect(context.result).toBe(VALID);
     // The grant was in the collection until the cancellation removed it.
     expect(context.snapshots.map((snapshot) => snapshot.equityCompensation.length)).toEqual([1, 1, 1, 1, 0]);
-    expect(context.equityCompensation).toEqual([]);
+    expect(collection(context, "equityCompensation")).toEqual([]);
   });
 
   it.each([
@@ -99,7 +99,7 @@ describe("a history under the older names runs as the same history under the cur
         [{ id: "sh-1" }],
       );
       expect(context.result).toBe(VALID);
-      expect(context.equityCompensation).toEqual([]);
+      expect(collection(context, "equityCompensation")).toEqual([]);
     }
   });
 

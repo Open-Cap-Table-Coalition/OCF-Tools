@@ -1,6 +1,7 @@
 import * as path from "path";
 import { describe, it, expect } from "vitest";
 import { ocfValidator } from "../ocf_validator";
+import { collection } from "./helpers";
 
 /**
  * Characterization test: pins the validator's *current* output over the
@@ -19,8 +20,19 @@ describe("ocfValidator over testPackage", () => {
     // `ocfPackageContent` is just the input package echoed back onto the machine
     // context, and `removals` indexes it; exclude both so the snapshot captures
     // derived behavior, not the fixture.
-    const { ocfPackageContent, removals, ...output } = context;
+    const { ocfPackageContent, removals, nodes, ...output } = context;
 
-    expect(output).toMatchSnapshot();
+    // The context held four issuance arrays until the node map replaced them
+    // (#228). The snapshot was recorded with them, so they're read back off
+    // the map under their old names: the recorded snapshot passing unchanged
+    // is what shows the map holds what the arrays did.
+    const collections = {
+      stockIssuances: collection(context, "stockIssuances"),
+      convertibleIssuances: collection(context, "convertibleIssuances"),
+      warrantIssuances: collection(context, "warrantIssuances"),
+      equityCompensation: collection(context, "equityCompensation"),
+    };
+
+    expect({ ...output, ...collections }).toMatchSnapshot();
   });
 });

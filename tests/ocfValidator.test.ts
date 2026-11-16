@@ -1,6 +1,6 @@
 import { afterEach, describe, it, expect, vi } from "vitest";
 import { errorResult, TX_DESCRIPTORS } from "../ocf_validator/ocfMachine";
-import { baseContext, validatePackage } from "./helpers";
+import { baseContext, validatePackage, collection } from "./helpers";
 
 // ---------------------------------------------------------------------------
 // A run that throws
@@ -240,7 +240,7 @@ describe("malformed package values", () => {
     expect(context.result).toBe(`The validation of the OCF package for Test Co failed on ${failure} must both be strings.`);
     expect(context.findings).toEqual([]);
     expect(context.snapshots).toEqual([]);
-    expect(context.convertibleIssuances).toEqual([]);
+    expect(collection(context, "convertibleIssuances")).toEqual([]);
   });
 
   it("gives each run its own arrays, so changing one run's result can't change the next's", () => {

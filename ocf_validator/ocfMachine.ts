@@ -25,6 +25,7 @@ import { TX_WARRANT_TRANSFER } from "./validators/warrant/tx_warrant_transfer";
 import { TX_WARRANT_EXERCISE } from "./validators/warrant/tx_warrant_exercise";
 import { text, toValidate } from "./validators/checkKit";
 import { noEarlierRemoval } from "./validators/checks";
+import { applyTransaction, emptyNodes, outstanding } from "./nodes";
 import { TX_EQUITY_COMPENSATION_ISSUANCE, TX_PLAN_SECURITY_ISSUANCE } from "./validators/equity_compensation/tx_equity_compensation_issuance";
 import { TX_EQUITY_COMPENSATION_ACCEPTANCE, TX_PLAN_SECURITY_ACCEPTANCE } from "./validators/equity_compensation/tx_equity_compensation_acceptance";
 import { TX_EQUITY_COMPENSATION_EXERCISE, TX_PLAN_SECURITY_EXERCISE } from "./validators/equity_compensation/tx_equity_compensation_exercise";
@@ -42,15 +43,16 @@ import run_EOD from "./eod";
 export type { GradedValidator, OcfMachineContext } from "../types/validator";
 
 // ---------------------------------------------------------------------------
-// Cap-table collections
+// Security families
 // ---------------------------------------------------------------------------
 
 /**
- * The element type held by each family collection. Pairing a collection name
- * with a payload of the wrong family is a *compile* error (see
- * `appendToCollection`).
+ * The issuance type of each security family, by the family's key. The keys
+ * are the names of the four arrays the context once held, one per family;
+ * they now name the family itself: on a descriptor's `collection`, on a
+ * security's node (see `nodes.ts`), and on a lifecycle chart.
  */
-interface CollectionElement {
+export interface CollectionElement {
   stockIssuances: OCFStockIssuance;
   convertibleIssuances: OCFConvertibleIssuance;
   warrantIssuances: OCFWarrantIssuance;
@@ -78,32 +80,6 @@ export type OcfMachineEvent =
   | { type: "RUN_END"; date: string };
 
 // ---------------------------------------------------------------------------
-// Family-collection helpers
-// ---------------------------------------------------------------------------
-
-/**
- * Append `data` to a family collection. The `collection` literal pins `C`, so
- * `current` and `data` must both belong to that family — appending a wrong-family
- * payload (e.g. a warrant payload onto the convertible collection) is a COMPILE
- * error. Exercised in `types/ocf-machine-table.assert.ts`.
- */
-export function appendToCollection<C extends CollectionKey>(
-  _collection: C,
-  current: CollectionElement[C][],
-  data: CollectionElement[C],
-): CollectionElement[C][] {
-  return [...current, data];
-}
-
-/** Remove every member of a collection matching `securityId`. */
-function removeFromCollection<E extends { security_id: string }>(
-  current: E[],
-  securityId: unknown,
-): E[] {
-  return current.filter((obj) => obj.security_id !== securityId);
-}
-
-// ---------------------------------------------------------------------------
 // Per-transaction descriptors
 // ---------------------------------------------------------------------------
 
@@ -119,10 +95,23 @@ function removeFromCollection<E extends { security_id: string }>(
  * family migrates to the graded shape.
  */
 type Validator<T> = (
-  context: OcfMachineContext,
+  context: LegacyContext,
   event: { data?: T },
   isGuard: boolean,
 ) => any;
+
+/**
+ * The context a legacy validator receives: the machine's, plus the
+ * `stockIssuances` array the legacy stock validators loop over. The machine
+ * keeps no such array any more. `legacyContext` reads it off the node map for
+ * each call, so those validators run unchanged until they move to findings.
+ */
+export type LegacyContext = OcfMachineContext & { stockIssuances: OCFStockIssuance[] };
+
+const legacyContext = (context: OcfMachineContext): LegacyContext => ({
+  ...context,
+  stockIssuances: outstanding(context.nodes, "stockIssuances"),
+});
 
 /**
  * Everything the machine needs to know about one transaction type, keyed on its
@@ -137,10 +126,14 @@ type Validator<T> = (
  *
  *  - `passthrough`: no validator or mutation. The machine checks only that its
  *                   security wasn't removed earlier (see buildTransactionHandlers).
- *  - `none`:        validate and record, but mutate no collection.
- *  - `remove`:      validate, record, and filter `collection` by `security_id`.
- *  - `append`:      validate, record, and append the issuance to `collection`.
- *                   An issuance's security mustn't have been removed earlier.
+ *  - `none`:        validate and record, but change no security.
+ *  - `remove`:      validate, record, and mark the security removed. Its
+ *                   `collection` names the family it must belong to.
+ *  - `append`:      validate, record, and issue the security into the family
+ *                   `collection` names. An issuance's security mustn't have
+ *                   been removed earlier.
+ *
+ * `applyTransaction` in `nodes.ts` is what carries an effect out.
  *
  * The `none`/`remove` graded arms take `GradedValidator<any>`, not
  * `GradedValidator<unknown>`: the payload is contravariant, so `unknown` would
@@ -150,7 +143,9 @@ type Validator<T> = (
  * The `append` variants distribute over `CollectionKey`, tying `collection` to
  * the payload family of the validator — under either field — so a family-typed
  * validator cannot be declared under a mismatched collection (demonstrated in
- * `types/ocf-machine-table.assert.ts`).
+ * `types/ocf-machine-table.assert.ts`). That is what keeps a security's node
+ * holding an issuance of its own family: the node takes its family from the
+ * descriptor that issued it.
  *
  * Graded descriptors (the ones with `validate`) must also list their checks in
  * `checks` (see `types/validator.ts`). The machine doesn't read this list while
@@ -397,7 +392,7 @@ export function isValidOutcome(
   if ("validate" in descriptor) {
     return !descriptor.validate(context, event.data).some(isErrorFinding);
   }
-  return descriptor.legacyValidate(context, event, true);
+  return descriptor.legacyValidate(legacyContext(context), event, true);
 }
 
 /**
@@ -419,7 +414,7 @@ export function outcomeUpdate(
       lastErrorFindings: found.filter(isErrorFinding),
     };
   }
-  return { report: [...context.report, descriptor.legacyValidate(context, event, false)] };
+  return { report: [...context.report, descriptor.legacyValidate(legacyContext(context), event, false)] };
 }
 
 /**
@@ -472,55 +467,19 @@ export const malformedResult = (ocfPackageContent: OcfPackageContent, transactio
 // ---------------------------------------------------------------------------
 
 /**
- * Valid-branch collection mutation, driven by the descriptor's `effect` and
- * `collection`. `append` descriptors push the issuance onto their family
- * collection; `remove` descriptors filter it by `security_id`; `none` descriptors
- * (and control events) mutate nothing.
+ * The valid branch's change to the node map: the transaction applied by the
+ * pure reducer in `nodes.ts`, driven by its descriptor's `effect`. An
+ * "append" issues its security and a "remove" marks it removed. A "none" or
+ * passthrough transaction, or a control event, changes nothing and returns
+ * no update.
  */
-export function collectionUpdate(
+export function nodesUpdate(
   context: OcfMachineContext,
   event: OcfMachineEvent,
 ): Partial<OcfMachineContext> {
   if (isControlEvent(event)) return {};
-  const descriptor = TX_DESCRIPTORS[event.type];
-
-  if (descriptor.effect === "append") {
-    // The per-key narrowing makes `event.data` the matching family payload, so a
-    // wrong-family append is a compile error (see appendToCollection). TypeScript
-    // cannot pair a runtime `descriptor.collection` with the narrowed payload, so
-    // the collection literal comes from the per-type case, not the descriptor.
-    switch (event.type) {
-      case "TX_STOCK_ISSUANCE":
-        return { stockIssuances: appendToCollection("stockIssuances", context.stockIssuances, event.data) };
-      case "TX_CONVERTIBLE_ISSUANCE":
-        return { convertibleIssuances: appendToCollection("convertibleIssuances", context.convertibleIssuances, event.data) };
-      case "TX_WARRANT_ISSUANCE":
-        return { warrantIssuances: appendToCollection("warrantIssuances", context.warrantIssuances, event.data) };
-      case "TX_EQUITY_COMPENSATION_ISSUANCE":
-      case "TX_PLAN_SECURITY_ISSUANCE":
-        return { equityCompensation: appendToCollection("equityCompensation", context.equityCompensation, event.data) };
-      default:
-        return {};
-    }
-  }
-
-  if (descriptor.effect === "remove") {
-    const securityId = "security_id" in event.data ? event.data.security_id : undefined;
-    // `removeFromCollection` is family-agnostic (it only needs security_id); the
-    // descriptor's own `collection` picks the field, retiring the name-prefix guess.
-    switch (descriptor.collection) {
-      case "stockIssuances":
-        return { stockIssuances: removeFromCollection(context.stockIssuances, securityId) };
-      case "convertibleIssuances":
-        return { convertibleIssuances: removeFromCollection(context.convertibleIssuances, securityId) };
-      case "warrantIssuances":
-        return { warrantIssuances: removeFromCollection(context.warrantIssuances, securityId) };
-      case "equityCompensation":
-        return { equityCompensation: removeFromCollection(context.equityCompensation, securityId) };
-    }
-  }
-
-  return {};
+  const nodes = applyTransaction(context.nodes, TX_DESCRIPTORS[event.type], event.data);
+  return nodes === context.nodes ? {} : { nodes };
 }
 
 // ---------------------------------------------------------------------------
@@ -528,8 +487,8 @@ export function collectionUpdate(
 // ---------------------------------------------------------------------------
 
 /**
- * The earliest transaction in `transactions` that removes each security from
- * its collection (an effect of "remove"), by security_id: the machine's
+ * The earliest transaction in `transactions` that removes each security (an
+ * effect of "remove"), by security_id: the machine's
  * `removals`, which no-earlier-removal reads. START builds it, once per run.
  */
 export const earliestRemovals = (transactions: readonly OcfTransaction[]): OcfMachineContext["removals"] => {
@@ -569,7 +528,7 @@ function buildTransactionHandlers() {
     {
       guard: "isValidTx",
       target: "capTable",
-      actions: ["recordOutcome", "mutateCollection"],
+      actions: ["recordOutcome", "applyToNodes"],
     },
     {
       target: "validationError",
@@ -639,9 +598,9 @@ export const ocfMachine = setup({
         failureResult(isControlEvent(event) ? undefined : activeDescriptorFor(event.type), context, event),
     }),
 
-    // Valid branch collection mutation, driven by the descriptor's `effect` and
-    // `collection`. `none` descriptors (and control events) mutate nothing.
-    mutateCollection: assign(({ context, event }) => collectionUpdate(context, event)),
+    // Valid branch: apply the transaction to the node map (see nodesUpdate).
+    // `none` descriptors (and control events) change nothing.
+    applyToNodes: assign(({ context, event }) => nodesUpdate(context, event)),
 
     // The followsRemoval branch's record and failure message, as for a
     // graded validator's invalid branch.
@@ -653,13 +612,10 @@ export const ocfMachine = setup({
 }).createMachine({
   id: "OCF-xstate",
   initial: "capTable",
-  // A function, so each run starts with its own arrays: a caller that changes
-  // one in a run's returned context can't change the next run's.
+  // A function, so each run starts with its own arrays and node map: a caller
+  // that changes one in a run's returned context can't change the next run's.
   context: () => ({
-    stockIssuances: [],
-    equityCompensation: [],
-    convertibleIssuances: [],
-    warrantIssuances: [],
+    nodes: emptyNodes(),
     ocfPackageContent: {
       manifest: {},
       stakeholders: [],

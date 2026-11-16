@@ -15,6 +15,7 @@ import {
   emittedCheckIds,
   expectFindingShape,
   type FailingScenarios,
+  collection,
 } from "./helpers";
 
 const MIGRATED_KEYS = [
@@ -73,8 +74,8 @@ describe("convertible issuance validity", () => {
 
     const snapshot = actor.getSnapshot();
     expect(snapshot.value).toBe("capTable");
-    expect(snapshot.context.convertibleIssuances).toHaveLength(1);
-    expect(snapshot.context.convertibleIssuances[0]).toMatchObject({ id: "conv1", security_id: "sec1" });
+    expect(collection(snapshot.context, "convertibleIssuances")).toHaveLength(1);
+    expect(collection(snapshot.context, "convertibleIssuances")[0]).toMatchObject({ id: "conv1", security_id: "sec1" });
     expect(snapshot.context.findings).toEqual([]);
   });
 
@@ -86,7 +87,7 @@ describe("convertible issuance validity", () => {
     expect(snapshot.value).toBe("validationError");
     expect(snapshot.context.findings).toHaveLength(1);
     expect(snapshot.context.findings[0].check).toBe("stakeholder-exists");
-    expect(snapshot.context.convertibleIssuances).toEqual([]);
+    expect(collection(snapshot.context, "convertibleIssuances")).toEqual([]);
     expect(snapshot.context.result).toContain("stakeholder-exists");
   });
 });
@@ -118,14 +119,14 @@ describe("convertible acceptance validity", () => {
       convertibleIssuances: [issuanceRecord("sec1")] as any,
       transactions: [issuanceRecord("sec1")],
     });
-    const before = structuredClone(seeded.convertibleIssuances);
+    const before = structuredClone(collection(seeded, "convertibleIssuances"));
 
     const actor = startSeeded(seeded);
     actor.send(ev("TX_CONVERTIBLE_ACCEPTANCE", acceptance()));
 
     const snapshot = actor.getSnapshot();
     expect(snapshot.value).toBe("capTable");
-    expect(snapshot.context.convertibleIssuances).toEqual(before);
+    expect(collection(snapshot.context, "convertibleIssuances")).toEqual(before);
     expect(snapshot.context.findings).toEqual([]);
   });
 
@@ -178,8 +179,8 @@ describe("convertible retraction validity", () => {
 
     const snapshot = actor.getSnapshot();
     expect(snapshot.value).toBe("capTable");
-    expect(snapshot.context.convertibleIssuances.some((c: any) => c.security_id === "sec1")).toBe(false);
-    expect(snapshot.context.convertibleIssuances.some((c: any) => c.security_id === "sec2")).toBe(true);
+    expect(collection(snapshot.context, "convertibleIssuances").some((c: any) => c.security_id === "sec1")).toBe(false);
+    expect(collection(snapshot.context, "convertibleIssuances").some((c: any) => c.security_id === "sec2")).toBe(true);
     expect(snapshot.context.findings).toEqual([]);
   });
 
@@ -234,8 +235,8 @@ describe("convertible cancellation validity", () => {
 
     const snapshot = actor.getSnapshot();
     expect(snapshot.value).toBe("capTable");
-    expect(snapshot.context.convertibleIssuances.some((c: any) => c.security_id === "sec1")).toBe(false);
-    expect(snapshot.context.convertibleIssuances.some((c: any) => c.security_id === "sec2")).toBe(true);
+    expect(collection(snapshot.context, "convertibleIssuances").some((c: any) => c.security_id === "sec1")).toBe(false);
+    expect(collection(snapshot.context, "convertibleIssuances").some((c: any) => c.security_id === "sec2")).toBe(true);
   });
 
   it("emits one no-other-transactions finding per past offender, exempting acceptances and itself", () => {
@@ -328,8 +329,8 @@ describe("convertible transfer validity", () => {
 
     const snapshot = actor.getSnapshot();
     expect(snapshot.value).toBe("capTable");
-    expect(snapshot.context.convertibleIssuances.some((c: any) => c.security_id === "sec1")).toBe(false);
-    expect(snapshot.context.convertibleIssuances.some((c: any) => c.security_id === "sec2")).toBe(true);
+    expect(collection(snapshot.context, "convertibleIssuances").some((c: any) => c.security_id === "sec1")).toBe(false);
+    expect(collection(snapshot.context, "convertibleIssuances").some((c: any) => c.security_id === "sec2")).toBe(true);
   });
 
   it("never emits no-other-transactions, even when a past transaction references the security", () => {
@@ -661,7 +662,7 @@ describe("convertible conversion drives the machine to completion", () => {
     const snapshot = actor.getSnapshot();
     expect(snapshot.value).toBe("capTable");
     expect(snapshot.context.findings).toEqual([]);
-    expect(snapshot.context.convertibleIssuances).toEqual([]);
+    expect(collection(snapshot.context, "convertibleIssuances")).toEqual([]);
   });
 
   it("completes an empty-resulting conversion on its warning alone and still removes the converted convertible", () => {
@@ -678,7 +679,7 @@ describe("convertible conversion drives the machine to completion", () => {
     expect(snapshot.context.findings).toHaveLength(1);
     expect(snapshot.context.findings[0].check).toBe("resulting-security-named");
     expect(snapshot.context.findings[0].severity).toBe("warning");
-    expect(snapshot.context.convertibleIssuances).toEqual([]);
+    expect(collection(snapshot.context, "convertibleIssuances")).toEqual([]);
   });
 
   // A run used to stop at every conversion, so it never reached the equity
@@ -924,7 +925,7 @@ describe("a conflicting transaction pair flags the later transaction, not the ea
     expect(afterRetraction.value).toBe("capTable");
     expect(afterRetraction.context.findings).toEqual([]);
     // The retraction removed the issuance from the live collection.
-    expect(afterRetraction.context.convertibleIssuances.some((c: any) => c.security_id === "sec1")).toBe(false);
+    expect(collection(afterRetraction.context, "convertibleIssuances").some((c: any) => c.security_id === "sec1")).toBe(false);
 
     actor.send(ev("TX_CONVERTIBLE_ACCEPTANCE", acceptance));
     const { context, value } = actor.getSnapshot();

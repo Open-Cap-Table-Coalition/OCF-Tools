@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { createActor } from "xstate";
 import {
-  collectionUpdate,
+  nodesUpdate,
   isValidOutcome,
   outcomeUpdate,
   failureResult,
@@ -13,7 +13,7 @@ import {
 } from "../ocf_validator/ocfMachine";
 import type { Finding } from "../types/finding";
 import type { GradedValidator, OcfMachineContext } from "../types/validator";
-import { baseContext, contextWith, startSeeded, ev } from "./helpers";
+import { baseContext, contextWith, startSeeded, ev, collection } from "./helpers";
 
 // ---------------------------------------------------------------------------
 // Unknown transaction types
@@ -154,7 +154,7 @@ describe("stock retraction reports retraction-specific content", () => {
     expect(entry).toHaveProperty("incoming_stockIssuance_validity");
     expect(entry).not.toHaveProperty("stockClass_validity");
     // And the security was removed from the live collection (remove op).
-    expect(snapshot.context.stockIssuances.some((s: any) => s.security_id === "sec1")).toBe(false);
+    expect(collection(snapshot.context, "stockIssuances").some((s: any) => s.security_id === "sec1")).toBe(false);
   });
 });
 
@@ -178,12 +178,12 @@ describe("warrant issuance lands in its own family collection", () => {
 
     const ctx = actor.getSnapshot().context;
     // The warrant landed in warrantIssuances…
-    expect(ctx.warrantIssuances.some((w: any) => w.id === "wi1")).toBe(true);
+    expect(collection(ctx, "warrantIssuances").some((w: any) => w.id === "wi1")).toBe(true);
     // …the convertible collection did not leak into warrantIssuances…
-    expect(ctx.warrantIssuances.some((w: any) => w.id === "ci1")).toBe(false);
-    expect(ctx.warrantIssuances).toHaveLength(1);
+    expect(collection(ctx, "warrantIssuances").some((w: any) => w.id === "ci1")).toBe(false);
+    expect(collection(ctx, "warrantIssuances")).toHaveLength(1);
     // …and convertibleIssuances is untouched.
-    expect(ctx.convertibleIssuances).toEqual([sentinel]);
+    expect(collection(ctx, "convertibleIssuances")).toEqual([sentinel]);
   });
 });
 
@@ -197,6 +197,9 @@ const ACTIVE_KEYS = (Object.keys(TX_DESCRIPTORS) as TxKey[]).filter(
   (key) => TX_DESCRIPTORS[key].effect !== "passthrough",
 );
 
+// The four families, by their collection keys.
+const FAMILIES: CollectionKey[] = ["stockIssuances", "convertibleIssuances", "warrantIssuances", "equityCompensation"];
+
 // The active keys that name a collection (append/remove), derived the same way.
 const COLLECTION_KEYS = (Object.keys(TX_DESCRIPTORS) as TxKey[]).filter(
   (key) => "collection" in TX_DESCRIPTORS[key],
@@ -204,8 +207,9 @@ const COLLECTION_KEYS = (Object.keys(TX_DESCRIPTORS) as TxKey[]).filter(
 
 // Independent oracle: the collection each append/remove key must declare, written
 // out by hand — no prefix logic, no mapping helper imported from the interpreter.
-// The `remove` path trusts `descriptor.collection` verbatim, so this oracle is the
-// independent check that each declaration is right.
+// The reducer trusts `descriptor.collection` verbatim, for the family an
+// issuance's security joins and the family a removal acts on, so this oracle is
+// the independent check that each declaration is right.
 const EXPECTED_COLLECTION: Record<string, CollectionKey> = {
   // append
   TX_STOCK_ISSUANCE: "stockIssuances",
@@ -247,14 +251,13 @@ describe("per-type collection placement", () => {
     }
   });
 
-  it.each(ACTIVE_KEYS)("%s mutates only the collection its descriptor declares", (key) => {
+  it.each(ACTIVE_KEYS)("%s changes only the family its descriptor declares", (key) => {
     const descriptor = TX_DESCRIPTORS[key];
-    const data = { id: "incoming", security_id: "SEC", object_type: key };
 
     if (!("collection" in descriptor)) {
-      // none: validate and record, but mutate nothing.
+      // none: validate and record, but change nothing.
       expect(descriptor.effect).toBe("none");
-      const result = collectionUpdate(baseContext(), ev(key, data));
+      const result = nodesUpdate(baseContext(), ev(key, { id: "incoming", security_id: "SEC", object_type: key }));
       expect(Object.keys(result)).toHaveLength(0);
       return;
     }
@@ -262,20 +265,25 @@ describe("per-type collection placement", () => {
     const fam = descriptor.collection;
     const matching = { id: "match", security_id: "SEC", object_type: "seed" };
     const other = { id: "other", security_id: "OTHER", object_type: "seed" };
-    const ctx = baseContext({ [fam]: [matching, other] } as Partial<OcfMachineContext>);
+    const ctx = baseContext({ [fam]: [matching, other] });
 
-    const result = collectionUpdate(ctx, ev(key, data)) as Record<string, any[]>;
+    // An issuance brings a security of its own; a removal names the seeded one.
+    const data = { id: "incoming", security_id: descriptor.effect === "append" ? "NEW" : "SEC", object_type: key };
+    const result = nodesUpdate(ctx, ev(key, data));
 
-    // The mutation lands in exactly the collection the descriptor names.
-    expect(Object.keys(result)).toEqual([fam]);
+    // The change lands in the node map, and in exactly the family the
+    // descriptor names: the other families still hold nothing.
+    expect(Object.keys(result)).toEqual(["nodes"]);
+    const after = { ...ctx, ...result };
+    for (const family of FAMILIES) {
+      if (family !== fam) expect(collection(after, family)).toEqual([]);
+    }
 
     if (descriptor.effect === "append") {
-      expect(result[fam]).toHaveLength(3);
-      expect(result[fam].at(-1)).toEqual(data);
+      expect(collection(after, fam)).toEqual([matching, other, data]);
     } else {
-      // remove: the matching security_id is filtered out, the rest retained.
-      expect(result[fam].some((x) => x.security_id === "SEC")).toBe(false);
-      expect(result[fam].some((x) => x.security_id === "OTHER")).toBe(true);
+      // remove: the matching security_id is no longer outstanding, the rest retained.
+      expect(collection(after, fam)).toEqual([other]);
     }
   });
 
@@ -289,8 +297,8 @@ describe("per-type collection placement", () => {
     expect(collection).toBe(EXPECTED_COLLECTION[key]);
   });
 
-  it("a passthrough type mutates no collection", () => {
-    const result = collectionUpdate(baseContext(), ev("TX_VESTING_START", { security_id: "s" }));
+  it("a passthrough type changes no security", () => {
+    const result = nodesUpdate(baseContext({ equityCompensation: [{ id: "ec", security_id: "s" }] }), ev("TX_VESTING_START", { security_id: "s" }));
     expect(Object.keys(result)).toHaveLength(0);
   });
 });
@@ -327,10 +335,10 @@ describe("family collections hold only issuances", () => {
 
   it("starts every family collection empty", () => {
     const { context } = createActor(ocfMachine).start().getSnapshot();
-    expect(context.stockIssuances).toEqual([]);
-    expect(context.convertibleIssuances).toEqual([]);
-    expect(context.warrantIssuances).toEqual([]);
-    expect(context.equityCompensation).toEqual([]);
+    expect(collection(context, "stockIssuances")).toEqual([]);
+    expect(collection(context, "convertibleIssuances")).toEqual([]);
+    expect(collection(context, "warrantIssuances")).toEqual([]);
+    expect(collection(context, "equityCompensation")).toEqual([]);
   });
 });
 
@@ -367,7 +375,7 @@ describe("family collections end holding only the surviving issuance", () => {
     const snapshot = actor.getSnapshot();
     expect(snapshot.value).toBe("capTable");
     expect(snapshot.context.findings).toEqual([]);
-    expect(snapshot.context.convertibleIssuances).toEqual([issueA]);
+    expect(collection(snapshot.context, "convertibleIssuances")).toEqual([issueA]);
   });
 
   it("keeps the warrant collection as exactly the security-A issuance after an append and a removal", () => {
@@ -393,7 +401,7 @@ describe("family collections end holding only the surviving issuance", () => {
     const snapshot = actor.getSnapshot();
     expect(snapshot.value).toBe("capTable");
     expect(snapshot.context.findings).toEqual([]);
-    expect(snapshot.context.warrantIssuances).toEqual([issueA]);
+    expect(collection(snapshot.context, "warrantIssuances")).toEqual([issueA]);
   });
 });
 

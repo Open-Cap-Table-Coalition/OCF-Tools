@@ -1,9 +1,4 @@
-import type {
-  OCFStockIssuance,
-  OCFConvertibleIssuance,
-  OCFWarrantIssuance,
-  OCFEquityCompensationIssuance,
-} from "@opencaptablecoalition/ocf-types";
+import type { NodeMap } from "../ocf_validator/nodes";
 import type { OcfPackageContent } from "../read_ocf_package";
 import type { OcfTransaction } from "./ocf-input";
 import type { Snapshot } from "./snapshot";
@@ -11,16 +6,20 @@ import type { Finding, Severity } from "./finding";
 
 /**
  * The machine context a validator receives: the package under validation, the
- * per-family collections accumulated so far, and the record channels —
- * `report` for legacy dual-mode validators, `findings` for graded ones.
- * `report` retires with the legacy convention once every family returns
+ * node map built from the transactions applied so far, and the record
+ * channels — `report` for legacy dual-mode validators, `findings` for graded
+ * ones. `report` retires with the legacy convention once every family returns
  * findings.
  */
 export type OcfMachineContext = {
-  stockIssuances: OCFStockIssuance[];
-  equityCompensation: OCFEquityCompensationIssuance[];
-  convertibleIssuances: OCFConvertibleIssuance[];
-  warrantIssuances: OCFWarrantIssuance[];
+  /**
+   * The state of the cap table: every security the run has issued, with what
+   * has become of it (see `ocf_validator/nodes.ts`). Immutable; applying a
+   * transaction replaces it with a new map. `outstanding` in that module
+   * lists a family's outstanding issuances, which is what the four issuance
+   * arrays this replaces held.
+   */
+  nodes: NodeMap;
   ocfPackageContent: OcfPackageContent;
   /**
    * An index of the package, not a record of the run: each security's

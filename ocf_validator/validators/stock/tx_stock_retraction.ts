@@ -1,4 +1,4 @@
-import {OcfMachineContext} from '../../ocfMachine';
+import {LegacyContext} from '../../ocfMachine';
 
 /*
 CURRENT CHECKS:
@@ -10,7 +10,7 @@ MISSING CHECKS:
 None
 */
 
-const valid_tx_stock_retraction = (context: OcfMachineContext, event: any, isGuard: Boolean = false) => {
+const valid_tx_stock_retraction = (context: LegacyContext, event: any, isGuard: Boolean = false) => {
   let validity = false;
 
   let report: any = {transaction_type: "TX_STOCK_RETRACTION", transaction_id: event.data.id, transaction_date: event.data.date};

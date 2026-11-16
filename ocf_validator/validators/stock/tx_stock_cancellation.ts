@@ -12,10 +12,10 @@
     9. The security_id of the stock issuance referred to in the security_id variable must not be the security_id related to any other transactions with the exception of a stock acceptance transaction.
 */
 
-import {OcfMachineContext} from '../../ocfMachine';
+import {LegacyContext} from '../../ocfMachine';
 
 const valid_tx_stock_cancellation = (
-  context: OcfMachineContext,
+  context: LegacyContext,
   event: any,
   isGuard: Boolean = false
 ) => {
