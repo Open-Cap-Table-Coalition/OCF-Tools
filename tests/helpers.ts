@@ -172,7 +172,7 @@ export const emittedCheckIds = <K extends string>(scenarios: FailingScenarios<K>
   return emitted;
 };
 
-/** Assert a finding carries the declared id, error severity, and the transaction as subject. */
+/** Assert a finding carries the declared id, error severity, a failed outcome, and the transaction as subject. */
 export const expectFindingShape = (
   finding: Finding,
   check: string,
@@ -180,5 +180,6 @@ export const expectFindingShape = (
 ) => {
   expect(finding.check).toBe(check);
   expect(finding.severity).toBe("error");
+  expect(finding.outcome).toBe("failed");
   expect(finding.subject).toEqual(subject);
 };

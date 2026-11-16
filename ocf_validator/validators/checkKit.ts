@@ -127,8 +127,9 @@ const toMetadata = (checks: readonly CheckObject<any>[]): readonly Check[] =>
  * Builds the validator function from the checks. It runs each check that has a
  * `run`, in list order, and turns every message returned into a finding. The
  * finding's severity and check id come from the check; its subject (the
- * transaction's type and id) comes from the transaction being validated. The
- * only thing a check controls is the message text.
+ * transaction's type and id) comes from the transaction being validated. Its
+ * outcome is "failed": a check that returns a message ran and found its
+ * problem. The only thing a check controls is the message text.
  *
  * A check that throws produces one error finding saying so, whatever the
  * check's severity: a check that couldn't finish has checked nothing, so the
@@ -158,6 +159,7 @@ export const toValidate =
       for (const message of messages) {
         findings.push({
           severity,
+          outcome: "failed",
           check: check.id,
           message,
           subject,
