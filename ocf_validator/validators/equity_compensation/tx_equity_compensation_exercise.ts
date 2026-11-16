@@ -40,6 +40,7 @@ const quantityReconciles = {
 export const TX_EQUITY_COMPENSATION_EXERCISE = defineValidator({
   transaction: "TX_EQUITY_COMPENSATION_EXERCISE",
   effect: "none",
+  families: ["equityCompensation"],
   checks: [
     issuanceExists,
     quantityOutstanding,

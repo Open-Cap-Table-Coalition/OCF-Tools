@@ -32,5 +32,6 @@ const noRetraction = {
 export const TX_EQUITY_COMPENSATION_ACCEPTANCE = defineValidator({
   transaction: "TX_EQUITY_COMPENSATION_ACCEPTANCE",
   effect: "none",
+  families: ["equityCompensation"],
   checks: [issuanceExists, noRetraction],
 });

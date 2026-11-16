@@ -30,5 +30,6 @@ const noRetraction = {
 export const TX_WARRANT_ACCEPTANCE = defineValidator({
   transaction: "TX_WARRANT_ACCEPTANCE",
   effect: "none",
+  families: ["warrantIssuances"],
   checks: [issuanceExists, noRetraction],
 });

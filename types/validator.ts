@@ -98,3 +98,17 @@ export type Check = {
   description: string;
   implemented?: false;
 };
+
+/**
+ * What a transaction does to the lifecycle of the security it names, in one
+ * word. A security is not issued, then outstanding, then removed:
+ *
+ *  - "issue":         takes it from not issued to outstanding.
+ *  - "stays":         acts on an outstanding security and leaves it outstanding.
+ *  - "removes":       takes it from outstanding to removed.
+ *  - "after removal": allowed only once it's removed, and leaves it removed.
+ *
+ * Every descriptor in `TX_DESCRIPTORS` declares one. The lifecycle charts are
+ * built from these words, one chart per family (#233).
+ */
+export type LifecycleWord = "issue" | "stays" | "removes" | "after removal";

@@ -9,7 +9,7 @@ import type {
 import type { OcfTransaction, TransactionFor } from "../types/ocf-input";
 import type { OcfPackageContent } from "../read_ocf_package";
 import type { Finding } from "../types/finding";
-import type { Check, GradedValidator, OcfMachineContext } from "../types/validator";
+import type { Check, GradedValidator, LifecycleWord, OcfMachineContext } from "../types/validator";
 import validators from "./validators";
 import { TX_CONVERTIBLE_ISSUANCE } from "./validators/convertible/tx_convertible_issuance";
 import { TX_CONVERTIBLE_ACCEPTANCE } from "./validators/convertible/tx_convertible_acceptance";
@@ -162,16 +162,32 @@ type Validator<T> = (
  * `defineValidator`, the same check definitions produce the findings, and each
  * finding's severity is copied from its check. Changing a check's severity
  * changes whether a failing transaction is blocked.
+ *
+ * Every descriptor also carries its `lifecycle` word (see `LifecycleWord` in
+ * `types/validator.ts`): what the transaction does to the lifecycle of the
+ * security it names. Nothing reads the word while validating yet; the
+ * lifecycle charts are built from it (#233). An active descriptor's word
+ * follows from its `effect`, and the types hold the two together: "append"
+ * is "issue", "remove" is "removes", and "none" is "stays". Only a
+ * passthrough descriptor's word is a free choice.
+ *
+ * A word needs a family to belong to: the chart it becomes an arrow on. An
+ * "append" or "remove" descriptor already names it, as its `collection`. A
+ * "none" or passthrough descriptor changes no collection, so it lists its
+ * `families` instead: more than one for a transaction that can name a
+ * security of several families (the vesting transactions), and none for a
+ * transaction that names no security at all (see `lifecycleFamilies`).
  */
 type Descriptor =
-  | { effect: "passthrough" }
-  | { effect: "none"; legacyValidate: Validator<unknown> }
-  | { effect: "none"; validate: GradedValidator<any>; checks: readonly Check[] }
-  | { effect: "remove"; legacyValidate: Validator<unknown>; collection: CollectionKey }
-  | { effect: "remove"; validate: GradedValidator<any>; collection: CollectionKey; checks: readonly Check[] }
+  | { effect: "passthrough"; lifecycle: LifecycleWord; families: readonly CollectionKey[] }
+  | { effect: "none"; lifecycle: "stays"; families: readonly CollectionKey[]; legacyValidate: Validator<unknown> }
+  | { effect: "none"; lifecycle: "stays"; families: readonly CollectionKey[]; validate: GradedValidator<any>; checks: readonly Check[] }
+  | { effect: "remove"; lifecycle: "removes"; legacyValidate: Validator<unknown>; collection: CollectionKey }
+  | { effect: "remove"; lifecycle: "removes"; validate: GradedValidator<any>; collection: CollectionKey; checks: readonly Check[] }
   | {
       [C in CollectionKey]: {
         effect: "append";
+        lifecycle: "issue";
         collection: C;
         legacyValidate: Validator<CollectionElement[C]>;
       };
@@ -179,6 +195,7 @@ type Descriptor =
   | {
       [C in CollectionKey]: {
         effect: "append";
+        lifecycle: "issue";
         collection: C;
         validate: GradedValidator<CollectionElement[C]>;
         checks: readonly Check[];
@@ -200,15 +217,40 @@ export type ActiveDescriptor = Exclude<Descriptor, { effect: "passthrough" }>;
  */
 export type DescriptorTable = { [K in TxKey]: Descriptor & { transaction?: K } };
 
+/** Every key some member of the union `T` has; `keyof` alone keeps only the shared ones. */
+type KeyOfAny<T> = T extends unknown ? keyof T : never;
+
+/**
+ * A family whose securities can vest: one whose issuance type carries vesting
+ * terms (`vesting_terms_id`, or a v2 grant's `vesting_template_id`). It's the
+ * rule `familyChecksFor` holds each family's `vests` flag to.
+ */
+export type VestingFamily = {
+  [C in CollectionKey]: Extract<KeyOfAny<CollectionElement[C]>, "vesting_terms_id" | "vesting_template_id"> extends never
+    ? never
+    : C;
+}[CollectionKey];
+
+/**
+ * The families a vesting transaction can name a security of. Pinned to
+ * `VestingFamily` in `types/ocf-machine-table.assert.ts`, so a family that
+ * gains or loses vesting terms has to be added or dropped here.
+ */
+export const VESTING_FAMILIES = [
+  "stockIssuances",
+  "warrantIssuances",
+  "equityCompensation",
+] as const satisfies readonly VestingFamily[];
+
 export const TX_DESCRIPTORS = {
   // --- append: issuance appended to its family collection -----------------
-  TX_STOCK_ISSUANCE: { effect: "append", collection: "stockIssuances", legacyValidate: validators.valid_tx_stock_issuance },
+  TX_STOCK_ISSUANCE: { effect: "append", lifecycle: "issue", collection: "stockIssuances", legacyValidate: validators.valid_tx_stock_issuance },
   TX_CONVERTIBLE_ISSUANCE,
   TX_WARRANT_ISSUANCE,
   TX_EQUITY_COMPENSATION_ISSUANCE,
 
   // --- none: validate and record, no collection mutation ------------------
-  TX_STOCK_ACCEPTANCE: { effect: "none", legacyValidate: validators.valid_tx_stock_acceptance },
+  TX_STOCK_ACCEPTANCE: { effect: "none", lifecycle: "stays", families: ["stockIssuances"], legacyValidate: validators.valid_tx_stock_acceptance },
   TX_CONVERTIBLE_ACCEPTANCE,
   TX_WARRANT_ACCEPTANCE,
   TX_EQUITY_COMPENSATION_ACCEPTANCE,
@@ -222,12 +264,12 @@ export const TX_DESCRIPTORS = {
   TX_EQUITY_COMPENSATION_REPRICING,
 
   // --- remove: filter the family collection by security_id ---------------
-  TX_STOCK_RETRACTION: { effect: "remove", collection: "stockIssuances", legacyValidate: validators.valid_tx_stock_retraction },
-  TX_STOCK_CANCELLATION: { effect: "remove", collection: "stockIssuances", legacyValidate: validators.valid_tx_stock_cancellation },
-  TX_STOCK_CONVERSION: { effect: "remove", collection: "stockIssuances", legacyValidate: validators.valid_tx_stock_conversion },
-  TX_STOCK_REISSUANCE: { effect: "remove", collection: "stockIssuances", legacyValidate: validators.valid_tx_stock_reissuance },
-  TX_STOCK_REPURCHASE: { effect: "remove", collection: "stockIssuances", legacyValidate: validators.valid_tx_stock_repurchase },
-  TX_STOCK_TRANSFER: { effect: "remove", collection: "stockIssuances", legacyValidate: validators.valid_tx_stock_transfer },
+  TX_STOCK_RETRACTION: { effect: "remove", lifecycle: "removes", collection: "stockIssuances", legacyValidate: validators.valid_tx_stock_retraction },
+  TX_STOCK_CANCELLATION: { effect: "remove", lifecycle: "removes", collection: "stockIssuances", legacyValidate: validators.valid_tx_stock_cancellation },
+  TX_STOCK_CONVERSION: { effect: "remove", lifecycle: "removes", collection: "stockIssuances", legacyValidate: validators.valid_tx_stock_conversion },
+  TX_STOCK_REISSUANCE: { effect: "remove", lifecycle: "removes", collection: "stockIssuances", legacyValidate: validators.valid_tx_stock_reissuance },
+  TX_STOCK_REPURCHASE: { effect: "remove", lifecycle: "removes", collection: "stockIssuances", legacyValidate: validators.valid_tx_stock_repurchase },
+  TX_STOCK_TRANSFER: { effect: "remove", lifecycle: "removes", collection: "stockIssuances", legacyValidate: validators.valid_tx_stock_transfer },
   TX_CONVERTIBLE_RETRACTION,
   TX_CONVERTIBLE_CANCELLATION,
   TX_CONVERTIBLE_TRANSFER,
@@ -248,26 +290,50 @@ export const TX_DESCRIPTORS = {
   //   TX_VESTING_START) records nothing for it.
   //   `satisfies DescriptorTable` below forces any future OCF transaction type
   //   to be classified here — a compile error until it is.
-  TX_ISSUER_AUTHORIZED_SHARES_ADJUSTMENT: { effect: "passthrough" },
-  TX_PLAN_SECURITY_ACCEPTANCE: { effect: "passthrough" },
-  TX_PLAN_SECURITY_CANCELLATION: { effect: "passthrough" },
-  TX_PLAN_SECURITY_EXERCISE: { effect: "passthrough" },
-  TX_PLAN_SECURITY_ISSUANCE: { effect: "passthrough" },
-  TX_PLAN_SECURITY_RELEASE: { effect: "passthrough" },
-  TX_PLAN_SECURITY_RETRACTION: { effect: "passthrough" },
-  TX_PLAN_SECURITY_TRANSFER: { effect: "passthrough" },
-  TX_STOCK_CLASS_AUTHORIZED_SHARES_ADJUSTMENT: { effect: "passthrough" },
-  TX_STOCK_CLASS_CONVERSION_RATIO_ADJUSTMENT: { effect: "passthrough" },
-  TX_STOCK_CLASS_SPLIT: { effect: "passthrough" },
-  TX_STOCK_CONSOLIDATION: { effect: "passthrough" },
-  TX_STOCK_PLAN_POOL_ADJUSTMENT: { effect: "passthrough" },
-  TX_STOCK_PLAN_RETURN_TO_POOL: { effect: "passthrough" },
-  TX_VESTING_ACCELERATION: { effect: "passthrough" },
-  TX_VESTING_EVENT: { effect: "passthrough" },
-  TX_VESTING_START: { effect: "passthrough" },
+  //
+  //   Their lifecycle words are assigned here, since no `effect` implies one.
+  //
+  //   The plan security types are the equity compensation types under their
+  //   older names, so each takes its equivalent's word.
+  TX_PLAN_SECURITY_ISSUANCE: { effect: "passthrough", lifecycle: "issue", families: ["equityCompensation"] },
+  TX_PLAN_SECURITY_ACCEPTANCE: { effect: "passthrough", lifecycle: "stays", families: ["equityCompensation"] },
+  TX_PLAN_SECURITY_EXERCISE: { effect: "passthrough", lifecycle: "stays", families: ["equityCompensation"] },
+  TX_PLAN_SECURITY_RELEASE: { effect: "passthrough", lifecycle: "stays", families: ["equityCompensation"] },
+  TX_PLAN_SECURITY_RETRACTION: { effect: "passthrough", lifecycle: "removes", families: ["equityCompensation"] },
+  TX_PLAN_SECURITY_CANCELLATION: { effect: "passthrough", lifecycle: "removes", families: ["equityCompensation"] },
+  TX_PLAN_SECURITY_TRANSFER: { effect: "passthrough", lifecycle: "removes", families: ["equityCompensation"] },
+  //   A vesting transaction records vesting and leaves its security
+  //   outstanding. It can name a security of any family whose issuance carries
+  //   vesting terms, which a convertible's doesn't.
+  TX_VESTING_START: { effect: "passthrough", lifecycle: "stays", families: VESTING_FAMILIES },
+  TX_VESTING_EVENT: { effect: "passthrough", lifecycle: "stays", families: VESTING_FAMILIES },
+  TX_VESTING_ACCELERATION: { effect: "passthrough", lifecycle: "stays", families: VESTING_FAMILIES },
+  //   A consolidation removes each stock security in its `security_ids` and
+  //   names the one that replaces them.
+  TX_STOCK_CONSOLIDATION: { effect: "passthrough", lifecycle: "removes", families: ["stockIssuances"] },
+  //   A return to pool records where a removed grant's shares went, so it's
+  //   the one transaction allowed only once its security has been removed.
+  TX_STOCK_PLAN_RETURN_TO_POOL: { effect: "passthrough", lifecycle: "after removal", families: ["equityCompensation"] },
+  //   The rest name no security: each acts on a stock class, a stock plan, or
+  //   the issuer. A split changes every security in its class and the others
+  //   change none, but all of them leave every security where it is, so the
+  //   word is "stays". With no family, none is an arrow on any chart.
+  TX_STOCK_CLASS_SPLIT: { effect: "passthrough", lifecycle: "stays", families: [] },
+  TX_STOCK_CLASS_AUTHORIZED_SHARES_ADJUSTMENT: { effect: "passthrough", lifecycle: "stays", families: [] },
+  TX_STOCK_CLASS_CONVERSION_RATIO_ADJUSTMENT: { effect: "passthrough", lifecycle: "stays", families: [] },
+  TX_ISSUER_AUTHORIZED_SHARES_ADJUSTMENT: { effect: "passthrough", lifecycle: "stays", families: [] },
+  TX_STOCK_PLAN_POOL_ADJUSTMENT: { effect: "passthrough", lifecycle: "stays", families: [] },
 } satisfies DescriptorTable;
 
 export type { Descriptor };
+
+/**
+ * The families whose lifecycle chart a descriptor's word is an arrow on: its
+ * `collection` if it changes one, otherwise the `families` it lists. Empty for
+ * a transaction that names no security.
+ */
+export const lifecycleFamilies = (descriptor: Descriptor): readonly CollectionKey[] =>
+  "collection" in descriptor ? [descriptor.collection] : descriptor.families;
 
 const CONTROL_EVENTS = ["START", "RUN_EOD", "RUN_END"] as const;
 type ControlEvent = (typeof CONTROL_EVENTS)[number];
@@ -475,9 +541,14 @@ export const earliestRemovals = (transactions: readonly OcfTransaction[]): OcfMa
   return removals;
 };
 
-/** noEarlierRemoval in the shape the dispatch helpers take. */
+/**
+ * noEarlierRemoval in the shape the dispatch helpers take. It isn't any one
+ * transaction's descriptor, so its lifecycle word and families say nothing.
+ */
 const notRemoved = {
   effect: "none",
+  lifecycle: "stays",
+  families: [],
   validate: toValidate([noEarlierRemoval]),
   checks: [noEarlierRemoval],
 } satisfies ActiveDescriptor;

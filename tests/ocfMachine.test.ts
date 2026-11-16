@@ -403,7 +403,7 @@ describe("family collections end holding only the surviving issuance", () => {
 
 /** A synthetic `none` descriptor carrying a graded validator and (empty) checks. */
 const gradedDescriptor = (validate: GradedValidator<any>) =>
-  ({ effect: "none", validate, checks: [] }) as const;
+  ({ effect: "none", lifecycle: "stays", families: [], validate, checks: [] }) as const;
 
 /** A minimal finding; `check` doubles as the distinguishing label. */
 const finding = (severity: Finding["severity"], check: string): Finding => ({
