@@ -12,6 +12,7 @@ import { createActor } from "xstate";
 import { ocfValidator } from "../ocf_validator";
 import { earliestRemovals, ocfMachine, TX_DESCRIPTORS, type OcfMachineEvent } from "../ocf_validator/ocfMachine";
 import type { Finding } from "../types/finding";
+import { expectShadowExplained } from "./lifecycleShadow";
 import type { Check, GradedValidator, OcfMachineContext } from "../types/validator";
 
 /**
@@ -54,6 +55,10 @@ export const baseContext = (overrides: Partial<OcfMachineContext> = {}): OcfMach
  * same-day sort as a real one does. It writes a minimal package (a manifest, a
  * stakeholders file, a stock classes file, and a transactions file) to a
  * temporary directory and removes it afterwards.
+ *
+ * It also runs the lifecycle charts over the package in shadow, and fails if
+ * they disagree with the checks they're to replace in a way that isn't
+ * explained (see tests/lifecycleShadow.ts).
  */
 export const validatePackage = (
   transactions: Record<string, unknown>[],
@@ -77,7 +82,12 @@ export const validatePackage = (
       stock_legend_templates_files: [],
       valuations_files: [],
     });
-    return ocfValidator(dir);
+    const context = ocfValidator(dir);
+    // Every package a test validates also goes through the lifecycle charts in
+    // shadow (#233). The driver has sorted the package's transactions in
+    // place, so they're in run order here.
+    expectShadowExplained(context.ocfPackageContent.transactions);
+    return context;
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
