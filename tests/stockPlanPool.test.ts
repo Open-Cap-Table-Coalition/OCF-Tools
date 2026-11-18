@@ -1,5 +1,5 @@
 import * as path from "path";
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { ocfValidator } from "../ocf_validator";
 import { POOL_WRITES } from "../ocf_validator/nodes";
 import { poolNotExceeded, STOCK_PLAN_CHECKS } from "../ocf_validator/validators/stock_plan/pool";
@@ -69,7 +69,8 @@ describe("plan A: a grant to an unknown stakeholder, then a valid grant", () => 
     // Once for each day something wrote to plan A's pool. The pool check is
     // the only blocked check in the package.
     expect(blocked).toEqual(
-      ["2022-01-10", "2022-01-20"].map(() => ({
+      ["2022-01-10", "2022-01-20"].map((date) => ({
+        date,
         severity: "error",
         outcome: "blocked",
         check: "pool-not-exceeded",
@@ -103,6 +104,7 @@ describe("plan B: granted more than it has", () => {
         check: "pool-not-exceeded",
         message: "As of 2022-02-15, stock plan plan-b has 110 shares drawn against 100 reserved: 10 more than it has.",
         subject: plan("plan-b"),
+        date: "2022-02-15",
       },
     ]);
   });
@@ -205,6 +207,16 @@ const run = (transactions: Record<string, unknown>[], plans: Record<string, unkn
 const poolFindings = (findings: Finding[]) => findings.filter((finding) => finding.check === "pool-not-exceeded");
 
 describe("the pool check", () => {
+  it("checks only pools written that day, including the first day", () => {
+    const checked = vi.spyOn(poolNotExceeded, "run");
+    try {
+      run([grant("g-1", "10", "2022-01-01")], [PLAN, { ...PLAN, id: "untouched" }]);
+      expect(checked.mock.calls.map(([, data]) => data.id)).toEqual(["plan-1"]);
+    } finally {
+      checked.mockRestore();
+    }
+  });
+
   it("is declared as an error on a stock plan, reading both of the plan's fields", () => {
     expect(STOCK_PLAN_CHECKS).toEqual([
       {
@@ -250,6 +262,9 @@ describe("the pool check", () => {
     expect(poolFindings(context.findings).map((finding) => finding.message)).toEqual([
       "As of 2022-01-01, stock plan plan-1 has 150 shares drawn against 100 reserved: 50 more than it has.",
       "As of 2022-03-01, stock plan plan-1 has 160 shares drawn against 100 reserved: 60 more than it has.",
+    ]);
+    expect(poolFindings(context.findings).map((finding) => finding.date)).toEqual([
+      "2022-01-01", "2022-03-01",
     ]);
   });
 
@@ -306,6 +321,7 @@ describe("defects on the pool", () => {
         message:
           "Not checked: it reads the shares reserved for stock plan plan-1, which can't be relied on because TX_STOCK_PLAN_POOL_ADJUSTMENT adj-bad failed.",
         subject: plan("plan-1"),
+        date: "2022-02-01",
         roots: [ADJUSTMENT],
       },
     ]);
@@ -354,6 +370,9 @@ describe("defects on the pool", () => {
     // drawn is a running total. A new reserve says nothing about whether the
     // failed grant's shares belong in it.
     const pool = poolFindings(context.findings);
+    expect(pool.map((finding) => finding.date)).toEqual([
+      "2022-01-01", "2022-02-01", "2022-03-01",
+    ]);
     expect(pool.map((finding) => finding.outcome)).toEqual(["blocked", "blocked", "blocked"]);
     for (const finding of pool) expect(finding).toMatchObject({ roots: [BAD] });
     expect(context.snapshots.at(-1)?.stockPlans).toEqual([{ id: "plan-1", reserved: "500", drawn: "10", defects: { drawn: [BAD] } }]);

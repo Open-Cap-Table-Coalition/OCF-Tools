@@ -66,7 +66,7 @@ export function endOfDayFindings(context: OcfMachineContext, since: NodeMap, dat
   const findings: Finding[] = [];
   for (const [id, plan] of context.nodes.plan) {
     if (since.plan.get(id) === plan) continue;
-    findings.push(...validatePlan(context, { object_type: "STOCK_PLAN", id, date }));
+    findings.push(...validatePlan(context, { object_type: "STOCK_PLAN", id, date }).map((finding) => ({ ...finding, date })));
   }
   return findings;
 }

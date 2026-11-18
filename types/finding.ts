@@ -36,6 +36,8 @@ interface FindingFields {
    * silently-bogus value.
    */
   subject: Subject;
+  /** The date evaluated by an aggregate check. Absent for transaction checks. */
+  date?: string;
 }
 
 /** A check that ran and found its problem. */
@@ -56,7 +58,8 @@ export interface BlockedFinding extends FindingFields {
 
 /**
  * One result of one check on one object. A finding is identified by its
- * `check` and its `subject`. Its `outcome` says whether the check ran and
- * failed or couldn't run; only a blocked finding has `roots`.
+ * `check`, its `subject`, and (for a daily aggregate) its `date`. Its `outcome`
+ * says whether the check ran and failed or couldn't run; only a blocked
+ * finding has `roots`.
  */
 export type Finding = FailedFinding | BlockedFinding;

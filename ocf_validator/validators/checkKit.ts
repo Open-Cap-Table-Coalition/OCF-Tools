@@ -57,8 +57,8 @@ export type CheckObject<P = unknown> = Pick<Check, "id" | "severity" | "descript
   run?: (context: DeepReadonly<CheckContext>, data: DeepReadonly<P>, read: ReadField) => string[];
 };
 
-/** The context a check is given: the machine's without the node map, which a check reads through `read`. */
-export type CheckContext = Omit<OcfMachineContext, "nodes">;
+/** Only package facts and their index; all derived state is accessed through declared reads. */
+export type CheckContext = Pick<OcfMachineContext, "ocfPackageContent" | "removals">;
 
 /**
  * Reads one field of the node map for a check: its value, or `undefined` if
@@ -210,7 +210,10 @@ export const toValidate =
   (checks: readonly CheckObject<any>[]): GradedValidator<any> =>
   (context, data: any) => {
     const subject = { object_type: data.object_type, id: data.id };
-    const { nodes, ...checkContext } = context;
+    const { nodes, ocfPackageContent, removals } = context;
+    // An explicit projection keeps new machine bookkeeping (such as the
+    // start-of-day map) from silently becoming an unchecked route to state.
+    const checkContext = { ocfPackageContent, removals };
     const findings: Finding[] = [];
     for (const check of checks) {
       if (!check.run) continue;

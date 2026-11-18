@@ -759,11 +759,16 @@ export const ocfMachine = setup({
         ...buildTransactionHandlers(),
         START: {
           target: "capTable",
-          actions: assign({
-            ocfPackageContent: ({ event }) => event.data,
-            removals: ({ event }) => earliestRemovals(event.data.transactions),
-            // The package's stock plans, each with its pool as the plan starts it.
-            nodes: ({ context, event }) => withPlans(context.nodes, event.data.stockPlans),
+          actions: assign(({ context, event }) => {
+            // Initial reserves are the starting state, not writes made by
+            // the first day's transactions.
+            const nodes = withPlans(context.nodes, event.data.stockPlans);
+            return {
+              ocfPackageContent: event.data,
+              removals: earliestRemovals(event.data.transactions),
+              nodes,
+              nodesAtStartOfDay: nodes,
+            };
           }),
         },
         // The end of a day: run the checks that judge the day's net (see

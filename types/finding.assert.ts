@@ -24,7 +24,7 @@ type _FindingOutcome = Expect<Equal<Finding["outcome"], Outcome>>;
 // added or renamed. A blocked finding has `roots` as well, and a failed one
 // doesn't.
 type _FindingKeys = Expect<
-  Equal<keyof Finding, "severity" | "outcome" | "check" | "message" | "subject">
+  Equal<keyof Finding, "severity" | "outcome" | "check" | "message" | "subject" | "date">
 >;
 type _FailedKeys = Expect<Equal<keyof FailedFinding, keyof Finding>>;
 type _BlockedKeys = Expect<Equal<keyof BlockedFinding, keyof Finding | "roots">>;
@@ -40,9 +40,10 @@ type _SubjectObjectType = Expect<
 // Pin 3c: a blocked finding carries all its roots, each located as a subject is.
 type _Roots = Expect<Equal<BlockedFinding["roots"], Subject[]>>;
 
-// Pin 4: All fields are required — no field may be accidentally made optional.
-type _FailedRequired = Expect<Equal<FailedFinding, Required<FailedFinding>>>;
-type _BlockedRequired = Expect<Equal<BlockedFinding, Required<BlockedFinding>>>;
+// Pin 4: Only the aggregate date is optional; transaction findings omit it.
+type _FailedRequired = Expect<Equal<Omit<FailedFinding, "date">, Required<Omit<FailedFinding, "date">>>>;
+type _BlockedRequired = Expect<Equal<Omit<BlockedFinding, "date">, Required<Omit<BlockedFinding, "date">>>>;
+type _AggregateDate = Expect<Equal<Finding["date"], string | undefined>>;
 
 // Pin 5a: Positive literal with severity "warning" and a transaction subject.
 const _warningFinding: Finding = {

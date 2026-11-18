@@ -43,11 +43,14 @@ import {
   type DescriptorTable,
   type VestingFamily,
 } from "../ocf_validator/ocfMachine";
-import { defineValidator, underOlderName, type CheckObject } from "../ocf_validator/validators/checkKit";
+import { defineValidator, underOlderName, type CheckContext, type CheckObject } from "../ocf_validator/validators/checkKit";
 import { familyChecksFor, type OLDER_NAMES } from "../ocf_validator/validators/checks";
 import type { TransactionFor } from "./ocf-input";
 import type { Check, GradedValidator, LifecycleWord, OcfMachineContext } from "./validator";
 import type { Expect, Equal } from "./type-assert";
+
+// A check cannot bypass declared reads through an old node map or snapshot.
+type _CheckContextKeys = Expect<Equal<keyof CheckContext, "ocfPackageContent" | "removals">>;
 
 // --- Declared check metadata ------------------------------------------------
 
