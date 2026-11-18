@@ -172,6 +172,8 @@ export const disagreements = (rows: readonly ShadowRow[]): ShadowRow[] =>
  * chart allows.
  */
 export const EXPLANATIONS = {
+  "return before removal":
+    "The run fails it through security-removed; neither of the two shadowed checks requires a removal before a return to pool.",
   /**
    * Nothing has issued the security, and the transaction isn't an issuance.
    * Neither check is about that: no-earlier-removal asks whether it was
@@ -238,6 +240,7 @@ export function explain(row: ShadowRow): Explanation | undefined {
   if (!refusedInSilence) return undefined;
 
   const descriptor = (TX_DESCRIPTORS as Record<string, Descriptor>)[row.object_type];
+  if (descriptor?.lifecycle === "after removal" && row.state !== "removed") return "return before removal";
   if (row.state === "notIssued") {
     // A graded transaction that isn't an issuance declares issuance-exists.
     return descriptor !== undefined && "validate" in descriptor && descriptor.lifecycle !== "issue" && row.family === undefined

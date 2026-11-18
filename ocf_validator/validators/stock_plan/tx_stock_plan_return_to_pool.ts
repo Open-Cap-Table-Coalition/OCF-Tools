@@ -1,4 +1,5 @@
-import { defineValidator, type CheckObject } from "../checkKit";
+import { securityField } from "../../nodes";
+import { defineValidator, text, type CheckObject } from "../checkKit";
 import { countable } from "../checks";
 
 // A return to pool is the one transaction that follows a security's removal:
@@ -6,15 +7,20 @@ import { countable } from "../checks";
 // quantity out of that plan's `drawn`. The plan needn't be the one the grant
 // came from.
 //
-// These two are needed and not written yet. Until they are, a return to pool
-// is taken at its word: whatever quantity it states comes off the pool.
+// The source must have been removed reliably before its shares can credit a
+// pool, including a different plan's pool. Quantity limits remain a gap.
 
 const securityRemoved = {
   id: "security-removed",
   severity: "error",
   description:
     "The security the shares are returned from is an equity compensation security that a transaction dated on or before this one removed.",
-} satisfies CheckObject;
+  reads: (data) => [securityField("equityCompensation", data.security_id, "lifecycle")],
+  run: (_context, data, read) =>
+    read(securityField("equityCompensation", data.security_id, "lifecycle")) === "removed"
+      ? []
+      : [text`The equity compensation security ${data.security_id} has not been removed, so its shares cannot be returned to a pool.`],
+} satisfies CheckObject<{ security_id: string }>;
 
 const quantityReturnable = {
   id: "quantity-returnable",

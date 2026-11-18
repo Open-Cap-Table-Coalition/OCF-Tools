@@ -356,6 +356,42 @@ describe("reserved", () => {
 // ---------------------------------------------------------------------------
 
 describe("a failed transaction's writes to the pool", () => {
+  it("withholds a return from a marked security, including a return to another plan", () => {
+    const bad = grant("g-bad", "opt-1", "100", { stakeholder_id: "nobody" });
+    const BAD = subject("TX_EQUITY_COMPENSATION_ISSUANCE", "g-bad");
+    const context = run([
+      bad,
+      cancellation("c-1", "opt-1", "100"),
+      returnToPool("rtp-1", "opt-1", "100", { stock_plan_id: "plan-2" }),
+    ], [PLAN, { ...PLAN, id: "plan-2" }]);
+
+    expect(context.findings.find((finding) => finding.subject.id === "rtp-1")).toMatchObject({
+      check: "security-removed", outcome: "blocked", roots: [BAD],
+    });
+    expect(context.nodes.plan.get("plan-2")?.drawn).toMatchObject({ value: "0", defects: [BAD] });
+    expect(context.snapshots).toHaveLength(3);
+  });
+
+  it("rejects a return from an outstanding grant instead of crediting the pool", () => {
+    const context = run([grant("g-1", "opt-1", "100"), returnToPool("rtp-1", "opt-1", "40")]);
+    expect(context.findings.find((finding) => finding.subject.id === "rtp-1")).toMatchObject({
+      check: "security-removed", outcome: "failed",
+    });
+    expect(context.nodes.plan.get("plan-1")?.drawn).toMatchObject({
+      value: "100", defects: [subject("TX_STOCK_PLAN_RETURN_TO_POOL", "rtp-1")],
+    });
+  });
+
+  it("accepts a same-day return after a cancellation under the older name", () => {
+    const context = run([
+      grant("g-1", "opt-1", "100"),
+      cancellation("c-1", "opt-1", "100", { object_type: "TX_PLAN_SECURITY_CANCELLATION" }),
+      returnToPool("rtp-1", "opt-1", "40", { date: "2022-02-01" }),
+    ]);
+    expect(context.findings).toEqual([]);
+    expect(context.nodes.plan.get("plan-1")?.drawn).toMatchObject({ value: "60", defects: [] });
+  });
+
   it("are withheld and marked for a grant to an unknown stakeholder, and a later valid grant still counts", () => {
     const bad = grant("g-bad", "opt-1", "200", { stakeholder_id: "nobody" });
     const context = run([bad, grant("g-good", "opt-2", "300", { date: "2022-01-02" })]);
