@@ -91,6 +91,12 @@ export const noEarlierRemoval = {
   id: "no-earlier-removal",
   severity: "error",
   description: "No transaction dated before this one removed its security from the cap table.",
+  // The index records attempted removals too. Its conclusion is unreliable
+  // when the security's lifecycle is marked; block on that root rather than
+  // reporting the attempted removal as another independent failure. This
+  // check is shared across families, including legacy stock issuances.
+  reads: (data) => (["stockIssuances", "convertibleIssuances", "warrantIssuances", "equityCompensation"] as const)
+    .map((family) => securityField(family, data.security_id, "lifecycle")),
   run: (context, data) => {
     const removal = context.removals.get(data.security_id);
     if (removal === undefined || !(removal.date < data.date)) return [];

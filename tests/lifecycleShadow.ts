@@ -76,7 +76,7 @@ const checksRunOn = (type: string, descriptor: Descriptor): string[] => {
 /** A check as the shadow runs it: on any transaction, whatever fields the check's own type asks for. */
 type ShadowedCheck = { run: (context: any, data: any, read: any) => string[] };
 
-/** Both checks read only the package, so neither has any business with the node map. */
+/** Compare the checks' structural verdicts, before the runner's defect gate. */
 const noReads = () => {
   throw new Error("A shadowed check read the node map.");
 };
@@ -91,7 +91,8 @@ const NO_OTHER_TRANSACTIONS_OF: Partial<Record<CollectionKey, ShadowedCheck>> = 
 /**
  * Which of the two checks report a finding on this transaction. Each check is
  * run on its own, not through the transaction's validator, so the answer is
- * the check's and nothing else's. Both read only the package.
+ * the check's and nothing else's. The runner's defect gate is intentionally
+ * excluded: the shadow follows transactions as written, including failures.
  */
 const checksReportedOn = (context: OcfMachineContext, transaction: Transaction, descriptor: Descriptor, runs: string[]): string[] =>
   runs.filter((id) => {

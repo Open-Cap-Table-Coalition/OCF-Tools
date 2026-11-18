@@ -353,8 +353,7 @@ describe("a failed issuance followed by transactions on its security", () => {
     expect(outcomes(context.findings)).toEqual([
       ["wi-1", "stakeholder-exists", "failed"],
       ["wa-1", "issuance-exists", "blocked"],
-      // The vesting event has no check that reads the security, so nothing of
-      // its is blocked.
+      ["ve-1", "no-earlier-removal", "blocked"],
       ["we-1", "issuance-exists", "blocked"],
       // These read the package, or the transaction alone, so they ran.
       ["we-1", "resulting-security-named", "failed"],
@@ -365,7 +364,7 @@ describe("a failed issuance followed by transactions on its security", () => {
       if (finding.outcome === "blocked") expect(finding.roots).toEqual([WARRANT_ISSUANCE]);
     }
     expect(context.result).toBe(
-      "The validation of the OCF package for Test Co is complete and found 1 error and 3 checks blocked by it, with 1 warning.",
+      "The validation of the OCF package for Test Co is complete and found 1 error and 4 checks blocked by it, with 1 warning.",
     );
   });
 });
