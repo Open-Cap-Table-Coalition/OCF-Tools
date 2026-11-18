@@ -1,0 +1,27 @@
+{
+  "ocf_version": "1.1.1-alpha+main",
+  "file_type": "OCF_MANIFEST_FILE",
+  "issuer": {
+    "id": "poolCo",
+    "comments": [],
+    "object_type": "ISSUER",
+    "legal_name": "Pool Co",
+    "formation_date": "2021-01-01",
+    "country_of_formation": "US"
+  },
+  "as_of": "2022-12-31",
+  "generated_at": "2022-12-31T00:00:00.000Z",
+  "stock_plans_files": [{ "filepath": "./StockPlans.ocf.json", "md5": "00000000000000000000000000000000" }],
+  "stock_legend_templates_files": [],
+  "stock_classes_files": [{ "filepath": "./StockClasses.ocf.json", "md5": "00000000000000000000000000000000" }],
+  "transactions_files": [{ "filepath": "./Transactions.ocf.json", "md5": "00000000000000000000000000000000" }],
+  "stakeholders_files": [{ "filepath": "./Stakeholders.ocf.json", "md5": "00000000000000000000000000000000" }],
+  "vesting_terms_files": [],
+  "valuations_files": [],
+  "comments": [
+    "Three stock plans, one story each, for the stock plan pool tests (#225, #235).",
+    "Plan A (1000 reserved): a-bad grants 200 to a stakeholder who isn't in the stakeholders file, then a-good grants 300 to one who is.",
+    "Plan B (100 reserved): b-1 grants 80 and b-2 grants 30, which is 10 more than the plan has.",
+    "Plan C (500 reserved): c-1 grants 100 under the older name TX_PLAN_SECURITY_ISSUANCE. c-cancel cancels 40 of it and names c-balance, a grant of the 60 that are left. c-return puts the 40 back in the pool."
+  ]
+}

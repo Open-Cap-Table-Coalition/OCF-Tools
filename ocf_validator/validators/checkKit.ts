@@ -1,6 +1,6 @@
 import type { TransactionFor } from "../../types/ocf-input";
 import type { Finding, Subject } from "../../types/finding";
-import { describeField, fieldAt, type FieldRef, type FieldRefValue, type NodeMap } from "../nodes";
+import { describeField, fieldAt, sameField, type FieldRef, type FieldRefValue, type NodeMap } from "../nodes";
 import type {
   Check,
   DeepReadonly,
@@ -161,10 +161,6 @@ const toMetadata = (checks: readonly CheckObject<any>[]): readonly Check[] =>
     if (!check.run) metadata.implemented = false;
     return metadata;
   });
-
-const sameField = (a: FieldRef, b: FieldRef): boolean =>
-  a.kind === b.kind && a.id === b.id && a.field === b.field &&
-  (a.kind !== "security" || (b.kind === "security" && a.family === b.family));
 
 /** The roots marking any of the fields at `refs`, each once, with the first marked field's address. */
 const defectsOn = (nodes: NodeMap, refs: readonly FieldRef[]): { roots: Subject[]; ref?: FieldRef } => {

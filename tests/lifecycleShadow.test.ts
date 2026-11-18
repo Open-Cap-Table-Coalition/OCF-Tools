@@ -45,10 +45,13 @@ describe("the packages on disk", () => {
   // markedSecurities has two mistakes in it, neither of them a lifecycle one:
   // an unknown stakeholder and a missing resulting stock. The chart follows
   // the transactions as written, so it has nothing to say about either.
+  // stockPlanPool's mistakes are an unknown stakeholder and an over-granted
+  // pool; its return to pool follows a cancellation, as the chart requires.
   it.each([
     { name: "testing_scripts/testPackage", dir: fixture("testing_scripts", "testPackage"), transactions: 2, rows: 2 },
     { name: "sample_ocf_folders/acme_holdings_limited", dir: fixture("sample_ocf_folders", "acme_holdings_limited"), transactions: 39, rows: 38 },
     { name: "testing_scripts/markedSecurities", dir: fixture("testing_scripts", "markedSecurities"), transactions: 6, rows: 6 },
+    { name: "testing_scripts/stockPlanPool", dir: fixture("testing_scripts", "stockPlanPool"), transactions: 8, rows: 8 },
   ])("$name: the chart and the checks agree on every transaction", ({ dir, transactions, rows: expected }) => {
     const context = ocfValidator(dir);
     const rows = shadowRows(context.ocfPackageContent.transactions as any);

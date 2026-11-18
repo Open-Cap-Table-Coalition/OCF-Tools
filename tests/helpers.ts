@@ -69,6 +69,7 @@ export const baseContext = (overrides: ContextSeed = {}): OcfMachineContext => {
     lastErrorFindings: [],
     snapshots: [],
     result: "Incomplete",
+    nodesAtStartOfDay: emptyNodes(),
     ...fields,
     nodes: seededNodes(overrides),
   };

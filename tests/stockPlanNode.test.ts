@@ -10,9 +10,9 @@ import { baseContext, validatePackage } from "./helpers";
 // ---------------------------------------------------------------------------
 //
 // A stock plan has a node with two fields: `reserved`, the shares it has to
-// grant, and `drawn`, the shares its grants have taken. Nothing checks one
-// against the other yet. These hold the arithmetic: what moves each number,
-// what doesn't, and what a failure does to them.
+// grant, and `drawn`, the shares its grants have taken. These hold the
+// arithmetic: what moves each number, what doesn't, and what a failure does
+// to them.
 
 const subject = (object_type: string, id: string) => ({ object_type, id }) as Subject;
 
@@ -60,6 +60,13 @@ const adjustment = (id: string, shares_reserved: unknown, fields: Record<string,
 /** A run over the plan and these transactions. */
 const run = (transactions: Record<string, unknown>[], plans: Record<string, unknown>[] = [PLAN]) =>
   validatePackage(transactions, stakeholders, [], plans);
+
+/**
+ * The findings on a run's transactions, leaving out the end-of-day pool
+ * check's on its plans. These tests are about what moves a pool's numbers;
+ * tests/stockPlanPool.test.ts is about what the check makes of them.
+ */
+const ofTransactions = (context: ReturnType<typeof run>) => context.findings.filter((finding) => finding.subject.object_type !== "STOCK_PLAN");
 
 /** What each day's snapshot shows for a plan: [date, drawn]. */
 const drawnByDay = (context: ReturnType<typeof run>, plan = "plan-1") =>
@@ -397,7 +404,7 @@ describe("a failed transaction's writes to the pool", () => {
     const context = run([bad, grant("g-good", "opt-2", "300", { date: "2022-01-02" })]);
     const BAD = subject("TX_EQUITY_COMPENSATION_ISSUANCE", "g-bad");
 
-    expect(context.findings.map((finding) => [finding.subject.id, finding.check, finding.outcome])).toEqual([["g-bad", "stakeholder-exists", "failed"]]);
+    expect(ofTransactions(context).map((finding) => [finding.subject.id, finding.check, finding.outcome])).toEqual([["g-bad", "stakeholder-exists", "failed"]]);
     expect(context.snapshots.map((snapshot) => snapshot.stockPlans)).toEqual([
       [{ id: "plan-1", reserved: "1000", drawn: "0", defects: { drawn: [BAD] } }],
       [{ id: "plan-1", reserved: "1000", drawn: "300", defects: { drawn: [BAD] } }],
@@ -416,7 +423,7 @@ describe("a failed transaction's writes to the pool", () => {
   it("are withheld for a grant from a plan whose quantity can't be counted", () => {
     const context = run([grant("g-1", "opt-1", "one hundred")]);
 
-    expect(context.findings).toEqual([
+    expect(ofTransactions(context)).toEqual([
       {
         severity: "error",
         outcome: "failed",
@@ -444,7 +451,7 @@ describe("a failed transaction's writes to the pool", () => {
     const context = run([grant("g-1", "opt-1", "100"), cancellation("c-1", "opt-1", "100"), returnToPool("rtp-1", "opt-1", quantity as any)]);
     const RETURN = subject("TX_STOCK_PLAN_RETURN_TO_POOL", "rtp-1");
 
-    expect(context.findings.map((finding) => [finding.check, finding.message])).toEqual([["quantity-countable", message]]);
+    expect(ofTransactions(context).map((finding) => [finding.check, finding.message])).toEqual([["quantity-countable", message]]);
     expect(context.snapshots.at(-1)?.stockPlans).toEqual([{ id: "plan-1", reserved: "1000", drawn: "100", defects: { drawn: [RETURN] } }]);
     expect(context.nodes.security.get("opt-1")?.lifecycle.defects).toEqual([]);
   });
@@ -453,7 +460,7 @@ describe("a failed transaction's writes to the pool", () => {
     const context = run([grant("g-1", "opt-1", "100"), adjustment("adj-1", "plenty")]);
     const ADJUSTMENT = subject("TX_STOCK_PLAN_POOL_ADJUSTMENT", "adj-1");
 
-    expect(context.findings.map((finding) => [finding.check, finding.message])).toEqual([
+    expect(ofTransactions(context).map((finding) => [finding.check, finding.message])).toEqual([
       ["shares-reserved-countable", "The transaction's shares_reserved (plenty) is not a number written the way OCF writes one."],
     ]);
     // reserved keeps the plan's initial figure, marked. drawn isn't touched.
@@ -469,7 +476,7 @@ describe("a failed transaction's writes to the pool", () => {
     const context = run([grant("g-balance", "opt-balance", "60", { date: "2022-02-01" }), partial]);
     const CANCELLATION = subject("TX_EQUITY_COMPENSATION_CANCELLATION", "c-1");
 
-    expect(context.findings.map((finding) => [finding.subject.id, finding.check])).toEqual([["c-1", "issuance-exists"]]);
+    expect(ofTransactions(context).map((finding) => [finding.subject.id, finding.check])).toEqual([["c-1", "issuance-exists"]]);
     expect(context.snapshots[0].stockPlans).toEqual([{ id: "plan-1", reserved: "1000", drawn: "60", defects: { drawn: [CANCELLATION] } }]);
     expect(context.nodes.security.get("opt-balance")).toMatchObject({
       provenance: { value: undefined, defects: [CANCELLATION] },

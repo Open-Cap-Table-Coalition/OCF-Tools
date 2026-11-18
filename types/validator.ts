@@ -29,6 +29,12 @@ export type OcfMachineContext = {
    * no-earlier-removal check.
    */
   removals: ReadonlyMap<unknown, DeepReadonly<OcfTransaction>>;
+  /**
+   * Machine bookkeeping, not validator input: the node map as the current day
+   * began. The end-of-day checks compare it with `nodes` to see which stock
+   * plans the day's transactions wrote to.
+   */
+  nodesAtStartOfDay: NodeMap;
   report: any[];
   findings: Finding[];
   /**
