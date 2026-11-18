@@ -43,7 +43,8 @@ type _Lifecycle = Expect<Equal<SecurityNode["lifecycle"], Field<LifecycleState>>
 type _Writer = Expect<Equal<Field<unknown>["writer"], Subject | undefined>>;
 type _Taint = Expect<Equal<Field<unknown>["taint"], readonly Subject[]>>;
 type _FieldIsReadonly = Expect<Equal<Field<string>, Readonly<Field<string>>>>;
-type _NodeIsReadonly = Expect<Equal<SecurityNode, Readonly<SecurityNode>>>;
+type Shape<T> = { [P in keyof T]: T[P] };
+type _NodeIsReadonly = Expect<Equal<Shape<SecurityNode>, Readonly<SecurityNode>>>;
 
 // The map can be read but not written: a write goes through the reducer,
 // which returns a new map.

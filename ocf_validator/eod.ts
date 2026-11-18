@@ -15,7 +15,7 @@ const shown = <C extends CollectionKey>(nodes: NodeMap, family: C): CollectionEl
   const issuances: CollectionElement[C][] = [];
   for (const { lifecycle, issuance } of securitiesIn(nodes, family)) {
     if (lifecycle.value !== undefined && isOnCapTable(family, lifecycle.value) && issuance.value !== undefined) {
-      issuances.push(issuance.value as CollectionElement[C]);
+      issuances.push(issuance.value);
     }
   }
   return issuances;

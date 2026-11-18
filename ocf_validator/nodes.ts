@@ -1,4 +1,6 @@
 import type { Subject } from "../types/finding";
+import { withNodeField, type Field, type NodeBase, type NodeMaps } from "./node";
+export type { Field, NodeBase } from "./node";
 import type { LifecycleState } from "./lifecycle";
 import type { CollectionElement, CollectionKey, Descriptor } from "./ocfMachine";
 
@@ -32,23 +34,6 @@ import type { CollectionElement, CollectionKey, Descriptor } from "./ocfMachine"
 // later transaction that names it can then be told it was removed and by
 // what, and a return to pool can read the grant it returns.
 
-/**
- * One field of a node.
- *
- *  - `value`:  what the field holds. `undefined` means not known.
- *  - `writer`: the transaction that last wrote the value, located the way a
- *              finding's subject is. `undefined` for a value no transaction
- *              wrote.
- *  - `taint`:  the transactions whose failure leaves this field unreliable.
- *              Empty for a field that can be trusted. Nothing taints a field
- *              yet (#231).
- */
-export type Field<T> = {
-  readonly value: T | undefined;
-  readonly writer: Subject | undefined;
-  readonly taint: readonly Subject[];
-};
-
 /** The issuance record of a security of any family. */
 export type Issuance = CollectionElement[CollectionKey];
 
@@ -62,21 +47,22 @@ export type Issuance = CollectionElement[CollectionKey];
  *  - `issuance`:  the issuance transaction itself: its stakeholder, quantity,
  *                 and so on. Written once, by the issuance.
  */
-export type SecurityNode = {
-  readonly kind: "security";
-  readonly id: unknown;
-  readonly family: CollectionKey;
-  readonly lifecycle: Field<LifecycleState>;
-  readonly issuance: Field<Issuance>;
+export type SecurityState<C extends CollectionKey> = {
+  lifecycle: LifecycleState;
+  issuance: CollectionElement[C];
 };
+
+/** A discriminated union: family determines the issuance payload. */
+type SecuritiesByFamily = {
+  [F in CollectionKey]: NodeBase<"security", SecurityState<F>> & { readonly family: F };
+};
+export type SecurityNode<C extends CollectionKey = CollectionKey> = SecuritiesByFamily[C];
 
 /**
  * The node map. `security` holds every security the run has issued, removed
  * ones included, keyed by `security_id` in the order they were issued.
  */
-export type NodeMap = {
-  readonly security: ReadonlyMap<unknown, SecurityNode>;
-};
+export type NodeMap = NodeMaps<SecurityNode>;
 
 /** A map with no nodes: the state before any transaction. */
 export const emptyNodes = (): NodeMap => ({ security: new Map() });
@@ -125,20 +111,22 @@ export function applyTransaction(nodes: NodeMap, descriptor: Descriptor, transac
   const writer = subjectOf(transaction);
 
   if (descriptor.effect === "append") {
-    const node: SecurityNode = {
+    // The dispatch descriptor supplies the family for this parsed issuance.
+    // Bridge that runtime pairing to the discriminated union at this boundary.
+    const node = {
       kind: "security",
       id: transaction.security_id,
       family: descriptor.collection,
       lifecycle: written<LifecycleState>("outstanding", writer),
       issuance: written(transaction as unknown as Issuance, writer),
-    };
+    } as SecurityNode;
     return withSecurity(nodes, node, { last: true });
   }
 
   if (descriptor.effect === "remove") {
     const node = outstandingSecurity(nodes, descriptor.collection, transaction.security_id);
     if (node === undefined) return nodes;
-    return withSecurity(nodes, { ...node, lifecycle: written<LifecycleState>("removed", writer) });
+    return withSecurity(nodes, withNodeField(node, "lifecycle", written<LifecycleState>("removed", writer)));
   }
 
   return nodes;
@@ -147,18 +135,19 @@ export function applyTransaction(nodes: NodeMap, descriptor: Descriptor, transac
 /** Whether a security is outstanding: issued, and not removed. */
 const isOutstanding = (node: SecurityNode): boolean => node.lifecycle.value === "outstanding";
 
-/**
- * The security of `family` with this `security_id`, if it's outstanding. A
- * security of another family with the same id isn't it.
- */
-export const outstandingSecurity = (nodes: NodeMap, family: CollectionKey, securityId: unknown): SecurityNode | undefined => {
+/** Narrow a stored security by its family discriminator. */
+export const isSecurityFamily = <C extends CollectionKey>(node: SecurityNode, family: C): node is SecurityNode<C> =>
+  node.family === family;
+
+/** The outstanding security under this id, narrowed to the requested family. */
+export const outstandingSecurity = <C extends CollectionKey>(nodes: NodeMap, family: C, securityId: unknown): SecurityNode<C> | undefined => {
   const node = nodes.security.get(securityId);
-  return node !== undefined && node.family === family && isOutstanding(node) ? node : undefined;
+  return node !== undefined && isSecurityFamily(node, family) && isOutstanding(node) ? node : undefined;
 };
 
 /** Every security of a family the map holds, removed ones included, in the order issued. */
-export const securitiesIn = (nodes: NodeMap, family: CollectionKey): SecurityNode[] =>
-  [...nodes.security.values()].filter((node) => node.family === family);
+export const securitiesIn = <C extends CollectionKey>(nodes: NodeMap, family: C): SecurityNode<C>[] =>
+  [...nodes.security.values()].filter((node): node is SecurityNode<C> => isSecurityFamily(node, family));
 
 /**
  * The issuances of a family's outstanding securities, in the order issued:
@@ -168,7 +157,7 @@ export const outstanding = <C extends CollectionKey>(nodes: NodeMap, family: C):
   const issuances: CollectionElement[C][] = [];
   for (const node of securitiesIn(nodes, family)) {
     if (isOutstanding(node) && node.issuance.value !== undefined) {
-      issuances.push(node.issuance.value as CollectionElement[C]);
+      issuances.push(node.issuance.value);
     }
   }
   return issuances;
