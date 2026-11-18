@@ -18,10 +18,11 @@ import { disagreements, explain, expectShadowExplained, shadowRows, EXPLANATIONS
 // that built it on a disagreement nothing explains. So a new test package is
 // shadowed without anyone listing it.
 //
-// Across the suite, the charts and the two checks disagree on three
-// transactions, of two kinds. Each is reproduced below from the test that has
-// it. A third kind is the gap the chart is meant to close; no existing package
-// has it, so it's shown on a package written for it.
+// Across the suite, the charts and the two checks disagree in three ways the
+// run already catches by another check or allows on purpose. Each is
+// reproduced below from a test that has it. A fourth kind is the gap the chart
+// is meant to close; no existing package has it, so it's shown on a package
+// written for it.
 
 /** A package's shadow rows: its transactions in run order, as the validator leaves them. */
 const shadow = (transactions: Record<string, unknown>[], stakeholders = [{ id: "sh-1" }]): ShadowRow[] =>
@@ -169,6 +170,20 @@ describe("where the chart and the checks disagree", () => {
       { id: "ve-1", state: "removed", allowed: false, runs: ["no-earlier-removal"], reported: [], removedBy: { id: "wc-1", date: "2021-06-01" } },
     ]);
     expect(disagreements(rows).map(explain)).toEqual(["removed earlier the same day"]);
+  });
+
+  it("the chart refuses a cancellation of a grant that was never issued, which neither check is about", () => {
+    // tests/stockPlanNode.test.ts has it: a cancellation that names a grant
+    // the package doesn't have.
+    const context = validatePackage(
+      [{ id: "can-1", object_type: "TX_EQUITY_COMPENSATION_CANCELLATION", security_id: "opt-missing", quantity: "40", date: "2021-01-01" }],
+      [{ id: "sh-1" }],
+    );
+    const rows = shadowRows(context.ocfPackageContent.transactions as any);
+
+    expect(disagreements(rows)).toMatchObject([{ id: "can-1", state: "notIssued", allowed: false, runs: ["no-other-transactions"], reported: [] }]);
+    expect(disagreements(rows).map(explain)).toEqual(["never issued"]);
+    expect(context.findings.map((finding) => [finding.subject.id, finding.check])).toEqual([["can-1", "issuance-exists"]]);
   });
 
   // The gap the chart closes: a removal the `removals` index leaves out. No

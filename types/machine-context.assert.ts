@@ -4,7 +4,7 @@
  * a broken invariant fails the build.
  */
 import type { LegacyContext, OcfMachineContext } from "../ocf_validator/ocfMachine";
-import type { Field, NodeMap, SecurityNode, outstanding } from "../ocf_validator/nodes";
+import type { Field, NodeMap, PlanNode, SecurityNode, outstanding } from "../ocf_validator/nodes";
 import type { LifecycleState } from "../ocf_validator/lifecycle";
 import type { Subject } from "./finding";
 import type { Snapshot } from "./snapshot";
@@ -49,6 +49,13 @@ type _NodeIsReadonly = Expect<Equal<Shape<SecurityNode>, Readonly<SecurityNode>>
 // The map can be read but not written: a write goes through the reducer,
 // which returns a new map.
 type _MapIsReadonly = Expect<Equal<NodeMap["security"], ReadonlyMap<unknown, SecurityNode>>>;
+
+// A stock plan's node holds its pool as two fields of the same kind, each an
+// OCF Numeric, and plans are addressed apart from securities.
+type _Plans = Expect<Equal<NodeMap["plan"], ReadonlyMap<unknown, PlanNode>>>;
+type _Reserved = Expect<Equal<PlanNode["reserved"], Field<string>>>;
+type _Drawn = Expect<Equal<PlanNode["drawn"], Field<string>>>;
+type _PlanIsReadonly = Expect<Equal<Shape<PlanNode>, Readonly<PlanNode>>>;
 declare const _nodes: NodeMap;
 // @ts-expect-error — a ReadonlyMap has no `set`.
 _nodes.security.set("sec-1", {} as SecurityNode);

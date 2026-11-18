@@ -1,7 +1,8 @@
 import type { Subject } from "../types/finding";
-import { readNodeField, withNodeField, type Field, type FieldAddress, type FieldKey, type NodeBase, type NodeMaps, type ReferenceValue } from "./node";
+import { withNodeField, type Field, type FieldAddress, type FieldKey, type NodeBase, type NodeMaps, type ReferenceValue } from "./node";
 export type { Field, NodeBase } from "./node";
 import type { LifecycleState } from "./lifecycle";
+import { add, isNumeric, subtract } from "./numeric";
 import type { CollectionElement, CollectionKey, Descriptor } from "./ocfMachine";
 
 // This module imports only types from `lifecycle.ts` and `ocfMachine.ts`. The
@@ -13,8 +14,8 @@ import type { CollectionElement, CollectionKey, Descriptor } from "./ocfMachine"
 // ---------------------------------------------------------------------------
 //
 // Everything the run knows about the cap table is in one map of nodes. A node
-// is a thing with state that transactions read and write. Today that is a
-// security; stock classes, stock plans, and the issuer join it later (#235).
+// is a thing with state that transactions read and write: a security, or a
+// stock plan. Stock classes and the issuer join it later (#235).
 //
 // A node is addressed by its kind and its id. The kind is part of the address
 // because OCF doesn't promise that a security_id differs from every stock
@@ -59,36 +60,79 @@ export type Issuance = CollectionElement[CollectionKey];
  * A security whose issuance failed still has a node. Both fields are marked
  * and neither has a value: the validator knows something claims that
  * security_id, and nothing more.
+ *
+ * Two more fields are there only once something writes them, and only an
+ * equity compensation security has them (see "The stock plan pool" below):
+ *
+ *  - `provenance`: the transaction that named this security as its balance or
+ *                  resulting security. Such a grant carries shares its source
+ *                  already drew from the pool.
+ *  - `draw`:       what the grant holds against a stock plan's pool.
+ *
+ * A transaction can name a balance or resulting security before the run
+ * reaches that security's issuance. The node is created then, holding its
+ * provenance and nothing else, and the issuance fills it in.
  */
 export type SecurityState<C extends CollectionKey> = {
   lifecycle: LifecycleState;
   issuance: CollectionElement[C];
-};
+} & (C extends "equityCompensation" ? { provenance?: Subject; draw?: Draw } : {});
 
-/** A discriminated union: family determines the issuance payload. */
+/** A discriminated union: family determines its issuance and additional fields. */
 type SecuritiesByFamily = {
   [F in CollectionKey]: NodeBase<"security", SecurityState<F>> & { readonly family: F };
 };
 export type SecurityNode<C extends CollectionKey = CollectionKey> = SecuritiesByFamily[C];
 
+/** What a grant holds against a stock plan's pool: the plan, and how many shares, as an OCF Numeric. */
+export type Draw = { readonly plan: unknown; readonly quantity: string };
+
+/**
+ * A stock plan's pool. Both fields are OCF Numerics, kept as the strings OCF
+ * writes them in and added up exactly (see `numeric.ts`).
+ *
+ *  - `reserved`: the shares the plan has to grant. It starts at the plan's
+ *                `initial_shares_reserved`, and a pool adjustment sets it.
+ *                Not known for a plan the package's stock plan files don't
+ *                have, until an adjustment sets it.
+ *  - `drawn`:    the shares its grants have taken. It starts at zero, a
+ *                grant adds to it, and a return to pool takes from it.
+ */
+export type PlanState = { reserved: string; drawn: string };
+export type PlanNode = NodeBase<"plan", PlanState>;
+
+/** All concrete node kinds currently stored by the reducer. */
+export type Node = SecurityNode | PlanNode;
+
 /**
  * The node map. `security` holds every security the run has issued, removed
- * ones included, keyed by `security_id` in the order they were issued.
+ * ones included, keyed by `security_id` in the order they were issued. `plan`
+ * holds every stock plan the package has or a transaction has named, keyed by
+ * the plan's id.
  */
-export type NodeMap = NodeMaps<SecurityNode>;
+export type NodeMap = NodeMaps<Node>;
 
 /** A map with no nodes: the state before any transaction. */
-export const emptyNodes = (): NodeMap => ({ security: new Map() });
+export const emptyNodes = (): NodeMap => ({ security: new Map(), plan: new Map() });
 
 /**
  * A field as a transaction writes it: the value, with that transaction as its
  * writer. Any defects on the previous field remain: a valid write
  * doesn't make an unreliable field reliable, and nothing clears defects yet.
  */
-const written = <T>(value: T, writer: Subject, was?: Field<T>): Field<T> => ({ value, writer, defects: was?.defects ?? [] });
+const written = <T>(value: T | undefined, writer: Subject, was?: Field<T>): Field<T> => ({ value, writer, defects: was?.defects ?? [] });
 
 /** The slice of a transaction the reducer reads. Everything else it carries goes into the node unread. */
-type Applied = { object_type: string; id: string; security_id?: unknown };
+type Applied = {
+  object_type: string;
+  id: string;
+  security_id?: unknown;
+  stock_plan_id?: unknown;
+  quantity?: unknown;
+  shares_reserved?: unknown;
+  balance_security_id?: unknown;
+  resulting_security_ids?: unknown;
+};
 
 /** A transaction, located the way a finding's subject is. */
 const subjectOf = (transaction: Applied): Subject => ({
@@ -176,6 +220,9 @@ const familiesOf = (descriptor: Descriptor): readonly CollectionKey[] =>
  *    one that leaves it outstanding, so when it fails that's what is in
  *    doubt. A transaction on a security the map doesn't hold in one of its
  *    families has nothing to mark.
+ *
+ * A transaction with a `pool` word also writes a stock plan's pool, or has
+ * those writes withheld and marked the same way: see "The stock plan pool".
  */
 export function applyTransaction(
   nodes: NodeMap,
@@ -183,15 +230,22 @@ export function applyTransaction(
   transaction: Applied,
   verdict: Verdict = APPLY,
 ): NodeMap {
-  if (!verdict.ok) return withheld(nodes, descriptor, transaction, verdict.roots);
+  const by: Stamp = verdict.ok ? { ok: true, writer: subjectOf(transaction) } : { ok: false, roots: verdict.roots };
+  const next = by.ok ? applied(nodes, descriptor, transaction, by.writer) : withheld(nodes, descriptor, transaction, by.roots);
+  return poolWrites(nodes, next, descriptor, transaction, by);
+}
 
-  const writer = subjectOf(transaction);
-
+/** The map after a valid transaction's writes to its security: see `applyTransaction`. */
+function applied(nodes: NodeMap, descriptor: Descriptor, transaction: Applied, writer: Subject): NodeMap {
   if (descriptor.effect === "append") {
-    // The dispatch descriptor supplies the family for this parsed issuance.
-    // Bridge that runtime pairing to the discriminated union at this boundary.
     const held = nodes.security.get(transaction.security_id);
+    // The descriptor supplies the family for this parsed issuance. Bridge
+    // that runtime pairing to the discriminated union at this boundary.
     const node = {
+      // A node created when the security was named as a balance or resulting
+      // security, or left by an earlier issuance of the same id, keeps what
+      // it knows of the pool.
+      ...(held?.family === descriptor.collection ? held : {}),
       kind: "security",
       id: transaction.security_id,
       family: descriptor.collection,
@@ -210,7 +264,13 @@ export function applyTransaction(
   return nodes;
 }
 
-/** The map after a transaction whose writes are withheld: see `applyTransaction`. */
+/** A security nothing is known about yet: the node a failed issuance or an early naming creates. */
+function blankSecurity<C extends CollectionKey>(id: unknown, family: C): SecurityNode<C>;
+function blankSecurity(id: unknown, family: CollectionKey): SecurityNode {
+  return { kind: "security", id, family, lifecycle: unknown<LifecycleState>(), issuance: unknown<never>() };
+}
+
+/** The map after a transaction whose writes to its security are withheld: see `applyTransaction`. */
 function withheld(nodes: NodeMap, descriptor: Descriptor, transaction: Applied, roots: readonly Subject[]): NodeMap {
   if (!("security_id" in transaction)) return nodes;
   const held = nodes.security.get(transaction.security_id);
@@ -218,18 +278,181 @@ function withheld(nodes: NodeMap, descriptor: Descriptor, transaction: Applied, 
   if (descriptor.effect === "append") {
     // The issuance would have replaced whatever holds its security_id, of
     // whichever family.
-    const node: SecurityNode = held ?? {
-      kind: "security",
-      id: transaction.security_id,
-      family: descriptor.collection,
-      lifecycle: unknown<LifecycleState>(),
-      issuance: unknown<never>(),
-    };
+    const node = held ?? blankSecurity(transaction.security_id, descriptor.collection);
     return withSecurity(nodes, markIssuanceDefects(node, roots));
   }
 
+  // A return to pool acts on a security that's already removed. It reads the
+  // security and writes the plan, so its failure leaves the security alone.
+  if (descriptor.lifecycle === "after removal") return nodes;
+
   if (held === undefined || !familiesOf(descriptor).includes(held.family)) return nodes;
   return withSecurity(nodes, { ...held, lifecycle: markDefects(held.lifecycle, roots) });
+}
+
+// ---------------------------------------------------------------------------
+// The stock plan pool (#235)
+// ---------------------------------------------------------------------------
+//
+// A plan's `drawn` is what its grants have taken from its pool. The rule:
+//
+//  - A grant draws its quantity once, at its first issuance.
+//  - A grant another transaction names as its balance or resulting security
+//    adds nothing. It carries shares its source already drew: a partial
+//    cancellation's balance grant, or the grants a transfer results in.
+//  - Removing a grant takes nothing back. Only a return to pool reduces
+//    `drawn`.
+//  - A grant with no `stock_plan_id` touches no pool.
+//
+// "Names" runs both ways in time, and the reducer never looks ahead. A balance
+// grant is usually issued earlier the same day than the cancellation that
+// names it, so it has drawn by the time it's named: the naming takes that
+// draw back. If the cancellation comes first, it leaves a node holding the
+// provenance, and the issuance finds it there and draws nothing. Either way
+// the day ends with the same number, and the pool is only ever judged on the
+// end-of-day state.
+//
+// Each descriptor declares its part in this as its `pool` word:
+//
+//  - "draws":    a grant. Adds to `drawn`.
+//  - "carries":  a removal that can name a balance or resulting grant.
+//  - "returns":  a return to pool. Takes from `drawn`.
+//  - "reserves": a pool adjustment. Sets `reserved`.
+//
+// A transaction whose writes are withheld marks the pool fields it would
+// have written, like any other field: a failed grant marks its plan's
+// `drawn`, and a failed pool adjustment marks the plan's `reserved`.
+
+/** How a write is made: under the transaction's name, or withheld and marked with the roots. */
+type Stamp = { readonly ok: true; readonly writer: Subject } | { readonly ok: false; readonly roots: readonly Subject[] };
+
+/** A field after a transaction's write of `value` to it: written, or left as it was and marked. */
+const stamped = <T>(field: Field<T> | undefined, value: T | undefined, by: Stamp): Field<T> =>
+  by.ok ? written(value, by.writer, field) : markDefects(field ?? unknown<T>(), by.roots);
+
+const ZERO = "0";
+
+/** A plan's node, or the node a plan the map doesn't hold yet starts with: nothing drawn, and its reserve not known. */
+const planAt = (nodes: NodeMap, id: unknown): PlanNode =>
+  nodes.plan.get(id) ?? { kind: "plan", id, reserved: unknown(), drawn: { value: ZERO, writer: undefined, defects: [] } };
+
+/** A new map with `plan` in it, sharing every other node with `nodes`. */
+const withPlan = (nodes: NodeMap, plan: PlanNode): NodeMap => ({ ...nodes, plan: new Map(nodes.plan).set(plan.id, plan) });
+
+/** Whether a transaction names something in an id field: the field is there and isn't null. */
+const names = (id: unknown): boolean => id !== undefined && id !== null;
+
+/**
+ * The map with a plan node for each stock plan in the package's stock plan
+ * files, added to `nodes`. The run starts here: `reserved` is the plan's
+ * `initial_shares_reserved`, written by no transaction, and nothing is drawn.
+ *
+ * The stock plan files aren't validated before the run (#234). A plan with no
+ * usable `initial_shares_reserved` starts with its reserve not known, and an
+ * entry that isn't a plan object is passed over.
+ */
+export function withPlans(nodes: NodeMap, stockPlans: unknown): NodeMap {
+  if (!Array.isArray(stockPlans) || stockPlans.length === 0) return nodes;
+  const plan = new Map(nodes.plan);
+  for (const stockPlan of stockPlans) {
+    if (typeof stockPlan !== "object" || stockPlan === null || !("id" in stockPlan)) continue;
+    const reserved = (stockPlan as { initial_shares_reserved?: unknown }).initial_shares_reserved;
+    plan.set(stockPlan.id, {
+      ...planAt(nodes, stockPlan.id),
+      reserved: { value: isNumeric(reserved) ? reserved : undefined, writer: undefined, defects: [] },
+    });
+  }
+  return { ...nodes, plan };
+}
+
+/** The transaction's writes to the pool, by its descriptor's `pool` word. `before` is the map as the transaction found it. */
+function poolWrites(before: NodeMap, nodes: NodeMap, descriptor: Descriptor, transaction: Applied, by: Stamp): NodeMap {
+  switch (descriptor.pool) {
+    case "draws":
+      return drawn(before, nodes, transaction, by);
+    case "carries":
+      return "collection" in descriptor && descriptor.collection === "equityCompensation" ? carried(nodes, transaction, by) : nodes;
+    case "returns":
+      return adjusted(nodes, transaction.stock_plan_id, transaction.quantity, subtract, by);
+    case "reserves":
+      return reserved(nodes, transaction, by);
+    default:
+      return nodes;
+  }
+}
+
+/** A plan's `drawn` moved by `quantity`, up with `add` or down with `subtract`. */
+function adjusted(nodes: NodeMap, planId: unknown, quantity: unknown, move: typeof add, by: Stamp): NodeMap {
+  if (!names(planId)) return nodes;
+  const plan = planAt(nodes, planId);
+  if (!by.ok) return withPlan(nodes, withNodeField(plan, "drawn", markDefects(plan.drawn, by.roots)));
+
+  // A valid transaction's quantity has passed its check. One that hasn't is
+  // a fault in the validator, not in the package.
+  if (!isNumeric(quantity)) throw new Error(`${by.writer.object_type} ${by.writer.id} reached the pool with a quantity that isn't a Numeric.`);
+  return withPlan(nodes, withNodeField(plan, "drawn", written(move(plan.drawn.value ?? ZERO, quantity), by.writer, plan.drawn)));
+}
+
+/** A grant's draw on its plan, if it makes one: see the rule above. */
+function drawn(before: NodeMap, nodes: NodeMap, transaction: Applied, by: Stamp): NodeMap {
+  if (!names(transaction.stock_plan_id)) return nodes;
+  const held = before.security.get(transaction.security_id);
+
+  // Not a first issuance: a security_id that has been issued before drew then.
+  if (held !== undefined && held.lifecycle.value !== undefined) return nodes;
+
+  // Named as a balance or resulting security before it was issued: it carries
+  // shares already drawn.
+  const provenance = held !== undefined && isSecurityFamily(held, "equityCompensation") ? held.provenance : undefined;
+  const inDoubt = provenance !== undefined && provenance.defects.length > 0;
+  if (provenance?.value !== undefined && !inDoubt) return nodes;
+
+  // If the naming itself failed, whether this grant draws is in doubt, and so
+  // is the pool: the draw is withheld and marked with the naming's roots.
+  const how: Stamp = inDoubt ? { ok: false, roots: by.ok ? provenance.defects : withRoots(by.roots, provenance.defects) } : by;
+
+  const node = nodes.security.get(transaction.security_id);
+  const marked =
+    node === undefined || !isSecurityFamily(node, "equityCompensation")
+      ? nodes
+      : withSecurity(nodes, {
+          ...node,
+          draw: stamped(node.draw, { plan: transaction.stock_plan_id, quantity: transaction.quantity as string }, how),
+        });
+  return adjusted(marked, transaction.stock_plan_id, transaction.quantity, add, how);
+}
+
+/**
+ * A removal's naming of its balance and resulting grants. Each gets its
+ * provenance, and gives back whatever it drew on its own account.
+ */
+function carried(nodes: NodeMap, transaction: Applied, by: Stamp): NodeMap {
+  const resulting = Array.isArray(transaction.resulting_security_ids) ? transaction.resulting_security_ids : [];
+  const named = [...new Set([transaction.balance_security_id, ...resulting].filter(names))];
+  const source = subjectOf(transaction);
+
+  return named.reduce<NodeMap>((map, id) => {
+    const held = map.security.get(id);
+    // A security of another family under that id isn't the grant it names.
+    if (held !== undefined && !isSecurityFamily(held, "equityCompensation")) return map;
+    const node = held ?? blankSecurity(id, "equityCompensation");
+
+    const drew = node.draw?.value;
+    const gaveBack = drew !== undefined && drew.quantity !== ZERO;
+    const next = withSecurity(map, {
+      ...node,
+      provenance: stamped(node.provenance, source, by),
+      ...(gaveBack ? { draw: stamped(node.draw, { plan: drew.plan, quantity: ZERO }, by) } : {}),
+    });
+    return gaveBack ? adjusted(next, drew.plan, drew.quantity, subtract, by) : next;
+  }, nodes);
+}
+
+/** A pool adjustment's write of the plan's `reserved`. */
+function reserved(nodes: NodeMap, transaction: Applied, by: Stamp): NodeMap {
+  if (!names(transaction.stock_plan_id)) return nodes;
+  const plan = planAt(nodes, transaction.stock_plan_id);
+  return withPlan(nodes, withNodeField(plan, "reserved", stamped(plan.reserved, transaction.shares_reserved as string, by)));
 }
 
 // ---------------------------------------------------------------------------
@@ -243,8 +466,8 @@ function withheld(nodes: NodeMap, descriptor: Descriptor, transaction: Applied, 
  *
  * Addresses and value types are derived from the concrete node definitions.
  */
-export type FieldRef = FieldAddress<SecurityNode>;
-export type FieldRefValue<R extends FieldRef> = ReferenceValue<SecurityNode, R>;
+export type FieldRef = FieldAddress<Node>;
+export type FieldRefValue<R extends FieldRef> = ReferenceValue<Node, R>;
 
 /** The address of a field of the security of `family` with this `security_id`. */
 export function securityField<C extends CollectionKey, P extends FieldKey<SecurityNode<C>>>(
@@ -253,17 +476,23 @@ export function securityField<C extends CollectionKey, P extends FieldKey<Securi
   return { kind: "security", family, id, field } as Extract<FieldRef, { kind: "security"; family: C; field: P }>;
 }
 
+/** The address of a field of the stock plan with this id. */
+export function planField<P extends FieldKey<PlanNode>>(id: unknown, field: P): Extract<FieldRef, { kind: "plan"; field: P }> {
+  return { kind: "plan", id, field } as Extract<FieldRef, { kind: "plan"; field: P }>;
+}
+
 /** The field at an address, or `undefined` if the map holds no such node. */
 export const fieldAt = <R extends FieldRef>(nodes: NodeMap, ref: R): Field<FieldRefValue<R>> | undefined => {
-  const node = nodes.security.get(ref.id);
-  if (node === undefined || node.family !== ref.family) return undefined;
-  // The family check establishes the pairing; TypeScript cannot correlate
-  // the generic address with the runtime union member selected from the map.
-  return readNodeField(node, ref.field) as Field<FieldRefValue<R>>;
+  const node = nodes[ref.kind].get(ref.id);
+  if (node === undefined || ("family" in ref && (!("family" in node) || node.family !== ref.family))) return undefined;
+  // The kind/family lookup establishes the pairing. TypeScript cannot
+  // correlate a generic address with the union member selected from the map.
+  const fields: Partial<Record<FieldRef["field"], Field<unknown>>> = node;
+  return fields[ref.field] as Field<FieldRefValue<R>> | undefined;
 };
 
 /** An address in words, for a message: "the lifecycle of security war-1". */
-export const describeField = (ref: FieldRef): string => `the ${ref.field} of security ${show(ref.id)}`;
+export const describeField = (ref: FieldRef): string => `the ${ref.field} of ${ref.kind === "plan" ? "stock plan" : "security"} ${show(ref.id)}`;
 
 const show = (value: unknown): string => {
   try {
@@ -280,10 +509,16 @@ const isOutstanding = (node: SecurityNode): boolean => node.lifecycle.value === 
 export const isSecurityFamily = <C extends CollectionKey>(node: SecurityNode, family: C): node is SecurityNode<C> =>
   node.family === family;
 
+/** A stored security of the requested family, including removed and provisional nodes. */
+export const securityAt = <C extends CollectionKey>(nodes: NodeMap, family: C, securityId: unknown): SecurityNode<C> | undefined => {
+  const node = nodes.security.get(securityId);
+  return node !== undefined && isSecurityFamily(node, family) ? node : undefined;
+};
+
 /** The outstanding security under this id, narrowed to the requested family. */
 export const outstandingSecurity = <C extends CollectionKey>(nodes: NodeMap, family: C, securityId: unknown): SecurityNode<C> | undefined => {
-  const node = nodes.security.get(securityId);
-  return node !== undefined && isSecurityFamily(node, family) && isOutstanding(node) ? node : undefined;
+  const node = securityAt(nodes, family, securityId);
+  return node !== undefined && isOutstanding(node) ? node : undefined;
 };
 
 /** Every security of a family the map holds, removed ones included, in the order issued. */

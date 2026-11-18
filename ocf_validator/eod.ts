@@ -1,7 +1,7 @@
 import type { OcfMachineContext } from "../types/validator";
-import type { Snapshot, SnapshotEntry, DefectMark } from "../types/snapshot";
+import type { Snapshot, SnapshotEntry, SnapshotStockPlan, DefectMark } from "../types/snapshot";
 import { isOnCapTable } from "./lifecycle";
-import { securitiesIn, type NodeMap, type SecurityNode } from "./nodes";
+import { securitiesIn, type NodeMap, type PlanNode, type SecurityNode } from "./nodes";
 import type { CollectionElement, CollectionKey } from "./ocfMachine";
 
 /**
@@ -47,6 +47,24 @@ const entries = <C extends CollectionKey, Row>(
       return mark === undefined ? (fields as Row) : { ...fields, ...mark };
     });
 
+/** A stock plan's pool as the snapshot shows it, with a mark on a number that can't be trusted. */
+const planRow = ({ id, reserved, drawn }: PlanNode): SnapshotStockPlan => {
+  const hasDefects = reserved.defects.length > 0 || drawn.defects.length > 0;
+  return {
+    id: id as string,
+    ...(reserved.value === undefined ? {} : { reserved: reserved.value }),
+    drawn: drawn.value ?? "0",
+    ...(hasDefects
+      ? {
+          defects: {
+            ...(reserved.defects.length > 0 ? { reserved: [...reserved.defects] } : {}),
+            ...(drawn.defects.length > 0 ? { drawn: [...drawn.defects] } : {}),
+          },
+        }
+      : {}),
+  };
+};
+
 /** The cap table at the end of a day, read off the node map. */
 const RUN_EOD = (context: OcfMachineContext, event: { date: string }): Snapshot => {
   const { nodes } = context;
@@ -78,6 +96,7 @@ const RUN_EOD = (context: OcfMachineContext, event: { date: string }): Snapshot 
       stakeholder: issuance.stakeholder_id,
       quantity: issuance.quantity,
     })),
+    stockPlans: [...nodes.plan.values()].map(planRow),
   };
 };
 

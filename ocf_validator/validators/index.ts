@@ -9,8 +9,6 @@ import valid_tx_stock_transfer from './stock/tx_stock_transfer';
 import valid_tx_stock_class_authorized_shares_adjustment from './stock_class/tx_stock_class_authorized_shares_adjustment';
 import valid_tx_stock_class_conversion_ratio_adjustment from './stock_class/tx_stock_class_conversion_ratio_adjustment';
 import valid_tx_stock_class_split from './stock_class/tx_stock_class_split';
-import valid_tx_stock_plan_pool_adjustment from './stock_plan/tx_stock_plan_pool_adjustment';
-import valid_tx_stock_plan_return_to_pool from './stock_plan/tx_stock_plan_return_to_pool';
 import valid_tx_vesting_acceleration from './vesting/ts_vesting_acceleration';
 import valid_tx_vesting_start from './vesting/ts_vesting_start';
 import valid_tx_vesting_event from './vesting/ts_vesting_event';
@@ -27,8 +25,6 @@ const validators = {
   valid_tx_stock_class_authorized_shares_adjustment,
   valid_tx_stock_class_conversion_ratio_adjustment,
   valid_tx_stock_class_split,
-  valid_tx_stock_plan_pool_adjustment,
-  valid_tx_stock_plan_return_to_pool,
   valid_tx_vesting_acceleration,
   valid_tx_vesting_start,
   valid_tx_vesting_event,

@@ -98,7 +98,13 @@ describe("lifecycle words", () => {
     const implied = { append: "issue", none: "stays", remove: "removes" } as const;
     for (const key of KEYS) {
       const descriptor = TX_DESCRIPTORS[key];
-      if (descriptor.effect !== "passthrough") expect(descriptor.lifecycle).toBe(implied[descriptor.effect]);
+      // The return to pool is the exception: it changes no security, and its
+      // word is "after removal", which it has to state.
+      if (key === "TX_STOCK_PLAN_RETURN_TO_POOL") {
+        expect(descriptor).toMatchObject({ effect: "none", lifecycle: "after removal" });
+      } else if (descriptor.effect !== "passthrough") {
+        expect(descriptor.lifecycle).toBe(implied[descriptor.effect]);
+      }
     }
   });
 

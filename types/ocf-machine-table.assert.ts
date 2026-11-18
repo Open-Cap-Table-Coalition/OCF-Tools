@@ -323,3 +323,24 @@ type _FiledUnderOlderName = Expect<Equal<(typeof _underOlderName)["transaction"]
 // …but not under a type whose payload it doesn't.
 // @ts-expect-error — a warrant retraction isn't an equity compensation retraction under another name.
 const _underUnrelatedName = underOlderName(_equityCompensationRetraction, "TX_WARRANT_RETRACTION");
+
+// --- Pool words -----------------------------------------------------------------
+
+// A descriptor's part in a stock plan's pool is one of the four words…
+const _draws = defineValidator({ transaction: "TX_EQUITY_COMPENSATION_ISSUANCE", effect: "append", collection: "equityCompensation", pool: "draws", checks: [] }) satisfies Descriptor;
+// …and nothing else.
+// @ts-expect-error — "spends" is not a PoolEffect.
+const _spends = defineValidator({ transaction: "TX_EQUITY_COMPENSATION_ISSUANCE", effect: "append", collection: "equityCompensation", pool: "spends", checks: [] });
+
+// The real table gives each transaction that moves a pool its word.
+type _GrantDraws = Expect<Equal<(typeof TX_DESCRIPTORS)["TX_EQUITY_COMPENSATION_ISSUANCE"]["pool"], "draws">>;
+type _OlderNameDraws = Expect<Equal<(typeof TX_DESCRIPTORS)["TX_PLAN_SECURITY_ISSUANCE"]["pool"], "draws">>;
+type _CancellationCarries = Expect<Equal<(typeof TX_DESCRIPTORS)["TX_EQUITY_COMPENSATION_CANCELLATION"]["pool"], "carries">>;
+type _TransferCarries = Expect<Equal<(typeof TX_DESCRIPTORS)["TX_PLAN_SECURITY_TRANSFER"]["pool"], "carries">>;
+type _ReturnReturns = Expect<Equal<(typeof TX_DESCRIPTORS)["TX_STOCK_PLAN_RETURN_TO_POOL"]["pool"], "returns">>;
+type _AdjustmentReserves = Expect<Equal<(typeof TX_DESCRIPTORS)["TX_STOCK_PLAN_POOL_ADJUSTMENT"]["pool"], "reserves">>;
+
+// A "none" declaration's word is "stays" unless it states "after removal",
+// which only the return to pool does.
+type _ReturnIsAfterRemoval = Expect<Equal<(typeof TX_DESCRIPTORS)["TX_STOCK_PLAN_RETURN_TO_POOL"]["lifecycle"], "after removal">>;
+type _AdjustmentStays = Expect<Equal<(typeof TX_DESCRIPTORS)["TX_STOCK_PLAN_POOL_ADJUSTMENT"]["lifecycle"], "stays">>;

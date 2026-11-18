@@ -113,3 +113,18 @@ export type Check = {
  * built from these words, one chart per family (#233).
  */
 export type LifecycleWord = "issue" | "stays" | "removes" | "after removal";
+
+/**
+ * A transaction's part in a stock plan's pool, in one word (see "The stock
+ * plan pool" in `ocf_validator/nodes.ts`):
+ *
+ *  - "draws":    a grant. It adds its quantity to its plan's `drawn`.
+ *  - "carries":  a removal that can name a balance or resulting grant, which
+ *                then carries shares already drawn and adds nothing.
+ *  - "returns":  a return to pool. It takes its quantity from the plan's
+ *                `drawn`.
+ *  - "reserves": a pool adjustment. It sets the plan's `reserved`.
+ *
+ * A descriptor with none of these leaves every pool alone.
+ */
+export type PoolEffect = "draws" | "carries" | "returns" | "reserves";

@@ -61,16 +61,15 @@ const securitiesOf = (transaction: Transaction): unknown[] => {
  * Which of the two checks the run performs on a transaction of this type. A
  * graded validator performs the ones it declares as implemented. The machine
  * runs no-earlier-removal itself on the transactions that can't declare it:
- * every passthrough type but the return to pool, and a legacy issuance.
+ * every passthrough type, and a legacy issuance.
  */
-const checksRunOn = (type: string, descriptor: Descriptor): string[] => {
+const checksRunOn = (descriptor: Descriptor): string[] => {
   if ("validate" in descriptor) {
     return (descriptor.checks as readonly Check[])
       .filter((check) => check.implemented !== false && SHADOWED.includes(check.id))
       .map((check) => check.id);
   }
-  if (descriptor.effect === "passthrough") return type === "TX_STOCK_PLAN_RETURN_TO_POOL" ? [] : [NO_EARLIER_REMOVAL];
-  return descriptor.effect === "append" ? [NO_EARLIER_REMOVAL] : [];
+  return descriptor.effect === "passthrough" || descriptor.effect === "append" ? [NO_EARLIER_REMOVAL] : [];
 };
 
 /** A check as the shadow runs it: on any transaction, whatever fields the check's own type asks for. */
@@ -117,7 +116,7 @@ export function shadowRows(transactions: readonly Transaction[]): ShadowRow[] {
   for (const transaction of transactions) {
     const descriptor = (TX_DESCRIPTORS as Record<string, Descriptor>)[transaction.object_type];
     if (descriptor === undefined) continue;
-    const runs = checksRunOn(transaction.object_type, descriptor);
+    const runs = checksRunOn(descriptor);
     const reported = checksReportedOn(context, transaction, descriptor, runs);
 
     for (const security of securitiesOf(transaction)) {
@@ -168,11 +167,22 @@ export const disagreements = (rows: readonly ShadowRow[]): ShadowRow[] =>
  * Every way the charts are known to disagree with the two checks, and why.
  * `explain` decides which one a disagreement is from the row alone.
  *
- * In all three the chart refuses a transaction the two checks say nothing
+ * In all of them the chart refuses a transaction the two checks say nothing
  * about. No package in the suite has a transaction the checks report and the
  * chart allows.
  */
 export const EXPLANATIONS = {
+  /**
+   * Nothing has issued the security, and the transaction isn't an issuance.
+   * Neither check is about that: no-earlier-removal asks whether it was
+   * removed, and no-other-transactions whether anything else names it. The
+   * run fails the transaction today through issuance-exists, which finds no
+   * such security. So the run and the chart agree here too.
+   */
+  "never issued":
+    "The run fails it through issuance-exists; neither of the two checks asks whether the security was ever issued.",
+
+
   /**
    * The security was removed, and the transaction is one neither check runs
    * on: an acceptance, a retraction, a transfer, or one that leaves the
@@ -225,7 +235,16 @@ const isIndexedRemoval = (transaction: Transaction): boolean =>
 /** Which explained disagreement a row is, or `undefined` for one nothing explains yet. */
 export function explain(row: ShadowRow): Explanation | undefined {
   const refusedInSilence = !row.allowed && row.reported.length === 0;
-  if (!refusedInSilence || row.state !== "removed" || row.removedBy === undefined) return undefined;
+  if (!refusedInSilence) return undefined;
+
+  const descriptor = (TX_DESCRIPTORS as Record<string, Descriptor>)[row.object_type];
+  if (row.state === "notIssued") {
+    // A graded transaction that isn't an issuance declares issuance-exists.
+    return descriptor !== undefined && "validate" in descriptor && descriptor.lifecycle !== "issue" && row.family === undefined
+      ? "never issued"
+      : undefined;
+  }
+  if (row.state !== "removed" || row.removedBy === undefined) return undefined;
 
   if (row.runs.length === 0) return "removed, and neither check runs on it";
   if (row.runs.length === 1 && row.runs[0] === NO_EARLIER_REMOVAL) {

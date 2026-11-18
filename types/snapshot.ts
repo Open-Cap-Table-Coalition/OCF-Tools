@@ -58,6 +58,24 @@ export interface DefectMark {
   defects: { lifecycle?: Subject[]; issuance?: Subject[] };
 }
 
+/**
+ * A stock plan's pool at the end of a day: the shares it has `reserved` and
+ * the shares its grants have `drawn`, as OCF Numerics. `reserved` is missing
+ * for a plan the package's stock plan files don't have, until a pool
+ * adjustment sets it.
+ *
+ * `defects` marks a number that can't be trusted, per field, with the
+ * transactions whose failure is behind it. A marked number is the last one
+ * that could be vouched for: what the failed transaction would have changed
+ * it to was withheld.
+ */
+export interface SnapshotStockPlan {
+  id: string;
+  reserved?: string;
+  drawn: string;
+  defects?: { reserved?: Subject[]; drawn?: Subject[] };
+}
+
 /** A snapshot entry: a row as before, or a marked one, whose values may be missing. */
 export type SnapshotEntry<Row> = Row | (Partial<Row> & DefectMark);
 
@@ -67,4 +85,6 @@ export interface Snapshot {
   convertibles: SnapshotEntry<SnapshotConvertibleIssuance>[];
   warrants: SnapshotEntry<SnapshotWarrantIssuance>[];
   equityCompensation: SnapshotEntry<SnapshotEquityCompensation>[];
+  /** Every stock plan the package has or a transaction has named, in that order. */
+  stockPlans: SnapshotStockPlan[];
 }

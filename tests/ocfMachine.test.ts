@@ -88,7 +88,7 @@ describe("passthrough transaction types are no-ops unless their security was rem
       findings: [
         { severity: "error", outcome: "failed", check: "demo", message: "m", subject: { object_type: "TX_STOCK_ISSUANCE", id: "x" } },
       ],
-      snapshots: [{ date: "2020-01-01", stockIssuances: [], convertibles: [], warrants: [], equityCompensation: [] }],
+      snapshots: [{ date: "2020-01-01", stockIssuances: [], convertibles: [], warrants: [], equityCompensation: [], stockPlans: [] }],
       result: "PRESERVED",
     });
 

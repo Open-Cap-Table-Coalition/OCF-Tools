@@ -83,10 +83,10 @@ export const collection = <C extends CollectionKey>(context: OcfMachineContext, 
 
 /**
  * Runs the whole validator over a package holding the given transactions,
- * stakeholders, and stock classes, so the run goes through the driver and
- * same-day sort as a real one does. It writes a minimal package (a manifest, a
- * stakeholders file, a stock classes file, and a transactions file) to a
- * temporary directory and removes it afterwards.
+ * stakeholders, stock classes, and stock plans, so the run goes through the
+ * driver and same-day sort as a real one does. It writes a minimal package (a
+ * manifest and a file for each of those) to a temporary directory and removes
+ * it afterwards.
  *
  * It also runs the lifecycle charts over the package in shadow, and fails if
  * they disagree with the checks they're to replace in a way that isn't
@@ -96,6 +96,7 @@ export const validatePackage = (
   transactions: Record<string, unknown>[],
   stakeholders: { id: string }[] = [],
   stockClasses: { id: string }[] = [],
+  stockPlans: Record<string, unknown>[] = [],
 ): OcfMachineContext => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ocf-tools-test-"));
   try {
@@ -103,6 +104,7 @@ export const validatePackage = (
       fs.writeFileSync(path.join(dir, name), JSON.stringify(content));
     write("Stakeholders.ocf.json", { items: stakeholders });
     write("StockClasses.ocf.json", { items: stockClasses });
+    write("StockPlans.ocf.json", { items: stockPlans });
     write("Transactions.ocf.json", { items: transactions });
     write("Manifest.ocf.json", {
       issuer: { legal_name: "Test Co" },
@@ -110,7 +112,7 @@ export const validatePackage = (
       transactions_files: [{ filepath: "Transactions.ocf.json" }],
       stock_classes_files: [{ filepath: "StockClasses.ocf.json" }],
       vesting_terms_files: [],
-      stock_plans_files: [],
+      stock_plans_files: [{ filepath: "StockPlans.ocf.json" }],
       stock_legend_templates_files: [],
       valuations_files: [],
     });

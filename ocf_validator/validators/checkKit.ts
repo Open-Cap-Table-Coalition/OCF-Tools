@@ -7,6 +7,7 @@ import type {
   GradedValidator,
   LifecycleWord,
   OcfMachineContext,
+  PoolEffect,
 } from "../../types/validator";
 import type { CollectionKey, TxKey } from "../ocfMachine";
 
@@ -113,14 +114,26 @@ export const asGap = ({ id, severity, description }: CheckObject<any>): CheckObj
  *  - "remove": remove the security from `collection` (e.g. cancellations).
  * A "none" transaction changes no collection, so it can't name one. It lists
  * `families` instead: the families whose securities it can name, which is
- * where its lifecycle word goes (see `Descriptor` in `ocfMachine.ts`).
+ * where its lifecycle word goes (see `Descriptor` in `ocfMachine.ts`). Its
+ * word is "stays" unless it declares "after removal".
+ *
+ * `pool` is the transaction's part in a stock plan's pool, if it has one (see
+ * `PoolEffect`).
  *
  * The checks are typed loosely here; `defineValidator` makes sure each one fits
  * the transaction.
  */
-type Spec =
-  | { transaction: TxKey; effect: "none"; collection?: never; families: readonly CollectionKey[]; checks: readonly CheckObject<any>[] }
-  | { transaction: TxKey; effect: "append" | "remove"; collection: CollectionKey; checks: readonly CheckObject<any>[] };
+type Spec = { pool?: PoolEffect } & (
+  | {
+      transaction: TxKey;
+      effect: "none";
+      collection?: never;
+      lifecycle?: "after removal";
+      families: readonly CollectionKey[];
+      checks: readonly CheckObject<any>[];
+    }
+  | { transaction: TxKey; effect: "append" | "remove"; collection: CollectionKey; checks: readonly CheckObject<any>[] }
+);
 
 /**
  * The lifecycle word each `effect` implies. A validator module declares its
@@ -150,7 +163,8 @@ const toMetadata = (checks: readonly CheckObject<any>[]): readonly Check[] =>
   });
 
 const sameField = (a: FieldRef, b: FieldRef): boolean =>
-  a.kind === b.kind && a.family === b.family && a.id === b.id && a.field === b.field;
+  a.kind === b.kind && a.id === b.id && a.field === b.field &&
+  (a.kind !== "security" || (b.kind === "security" && a.family === b.family));
 
 /** The roots marking any of the fields at `refs`, each once, with the first marked field's address. */
 const defectsOn = (nodes: NodeMap, refs: readonly FieldRef[]): { roots: Subject[]; ref?: FieldRef } => {
@@ -251,8 +265,9 @@ export const toValidate =
  * must work on that input. Attaching a check that reads a field the transaction
  * doesn't have (e.g. the stakeholder check on an acceptance) won't compile.
  *
- * The result keeps `transaction`, `effect`, and `collection` or `families`
- * from the declaration and adds `lifecycle` (the word the effect implies),
+ * The result keeps `transaction`, `effect`, `pool`, and `collection` or
+ * `families` from the declaration and adds `lifecycle` (the word the effect
+ * implies, unless the declaration states one),
  * `validate` (the function that runs the checks), and `checks` (the list the
  * coverage report reads).
  *
@@ -267,16 +282,16 @@ export function defineValidator<const S extends Spec>(
 ): Defined<S> {
   const { checks, ...rest } = spec;
   return {
-    ...rest,
     lifecycle: LIFECYCLE_OF_EFFECT[spec.effect],
+    ...rest,
     validate: toValidate(checks),
     checks: toMetadata(checks),
   } as Defined<S>;
 }
 
 /** A validator's entry in the descriptor table, as `defineValidator` builds it from the declaration `S`. */
-type Defined<S extends Spec> = Omit<S, "checks"> & {
-  lifecycle: (typeof LIFECYCLE_OF_EFFECT)[S["effect"]];
+type Defined<S extends Spec> = Omit<S, "checks" | "lifecycle"> & {
+  lifecycle: S extends { lifecycle: infer Declared extends LifecycleWord } ? Declared : (typeof LIFECYCLE_OF_EFFECT)[S["effect"]];
   validate: GradedValidator<TransactionFor<S["transaction"]>>;
   checks: readonly Check[];
 };

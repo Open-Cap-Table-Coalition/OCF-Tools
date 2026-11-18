@@ -9,7 +9,7 @@ import type {
 import type { OcfTransaction, TransactionFor } from "../types/ocf-input";
 import type { OcfPackageContent } from "../read_ocf_package";
 import type { Finding, Subject } from "../types/finding";
-import type { Check, GradedValidator, LifecycleWord, OcfMachineContext } from "../types/validator";
+import type { Check, GradedValidator, LifecycleWord, OcfMachineContext, PoolEffect } from "../types/validator";
 import validators from "./validators";
 import { TX_CONVERTIBLE_ISSUANCE } from "./validators/convertible/tx_convertible_issuance";
 import { TX_CONVERTIBLE_ACCEPTANCE } from "./validators/convertible/tx_convertible_acceptance";
@@ -25,7 +25,9 @@ import { TX_WARRANT_TRANSFER } from "./validators/warrant/tx_warrant_transfer";
 import { TX_WARRANT_EXERCISE } from "./validators/warrant/tx_warrant_exercise";
 import { text, toValidate } from "./validators/checkKit";
 import { noEarlierRemoval } from "./validators/checks";
-import { applyTransaction, emptyNodes, outstanding, type Verdict } from "./nodes";
+import { applyTransaction, emptyNodes, outstanding, withPlans, type Verdict } from "./nodes";
+import { TX_STOCK_PLAN_POOL_ADJUSTMENT } from "./validators/stock_plan/tx_stock_plan_pool_adjustment";
+import { TX_STOCK_PLAN_RETURN_TO_POOL } from "./validators/stock_plan/tx_stock_plan_return_to_pool";
 import { TX_EQUITY_COMPENSATION_ISSUANCE, TX_PLAN_SECURITY_ISSUANCE } from "./validators/equity_compensation/tx_equity_compensation_issuance";
 import { TX_EQUITY_COMPENSATION_ACCEPTANCE, TX_PLAN_SECURITY_ACCEPTANCE } from "./validators/equity_compensation/tx_equity_compensation_acceptance";
 import { TX_EQUITY_COMPENSATION_EXERCISE, TX_PLAN_SECURITY_EXERCISE } from "./validators/equity_compensation/tx_equity_compensation_exercise";
@@ -172,11 +174,25 @@ const legacyContext = (context: OcfMachineContext): LegacyContext => ({
  * `families` instead: more than one for a transaction that can name a
  * security of several families (the vesting transactions), and none for a
  * transaction that names no security at all (see `lifecycleFamilies`).
+ *
+ * A graded "none" descriptor's word is "stays" unless it says otherwise. The
+ * return to pool does: it changes no security, and is allowed only after its
+ * security's removal.
+ *
+ * A descriptor that moves a stock plan's pool says how, as its `pool` word
+ * (see `PoolEffect` in `types/validator.ts`). The reducer in `nodes.ts` acts
+ * on it.
  */
-type Descriptor =
+type Descriptor = (
   | { effect: "passthrough"; lifecycle: LifecycleWord; families: readonly CollectionKey[] }
   | { effect: "none"; lifecycle: "stays"; families: readonly CollectionKey[]; legacyValidate: Validator<unknown> }
-  | { effect: "none"; lifecycle: "stays"; families: readonly CollectionKey[]; validate: GradedValidator<any>; checks: readonly Check[] }
+  | {
+      effect: "none";
+      lifecycle: "stays" | "after removal";
+      families: readonly CollectionKey[];
+      validate: GradedValidator<any>;
+      checks: readonly Check[];
+    }
   | { effect: "remove"; lifecycle: "removes"; legacyValidate: Validator<unknown>; collection: CollectionKey }
   | { effect: "remove"; lifecycle: "removes"; validate: GradedValidator<any>; collection: CollectionKey; checks: readonly Check[] }
   | {
@@ -195,7 +211,8 @@ type Descriptor =
         validate: GradedValidator<CollectionElement[C]>;
         checks: readonly Check[];
       };
-    }[CollectionKey];
+    }[CollectionKey]
+) & { pool?: PoolEffect };
 
 /** A non-passthrough descriptor — the shape the dispatch helpers consume. */
 export type ActiveDescriptor = Exclude<Descriptor, { effect: "passthrough" }>;
@@ -265,6 +282,12 @@ export const TX_DESCRIPTORS = {
   TX_PLAN_SECURITY_ACCEPTANCE,
   TX_PLAN_SECURITY_EXERCISE,
   TX_PLAN_SECURITY_RELEASE,
+  // The two transactions that act on a stock plan's pool and no security's
+  // lifecycle. A return to pool records where a removed grant's shares went,
+  // so it's the one transaction allowed only once its security has been
+  // removed. A pool adjustment names no security at all.
+  TX_STOCK_PLAN_RETURN_TO_POOL,
+  TX_STOCK_PLAN_POOL_ADJUSTMENT,
 
   // --- remove: filter the family collection by security_id ---------------
   TX_STOCK_RETRACTION: { effect: "remove", lifecycle: "removes", collection: "stockIssuances", legacyValidate: validators.valid_tx_stock_retraction },
@@ -289,11 +312,11 @@ export const TX_DESCRIPTORS = {
   TX_PLAN_SECURITY_TRANSFER,
 
   // --- passthrough: no validator of their own ----------------------------
-  //   No report entry, no collection mutation. Except for the return to pool,
-  //   the machine fails one on a security an earlier transaction removed (see
-  //   buildTransactionHandlers); otherwise they stay in `capTable` with nothing
-  //   recorded, so the characterization snapshot (which contains
-  //   TX_VESTING_START) records nothing for it.
+  //   No report entry, no collection mutation. The machine records a finding
+  //   for one on a security an earlier transaction removed (see
+  //   buildTransactionHandlers); otherwise nothing is recorded, so the
+  //   characterization snapshot (which contains TX_VESTING_START) records
+  //   nothing for it.
   //   `satisfies DescriptorTable` below forces any future OCF transaction type
   //   to be classified here — a compile error until it is.
   //
@@ -308,18 +331,13 @@ export const TX_DESCRIPTORS = {
   //   A consolidation removes each stock security in its `security_ids` and
   //   names the one that replaces them.
   TX_STOCK_CONSOLIDATION: { effect: "passthrough", lifecycle: "removes", families: ["stockIssuances"] },
-  //   A return to pool records where a removed grant's shares went, so it's
-  //   the one transaction allowed only once its security has been removed.
-  TX_STOCK_PLAN_RETURN_TO_POOL: { effect: "passthrough", lifecycle: "after removal", families: ["equityCompensation"] },
-  //   The rest name no security: each acts on a stock class, a stock plan, or
-  //   the issuer. A split changes every security in its class and the others
+  //   The rest name no security: each acts on a stock class or the issuer. A split changes every security in its class and the others
   //   change none, but all of them leave every security where it is, so the
   //   word is "stays". With no family, none is an arrow on any chart.
   TX_STOCK_CLASS_SPLIT: { effect: "passthrough", lifecycle: "stays", families: [] },
   TX_STOCK_CLASS_AUTHORIZED_SHARES_ADJUSTMENT: { effect: "passthrough", lifecycle: "stays", families: [] },
   TX_STOCK_CLASS_CONVERSION_RATIO_ADJUSTMENT: { effect: "passthrough", lifecycle: "stays", families: [] },
   TX_ISSUER_AUTHORIZED_SHARES_ADJUSTMENT: { effect: "passthrough", lifecycle: "stays", families: [] },
-  TX_STOCK_PLAN_POOL_ADJUSTMENT: { effect: "passthrough", lifecycle: "stays", families: [] },
 } satisfies DescriptorTable;
 
 export type { Descriptor };
@@ -604,8 +622,9 @@ const notRemoved = {
  * one transition: validate once, record the findings, and apply its writes or
  * withhold and mark them (`applyByFindings`). A passthrough type has no
  * validator of its own, so the machine runs no-earlier-removal on it and
- * treats it the same way; the return to pool is exempt, since it records
- * where a removed security's shares went.
+ * treats it the same way. (The return to pool, which records where a removed
+ * security's shares went, has a validator of its own and doesn't declare
+ * that check.)
  *
  * A legacy type keeps the two-branch transition: valid stays in `capTable`,
  * and a failure ends the run in `validationError`. A legacy issuance can't
@@ -633,10 +652,7 @@ function buildTransactionHandlers() {
 
   const handlerFor = (type: TxKey) => {
     const descriptor = TX_DESCRIPTORS[type];
-    if (descriptor.effect === "passthrough") {
-      return type === "TX_STOCK_PLAN_RETURN_TO_POOL" ? {} : byFindings;
-    }
-    if ("validate" in descriptor) return byFindings;
+    if (descriptor.effect === "passthrough" || "validate" in descriptor) return byFindings;
     if (descriptor.effect === "append") return [afterRemoval, ...legacyTransitions];
     return legacyTransitions;
   };
@@ -744,6 +760,8 @@ export const ocfMachine = setup({
           actions: assign({
             ocfPackageContent: ({ event }) => event.data,
             removals: ({ event }) => earliestRemovals(event.data.transactions),
+            // The package's stock plans, each with its pool as the plan starts it.
+            nodes: ({ context, event }) => withPlans(context.nodes, event.data.stockPlans),
           }),
         },
         RUN_EOD: {

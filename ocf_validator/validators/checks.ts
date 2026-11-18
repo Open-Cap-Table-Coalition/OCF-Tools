@@ -2,6 +2,7 @@ import type { OCFStockIssuance } from "@opencaptablecoalition/ocf-types";
 import type { OcfTransaction, TransactionFor } from "../../types/ocf-input";
 import type { DeepReadonly } from "../../types/validator";
 import { securityField } from "../nodes";
+import { isNegative, isNumeric } from "../numeric";
 import type { CollectionElement, CollectionKey, TxKey } from "../ocfMachine";
 import { text, type CheckContext, type CheckObject } from "./checkKit";
 
@@ -71,6 +72,29 @@ export const stakeholderExists = {
 } satisfies CheckObject<{ stakeholder_id: string }>;
 
 /**
+ * Builds the check that one of a transaction's fields is a quantity the pool
+ * arithmetic can count: an OCF Numeric, and not negative. Nothing checks a
+ * package against the schema first, and a quantity that can't be counted
+ * can't be added to a pool or taken from one, so the transaction fails here
+ * and its write is withheld.
+ *
+ * `applies` narrows it to the transactions that touch a pool at all: a grant
+ * with no `stock_plan_id` doesn't, so its quantity isn't this check's concern.
+ */
+export const countable = <F extends string>(field: F, applies: (data: any) => boolean = () => true) =>
+  ({
+    id: `${field.replace(/_/g, "-")}-countable`,
+    severity: "error",
+    description: `The transaction's ${field} is a number, and not negative, so it can be counted against the stock plan's pool.`,
+    run: (_context, data) => {
+      if (!applies(data)) return [];
+      const value = (data as Record<string, unknown>)[field];
+      if (!isNumeric(value)) return [text`The transaction's ${field} (${value}) is not a number written the way OCF writes one.`];
+      return isNegative(value) ? [text`The transaction's ${field} (${value}) is negative.`] : [];
+    },
+  }) satisfies CheckObject<Record<F, string>>;
+
+/**
  * No transaction dated before this one removed its security from the cap
  * table: no cancellation, conversion, warrant exercise, repurchase,
  * reissuance, retraction, or transfer of it (see the machine's `removals`).
@@ -80,8 +104,8 @@ export const stakeholderExists = {
  *
  * The graded issuances declare it, so a removed security_id can't be issued
  * again. The machine runs it first on the transactions that can't declare it:
- * the passthrough types, except the return to pool, and the legacy issuances
- * (#214).
+ * the passthrough types and the legacy issuances (#214). A return to pool
+ * doesn't declare it: it's the one transaction that follows a removal.
  *
  * A removal dated the same day doesn't count, since a security can be issued,
  * vest, and be removed on one day. A same-day reuse of the security_id is left

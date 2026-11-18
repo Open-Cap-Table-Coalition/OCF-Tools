@@ -225,6 +225,7 @@ describe("a check that declares its reads", () => {
     const issued = reduce([warrant()]);
     const node = outstandingSecurity(issued, "warrantIssuances", "war-1")!;
     const nodes: NodeMap = {
+      ...issued,
       security: new Map(issued.security).set("war-1", { ...node, issuance: { ...node.issuance, defects: [WARRANT_ISSUANCE] } }),
     };
 
@@ -276,7 +277,8 @@ describe("a check that declares its reads", () => {
     // declaring it would be reported as having thrown.
     for (const [type, descriptor] of Object.entries(TX_DESCRIPTORS)) {
       if (!("validate" in descriptor)) continue;
-      const family = "collection" in descriptor ? descriptor.collection : descriptor.families[0];
+      // A pool adjustment names no security and has no family, so its seed lands nowhere it looks.
+      const family = ("collection" in descriptor ? descriptor.collection : descriptor.families[0]) ?? "stockIssuances";
       const seeded = { id: "seed", object_type: "seed", security_id: "sec-1", stakeholder_id: "sh-1", date: "2020-01-01" };
       const data = { id: "tx-1", object_type: type, security_id: "sec-1", stakeholder_id: "sh-1", resulting_security_ids: ["stock-1"], date: "2021-01-01" };
       for (const context of [contextWith({ [family]: [seeded], stakeholders: [{ id: "sh-1" }] }), contextWith()]) {
