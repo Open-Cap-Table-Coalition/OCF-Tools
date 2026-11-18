@@ -79,16 +79,23 @@ describe("convertible issuance validity", () => {
     expect(snapshot.context.findings).toEqual([]);
   });
 
-  it("halts an invalid issuance in validationError with the error finding recorded", () => {
+  it("records an invalid issuance's error finding and goes on, with the security withheld and marked", () => {
     const actor = startSeeded(withStakeholder("someone-else"));
     actor.send(ev("TX_CONVERTIBLE_ISSUANCE", issuance()));
 
     const snapshot = actor.getSnapshot();
-    expect(snapshot.value).toBe("validationError");
+    // A failing transaction no longer stops the run (#231).
+    expect(snapshot.value).toBe("capTable");
     expect(snapshot.context.findings).toHaveLength(1);
     expect(snapshot.context.findings[0].check).toBe("stakeholder-exists");
     expect(collection(snapshot.context, "convertibleIssuances")).toEqual([]);
-    expect(snapshot.context.result).toContain("stakeholder-exists");
+    // The security has a node all the same: nothing is known of it, and it's
+    // marked with the issuance that failed.
+    const root = snapshot.context.findings[0].subject;
+    expect(snapshot.context.nodes.security.get("sec1")).toMatchObject({
+      lifecycle: { value: undefined, defects: [root] },
+      issuance: { value: undefined, defects: [root] },
+    });
   });
 });
 
@@ -898,7 +905,8 @@ describe("a conflicting transaction pair flags the later transaction, not the ea
 
     actor.send(ev("TX_CONVERTIBLE_RETRACTION", retraction));
     const { context, value } = actor.getSnapshot();
-    expect(value).toBe("validationError");
+    // A failing transaction no longer stops the run (#231).
+    expect(value).toBe("capTable");
 
     const errors = context.findings.filter((f) => f.severity === "error");
     expect(errors).toHaveLength(1);
@@ -929,7 +937,8 @@ describe("a conflicting transaction pair flags the later transaction, not the ea
 
     actor.send(ev("TX_CONVERTIBLE_ACCEPTANCE", acceptance));
     const { context, value } = actor.getSnapshot();
-    expect(value).toBe("validationError");
+    // A failing transaction no longer stops the run (#231).
+    expect(value).toBe("capTable");
 
     const errors = context.findings.filter((f) => f.severity === "error");
     expect(errors.map((f) => f.check).sort()).toEqual(["issuance-exists", "no-retraction"]);
@@ -1031,7 +1040,7 @@ describe("declared and emitted checks stay consistent across the family", () => 
 // ---------------------------------------------------------------------------
 
 describe("convertible family findings migrate to the findings channel", () => {
-  it("routes an invalid convertible transaction to findings, leaves report clear, and serializes the errors in the failure result", () => {
+  it("routes an invalid convertible transaction to findings, leaves report clear, and counts the errors in the result", () => {
     const actor = startSeeded(baseContext());
     // No stakeholder matches, so the issuance is invalid.
     actor.send(ev("TX_CONVERTIBLE_ISSUANCE", {
@@ -1043,14 +1052,18 @@ describe("convertible family findings migrate to the findings channel", () => {
     }));
 
     const { context, value } = actor.getSnapshot();
-    expect(value).toBe("validationError");
+    // A failing transaction no longer stops the run (#231).
+    expect(value).toBe("capTable");
     // The errors landed on findings…
     expect(context.findings.length).toBeGreaterThan(0);
     expect(context.findings.every((f) => f.severity === "error")).toBe(true);
     // …no report entry was written for a migrated convertible type…
     const migrated = MIGRATED_KEYS as readonly string[];
     expect(context.report.some((entry: any) => migrated.includes(entry?.transaction_type))).toBe(false);
-    // …and the failure result serialized the error findings.
-    expect(context.result).toContain(JSON.stringify(context.findings, null, 2));
+    // …and the result, written when the run ends, counts them.
+    actor.send({ type: "RUN_END", date: "2021-01-01" });
+    expect(actor.getSnapshot().context.result).toBe(
+      `The validation of the OCF package for Test Co is complete and found ${context.findings.length} error${context.findings.length === 1 ? "" : "s"}.`,
+    );
   });
 });

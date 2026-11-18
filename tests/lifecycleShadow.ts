@@ -74,7 +74,12 @@ const checksRunOn = (type: string, descriptor: Descriptor): string[] => {
 };
 
 /** A check as the shadow runs it: on any transaction, whatever fields the check's own type asks for. */
-type ShadowedCheck = { run: (context: any, data: any) => string[] };
+type ShadowedCheck = { run: (context: any, data: any, read: any) => string[] };
+
+/** Both checks read only the package, so neither has any business with the node map. */
+const noReads = () => {
+  throw new Error("A shadowed check read the node map.");
+};
 
 /** Each graded family's own no-other-transactions, by the family's collection. */
 const NO_OTHER_TRANSACTIONS_OF: Partial<Record<CollectionKey, ShadowedCheck>> = {
@@ -93,7 +98,7 @@ const checksReportedOn = (context: OcfMachineContext, transaction: Transaction, 
     const check: ShadowedCheck | undefined =
       id === NO_EARLIER_REMOVAL ? noEarlierRemoval : NO_OTHER_TRANSACTIONS_OF[lifecycleFamilies(descriptor)[0]];
     if (check === undefined) throw new Error(`No ${id} to run for ${transaction.object_type}.`);
-    return check.run(context, transaction).length > 0;
+    return check.run(context, transaction, noReads).length > 0;
   });
 
 /**

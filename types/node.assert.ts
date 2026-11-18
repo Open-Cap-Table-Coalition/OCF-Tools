@@ -1,6 +1,6 @@
 /** Compile-time guarantees for node composition and derived field access. */
 import { readNodeField, withNodeField, type Field, type FieldKey, type FieldValue, type NodeBase, type NodeMaps } from "../ocf_validator/node";
-import { isSecurityFamily, type SecurityNode } from "../ocf_validator/nodes";
+import { fieldAt, securityField, isSecurityFamily, type NodeMap, type SecurityNode } from "../ocf_validator/nodes";
 import type { CollectionElement } from "../ocf_validator/ocfMachine";
 import type { Equal, Expect } from "./type-assert";
 
@@ -40,3 +40,14 @@ withNodeField(warrant, "issuance", convertible.issuance);
 withNodeField(security, "issuance", convertible.issuance);
 // @ts-expect-error — node identity remains readonly.
 example.id = "different";
+
+// Values follow the addressed field, including refs authored as plain objects.
+declare const nodes: NodeMap;
+const issuance = fieldAt(nodes, securityField("warrantIssuances", "w", "issuance"));
+type _RefIssuance = Expect<Equal<typeof issuance, Field<CollectionElement["warrantIssuances"]> | undefined>>;
+const literal = fieldAt(nodes, { kind: "security", family: "warrantIssuances", id: "w", field: "issuance" });
+type _LiteralIssuance = Expect<Equal<typeof literal, typeof issuance>>;
+// @ts-expect-error — addresses cannot name identity as a state field.
+securityField("warrantIssuances", "w", "id");
+// @ts-expect-error — a caller cannot choose a value type independent of the address.
+fieldAt<number>(nodes, securityField("warrantIssuances", "w", "issuance"));

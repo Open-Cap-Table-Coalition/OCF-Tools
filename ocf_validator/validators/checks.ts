@@ -1,9 +1,9 @@
 import type { OCFStockIssuance } from "@opencaptablecoalition/ocf-types";
 import type { OcfTransaction, TransactionFor } from "../../types/ocf-input";
-import type { DeepReadonly, OcfMachineContext } from "../../types/validator";
-import { outstandingSecurity } from "../nodes";
+import type { DeepReadonly } from "../../types/validator";
+import { securityField } from "../nodes";
 import type { CollectionElement, CollectionKey, TxKey } from "../ocfMachine";
-import { text, type CheckObject } from "./checkKit";
+import { text, type CheckContext, type CheckObject } from "./checkKit";
 
 /**
  * The seven TX_PLAN_SECURITY_* types are older names OCF still accepts for
@@ -74,8 +74,9 @@ export const stakeholderExists = {
  * No transaction dated before this one removed its security from the cap
  * table: no cancellation, conversion, warrant exercise, repurchase,
  * reissuance, retraction, or transfer of it (see the machine's `removals`).
- * The run takes transactions in date order and stops at the first that fails,
- * so a removal dated before this transaction has already run.
+ * The run takes transactions in date order, so a removal dated before this
+ * transaction has already been reached. The index holds a removal whether or
+ * not it passed its own checks.
  *
  * The graded issuances declare it, so a removed security_id can't be issued
  * again. The machine runs it first on the transactions that can't declare it:
@@ -187,6 +188,10 @@ export function familyChecksFor({
    * security of the family under that `security_id`. Only an issuance puts a
    * security in the map, which tests/ocfMachine.test.ts checks.
    *
+   * It reads the security's lifecycle, so it's blocked when an earlier
+   * failure leaves that in doubt: a failed issuance, or a failed transaction
+   * on the security since.
+   *
    * When there's no match, the message says why, worked out from the package's
    * full transaction history: the security was never issued, it's only issued
    * after this transaction, or it was issued on or before this date but is no
@@ -201,7 +206,8 @@ export function familyChecksFor({
     id: "issuance-exists",
     severity: "error",
     description: `The ${name} issuance referenced by the transaction's security_id is outstanding as of the transaction's date.`,
-    run: (context, data) => {
+    reads: (data) => [securityField(collection, data.security_id, "lifecycle")],
+    run: (context, data, read) => {
       const messages: string[] = [];
 
       // OCF requires a date on every transaction, but nothing checks that
@@ -214,7 +220,7 @@ export function familyChecksFor({
         return messages;
       }
 
-      if (outstandingSecurity(context.nodes, collection, data.security_id) !== undefined) return messages;
+      if (read(securityField(collection, data.security_id, "lifecycle")) === "outstanding") return messages;
 
       // The type comparison comes first because it tells TypeScript this is an
       // issuance, which is what allows reading `security_id` and `date` next.
@@ -347,7 +353,7 @@ const resultingIds = (
 // so a duplicated security_id is reported as itself, whatever order its
 // issuances come in.
 const resultingStockIssuances = (
-  context: DeepReadonly<OcfMachineContext>,
+  context: DeepReadonly<CheckContext>,
   resultingId: string,
 ): DeepReadonly<OCFStockIssuance>[] =>
   context.ocfPackageContent.transactions.filter(
@@ -357,7 +363,7 @@ const resultingStockIssuances = (
 
 // The stock issuance a resulting id names, if it names exactly one.
 const resultingStockIssuance = (
-  context: DeepReadonly<OcfMachineContext>,
+  context: DeepReadonly<CheckContext>,
   resultingId: string,
 ): DeepReadonly<OCFStockIssuance> | undefined => {
   const matches = resultingStockIssuances(context, resultingId);
@@ -455,14 +461,21 @@ export function resultingChecksFor({
     severity: "error",
     description:
       `Each resulting stock issuance names the stakeholder of the ${participle} ${name} issuance.`,
-    run: (context, data) => {
+    reads: (data) => [
+      securityField(collection, data.security_id, "lifecycle"),
+      securityField(collection, data.security_id, "issuance"),
+    ],
+    run: (context, data, read) => {
       const messages: string[] = [];
 
       // The reference stakeholder comes from the outstanding issuance this
       // transaction acts on — the same security issuance-exists matches. With none,
       // issuance-exists already carries the failure and there is no reference
       // to compare against, so this check stays silent.
-      const reference = outstandingSecurity(context.nodes, collection, data.security_id)?.issuance.value;
+      const reference =
+        read(securityField(collection, data.security_id, "lifecycle")) === "outstanding"
+          ? read(securityField(collection, data.security_id, "issuance"))
+          : undefined;
       if (reference === undefined) return messages;
 
       // As with the date check, only resulting ids backed by exactly one stock

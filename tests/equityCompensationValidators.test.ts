@@ -82,16 +82,23 @@ describe("equity compensation issuance validity", () => {
     expect(snapshot.context.findings).toEqual([]);
   });
 
-  it("halts an invalid issuance in validationError with the error finding recorded", () => {
+  it("records an invalid issuance's error finding and goes on, with the security withheld and marked", () => {
     const actor = startSeeded(withStakeholder("someone-else"));
     actor.send(ev("TX_EQUITY_COMPENSATION_ISSUANCE", issuance()));
 
     const snapshot = actor.getSnapshot();
-    expect(snapshot.value).toBe("validationError");
+    // A failing transaction no longer stops the run (#231).
+    expect(snapshot.value).toBe("capTable");
     expect(snapshot.context.findings).toHaveLength(1);
     expect(snapshot.context.findings[0].check).toBe("stakeholder-exists");
     expect(collection(snapshot.context, "equityCompensation")).toEqual([]);
-    expect(snapshot.context.result).toContain("stakeholder-exists");
+    // The security has a node all the same: nothing is known of it, and it's
+    // marked with the issuance that failed.
+    const root = snapshot.context.findings[0].subject;
+    expect(snapshot.context.nodes.security.get("sec1")).toMatchObject({
+      lifecycle: { value: undefined, defects: [root] },
+      issuance: { value: undefined, defects: [root] },
+    });
   });
 });
 
@@ -489,18 +496,17 @@ describe("equity compensation release validity", () => {
     expect(findings[0].message).toContain("sec1");
   });
 
-  // Release used to be passthrough, which would leave the machine in capTable
-  // here; now an invalid release stops the run.
-  it("halts an invalid release in validationError with the error finding recorded", () => {
+  // Release used to be passthrough, which recorded nothing here; now an
+  // invalid release is recorded, and the run goes on (#231).
+  it("records an invalid release's error finding and goes on", () => {
     // In the package history but not the live collection.
     const actor = startSeeded(contextWith({ transactions: [issuanceRecord("sec1")] }));
     actor.send(ev("TX_EQUITY_COMPENSATION_RELEASE", release()));
 
     const snapshot = actor.getSnapshot();
-    expect(snapshot.value).toBe("validationError");
+    expect(snapshot.value).toBe("capTable");
     expect(snapshot.context.findings).toHaveLength(1);
     expectFindingShape(snapshot.context.findings[0], "issuance-exists", subject);
-    expect(snapshot.context.result).toContain("failed on rel1");
   });
 
   it("passes a second full release, which quantity-outstanding would flag once it's written", () => {
@@ -568,7 +574,7 @@ describe("equity compensation repricing validity", () => {
     const cancellation = { id: "can-1", object_type: "TX_EQUITY_COMPENSATION_CANCELLATION", security_id: "sec1", quantity: "1000", reason_text: "Terminated", date: "2021-01-01" };
 
     const { result, findings } = validatePackage([grant, cancellation, repricing({ date: "2021-06-01" })], [{ id: "sh1" }]);
-    expect(result).toContain("failed on rep1");
+    expect(result).toBe("The validation of the OCF package for Test Co is complete and found 1 error.");
     expect(findings).toHaveLength(1);
     expectFindingShape(findings[0], "issuance-exists", subject);
   });
@@ -805,7 +811,8 @@ describe("a conflicting transaction pair flags the later transaction, not the ea
 
     actor.send(ev("TX_EQUITY_COMPENSATION_RETRACTION", retraction));
     const { context, value } = actor.getSnapshot();
-    expect(value).toBe("validationError");
+    // A failing transaction no longer stops the run (#231).
+    expect(value).toBe("capTable");
 
     const errors = context.findings.filter((f) => f.severity === "error");
     expect(errors).toHaveLength(1);
@@ -836,7 +843,8 @@ describe("a conflicting transaction pair flags the later transaction, not the ea
 
     actor.send(ev("TX_EQUITY_COMPENSATION_ACCEPTANCE", acceptance));
     const { context, value } = actor.getSnapshot();
-    expect(value).toBe("validationError");
+    // A failing transaction no longer stops the run (#231).
+    expect(value).toBe("capTable");
 
     const errors = context.findings.filter((f) => f.severity === "error");
     expect(errors.map((f) => f.check).sort()).toEqual(["issuance-exists", "no-retraction"]);
@@ -893,7 +901,7 @@ describe("the validator accepts cancelling what's left of a grant after part of 
 
   it("but still fails an exercise dated after the cancellation", () => {
     const { result, findings } = validatePackage([option, cancellation("opt-1", "2021-01-01"), exercise("2021-06-01")], stakeholders);
-    expect(result).toContain("failed on ex-1");
+    expect(result).toBe("The validation of the OCF package for Test Co is complete and found 1 error.");
     expect(findings.map((f) => f.check)).toEqual(["issuance-exists"]);
   });
 });
@@ -990,7 +998,7 @@ describe("declared and emitted checks stay consistent across the family", () => 
 // ---------------------------------------------------------------------------
 
 describe("equity compensation family findings migrate to the findings channel", () => {
-  it("routes an invalid equity compensation transaction to findings, leaves report clear, and serializes the errors in the failure result", () => {
+  it("routes an invalid equity compensation transaction to findings, leaves report clear, and counts the errors in the result", () => {
     const actor = startSeeded(baseContext());
     // No stakeholder matches, so the issuance is invalid.
     actor.send(ev("TX_EQUITY_COMPENSATION_ISSUANCE", {
@@ -1002,14 +1010,18 @@ describe("equity compensation family findings migrate to the findings channel", 
     }));
 
     const { context, value } = actor.getSnapshot();
-    expect(value).toBe("validationError");
+    // A failing transaction no longer stops the run (#231).
+    expect(value).toBe("capTable");
     // The errors landed on findings…
     expect(context.findings.length).toBeGreaterThan(0);
     expect(context.findings.every((f) => f.severity === "error")).toBe(true);
     // …no report entry was written for a migrated equity compensation type…
     const migrated = MIGRATED_KEYS as readonly string[];
     expect(context.report.some((entry: any) => migrated.includes(entry?.transaction_type))).toBe(false);
-    // …and the failure result serialized the error findings.
-    expect(context.result).toContain(JSON.stringify(context.findings, null, 2));
+    // …and the result, written when the run ends, counts them.
+    actor.send({ type: "RUN_END", date: "2021-01-01" });
+    expect(actor.getSnapshot().context.result).toBe(
+      `The validation of the OCF package for Test Co is complete and found ${context.findings.length} error${context.findings.length === 1 ? "" : "s"}.`,
+    );
   });
 });

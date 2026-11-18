@@ -7,9 +7,8 @@ import type { Subject } from "../types/finding";
  *  - `writer`: the transaction that last wrote the value, located the way a
  *              finding's subject is. `undefined` for a value no transaction
  *              wrote.
- *  - `defects`: the transactions whose failure leaves this field unreliable.
- *              Empty for a field that can be trusted. Nothing marks a field
- *              yet (#231).
+ *  - `defects`: the root transactions whose failure leaves this field
+ *              unreliable. Empty for a field that can be trusted.
  */
 export type Field<T> = {
   readonly value: T | undefined;
@@ -47,3 +46,15 @@ type FieldWrite<N, P extends keyof N> =
 /** Replace one tracked field, sharing all others. Identity is never a field write. */
 export const withNodeField = <N, P extends FieldKey<N>>(node: N, field: P, value: NoInfer<FieldWrite<N, P>>): N =>
   ({ ...node, [field]: value });
+
+/** Addresses follow each concrete node's discriminators and tracked fields. */
+export type FieldAddress<N extends { kind: string; id: unknown }> = N extends unknown ? {
+  [P in FieldKey<N>]: Pick<N, "kind" | "id"> &
+    (N extends { family: unknown } ? Pick<N, "family"> : {}) & { readonly field: P };
+}[FieldKey<N>] : never;
+
+/** Resolve the value type from an address, never from a caller-supplied type parameter. */
+export type ReferenceValue<Nodes extends { kind: string; id: unknown }, Ref> =
+  Nodes extends unknown ? Ref extends FieldAddress<Nodes>
+    ? Ref["field"] extends FieldKey<Nodes> ? FieldValue<Nodes, Ref["field"]> : never
+    : never : never;

@@ -32,9 +32,10 @@ export type OcfMachineContext = {
   report: any[];
   findings: Finding[];
   /**
-   * Machine bookkeeping, not validator input: the error findings of the most
-   * recently recorded transaction. Written at record time, read only by the
-   * failure branch to build the failure message.
+   * Machine bookkeeping, not validator input: the error findings that halted
+   * the run, when it was halted by the one check that still can: a legacy
+   * issuance of a security removed earlier. Written at record time, read only
+   * by that failure branch to build the failure message.
    */
   lastErrorFindings: Finding[];
   snapshots: Snapshot[];
@@ -57,12 +58,13 @@ export type DeepReadonly<T> = T extends readonly (infer E)[]
 /**
  * A graded validator for a transaction whose payload is `T`: receives the
  * payload directly — no guard flag — and returns findings. The machine derives
- * everything else from that one return value: the transaction is valid iff no
- * finding carries severity "error" (warnings alone do not block), and the
- * findings are recorded on `context.findings`, never on `context.report`.
- * The machine invokes a validator up to twice per transaction (guard and
- * record), always with identical inputs, so a validator must be pure; its
- * inputs are typed `DeepReadonly` so mutating them is a compile error.
+ * everything else from that one return value. The findings are recorded on
+ * `context.findings`, never on `context.report`. If none of them is at
+ * severity "error", the transaction's writes are applied (warnings alone
+ * don't stop them). Otherwise its writes are withheld and marked, and the
+ * run goes on (#231). The machine runs a validator once per transaction; a
+ * validator must still be pure, and its inputs are typed `DeepReadonly` so
+ * mutating them is a compile error.
  */
 export type GradedValidator<T> = (
   context: DeepReadonly<OcfMachineContext>,
@@ -82,8 +84,8 @@ export type GradedValidator<T> = (
  *                   within one transaction type's list; the same id can appear
  *                   under different transaction types. Copied onto each finding.
  *  - `severity`:    "error" or "warning". Copied onto every finding the check
- *                   produces. Only errors block a transaction, so changing a
- *                   check to "warning" lets transactions that fail it through.
+ *                   produces. Only an error fails a transaction, so changing
+ *                   a check to "warning" lets transactions that fail it through.
  *  - `description`: the sentence the report shows for this check. Required.
  *  - `implemented`: left out for a check the validator performs; `false` for a
  *                   known gap, a check that's needed but not written yet. It

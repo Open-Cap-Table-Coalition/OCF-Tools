@@ -1,5 +1,5 @@
 import type { Subject } from "../types/finding";
-import { withNodeField, type Field, type NodeBase, type NodeMaps } from "./node";
+import { readNodeField, withNodeField, type Field, type FieldAddress, type FieldKey, type NodeBase, type NodeMaps, type ReferenceValue } from "./node";
 export type { Field, NodeBase } from "./node";
 import type { LifecycleState } from "./lifecycle";
 import type { CollectionElement, CollectionKey, Descriptor } from "./ocfMachine";
@@ -33,6 +33,15 @@ import type { CollectionElement, CollectionKey, Descriptor } from "./ocfMachine"
 // A removed security stays in the map with its lifecycle set to removed. A
 // later transaction that names it can then be told it was removed and by
 // what, and a return to pool can read the grant it returns.
+//
+// A transaction that fails doesn't stop the run (#231). Its writes are
+// withheld, so every field it would have written keeps the value it had, and
+// each of those fields is marked with the transaction as the root. A check
+// that reads a marked field can't be trusted to run, so it comes back
+// blocked, naming the roots (see `toValidate` in `validators/checkKit.ts`).
+// A transaction with a blocked check passes the defects on to what it writes in
+// turn. Defects only ever spread: a field is never left stale and unmarked,
+// and a later valid write to a marked field leaves the defects on it.
 
 /** The issuance record of a security of any family. */
 export type Issuance = CollectionElement[CollectionKey];
@@ -46,6 +55,10 @@ export type Issuance = CollectionElement[CollectionKey];
  *                 issuance and by whatever removes it.
  *  - `issuance`:  the issuance transaction itself: its stakeholder, quantity,
  *                 and so on. Written once, by the issuance.
+ *
+ * A security whose issuance failed still has a node. Both fields are marked
+ * and neither has a value: the validator knows something claims that
+ * security_id, and nothing more.
  */
 export type SecurityState<C extends CollectionKey> = {
   lifecycle: LifecycleState;
@@ -67,8 +80,12 @@ export type NodeMap = NodeMaps<SecurityNode>;
 /** A map with no nodes: the state before any transaction. */
 export const emptyNodes = (): NodeMap => ({ security: new Map() });
 
-/** A field as a transaction writes it: the value, with that transaction as its writer. */
-const written = <T>(value: T, writer: Subject): Field<T> => ({ value, writer, defects: [] });
+/**
+ * A field as a transaction writes it: the value, with that transaction as its
+ * writer. Any defects on the previous field remain: a valid write
+ * doesn't make an unreliable field reliable, and nothing clears defects yet.
+ */
+const written = <T>(value: T, writer: Subject, was?: Field<T>): Field<T> => ({ value, writer, defects: was?.defects ?? [] });
 
 /** The slice of a transaction the reducer reads. Everything else it carries goes into the node unread. */
 type Applied = { object_type: string; id: string; security_id?: unknown };
@@ -78,6 +95,40 @@ const subjectOf = (transaction: Applied): Subject => ({
   object_type: transaction.object_type as Subject["object_type"],
   id: transaction.id,
 });
+
+/**
+ * What a transaction's checks decided about its writes:
+ *
+ *  - `ok: true`:  apply them.
+ *  - `ok: false`: withhold them, and mark every field they would have
+ *                 written with `roots`. The roots are the transaction itself
+ *                 if one of its checks failed, and whatever blocked it if one
+ *                 was blocked.
+ */
+export type Verdict = { readonly ok: true } | { readonly ok: false; readonly roots: readonly Subject[] };
+
+const APPLY: Verdict = { ok: true };
+
+/** `defects` with `roots` added, each root once. */
+const withRoots = (defects: readonly Subject[], roots: readonly Subject[]): readonly Subject[] => {
+  const added = roots.filter(
+    (root) => !defects.some((held) => held.object_type === root.object_type && held.id === root.id),
+  );
+  return added.length === 0 ? defects : [...defects, ...added];
+};
+
+/** A field left as it was, and no longer to be trusted: the same value and writer, marked with `roots`. */
+const markDefects = <F extends Field<unknown>>(field: F, roots: readonly Subject[]): F => ({ ...field, defects: withRoots(field.defects, roots) });
+
+/** Mark both issuance writes while preserving their family/payload pairing. */
+const markIssuanceDefects = <N extends SecurityNode>(node: N, roots: readonly Subject[]): N => ({
+  ...node,
+  lifecycle: markDefects(node.lifecycle, roots),
+  issuance: markDefects(node.issuance, roots),
+});
+
+/** A field nothing is known about. */
+const unknown = <T>(): Field<T> => ({ value: undefined, writer: undefined, defects: [] });
 
 /**
  * A new map with `node` in it, sharing every other node with `nodes`.
@@ -93,11 +144,15 @@ const withSecurity = (nodes: NodeMap, node: SecurityNode, { last = false } = {})
   return { ...nodes, security };
 };
 
+/** The families whose securities a transaction can name: its `collection`, or the `families` it lists. */
+const familiesOf = (descriptor: Descriptor): readonly CollectionKey[] =>
+  "collection" in descriptor ? [descriptor.collection] : descriptor.families;
+
 /**
- * The reducer: the map that results from applying one valid transaction.
- * Pure. It returns `nodes` itself when the transaction changes nothing.
+ * The reducer: the map that results from one transaction. Pure. It returns
+ * `nodes` itself when the transaction changes nothing.
  *
- * What a transaction does is its descriptor's `effect`:
+ * What a valid transaction writes is its descriptor's `effect`:
  *
  *  - "append": issues the security. Its node is written whole: outstanding,
  *    holding the issuance. A security_id issued again replaces the node that
@@ -105,20 +160,43 @@ const withSecurity = (nodes: NodeMap, node: SecurityNode, { last = false } = {})
  *  - "remove": sets the security's lifecycle to removed. The node stays. It
  *    acts only on an outstanding security of its own family, as filtering a
  *    family's collection did.
- *  - "none" and "passthrough": change nothing.
+ *  - "none" and "passthrough": write nothing.
+ *
+ * A transaction whose `verdict` isn't ok writes nothing either. Every field
+ * it would have written keeps its value and is marked with the verdict's
+ * roots instead:
+ *
+ *  - "append": both fields of its security. If nothing holds that
+ *    security_id, the node is created with neither value known, so a later
+ *    transaction on the security finds it there and is blocked, where it
+ *    would otherwise fail on a security that "doesn't exist" and report a
+ *    second error for one mistake.
+ *  - anything else that names a security: that security's lifecycle. A
+ *    transaction that acts on a security writes where it is in its life, even
+ *    one that leaves it outstanding, so when it fails that's what is in
+ *    doubt. A transaction on a security the map doesn't hold in one of its
+ *    families has nothing to mark.
  */
-export function applyTransaction(nodes: NodeMap, descriptor: Descriptor, transaction: Applied): NodeMap {
+export function applyTransaction(
+  nodes: NodeMap,
+  descriptor: Descriptor,
+  transaction: Applied,
+  verdict: Verdict = APPLY,
+): NodeMap {
+  if (!verdict.ok) return withheld(nodes, descriptor, transaction, verdict.roots);
+
   const writer = subjectOf(transaction);
 
   if (descriptor.effect === "append") {
     // The dispatch descriptor supplies the family for this parsed issuance.
     // Bridge that runtime pairing to the discriminated union at this boundary.
+    const held = nodes.security.get(transaction.security_id);
     const node = {
       kind: "security",
       id: transaction.security_id,
       family: descriptor.collection,
-      lifecycle: written<LifecycleState>("outstanding", writer),
-      issuance: written(transaction as unknown as Issuance, writer),
+      lifecycle: written<LifecycleState>("outstanding", writer, held?.lifecycle),
+      issuance: written(transaction as unknown as Issuance, writer, held?.issuance),
     } as SecurityNode;
     return withSecurity(nodes, node, { last: true });
   }
@@ -126,11 +204,74 @@ export function applyTransaction(nodes: NodeMap, descriptor: Descriptor, transac
   if (descriptor.effect === "remove") {
     const node = outstandingSecurity(nodes, descriptor.collection, transaction.security_id);
     if (node === undefined) return nodes;
-    return withSecurity(nodes, withNodeField(node, "lifecycle", written<LifecycleState>("removed", writer)));
+    return withSecurity(nodes, withNodeField(node, "lifecycle", written<LifecycleState>("removed", writer, node.lifecycle)));
   }
 
   return nodes;
 }
+
+/** The map after a transaction whose writes are withheld: see `applyTransaction`. */
+function withheld(nodes: NodeMap, descriptor: Descriptor, transaction: Applied, roots: readonly Subject[]): NodeMap {
+  if (!("security_id" in transaction)) return nodes;
+  const held = nodes.security.get(transaction.security_id);
+
+  if (descriptor.effect === "append") {
+    // The issuance would have replaced whatever holds its security_id, of
+    // whichever family.
+    const node: SecurityNode = held ?? {
+      kind: "security",
+      id: transaction.security_id,
+      family: descriptor.collection,
+      lifecycle: unknown<LifecycleState>(),
+      issuance: unknown<never>(),
+    };
+    return withSecurity(nodes, markIssuanceDefects(node, roots));
+  }
+
+  if (held === undefined || !familiesOf(descriptor).includes(held.family)) return nodes;
+  return withSecurity(nodes, { ...held, lifecycle: markDefects(held.lifecycle, roots) });
+}
+
+// ---------------------------------------------------------------------------
+// Reading a field
+// ---------------------------------------------------------------------------
+
+/**
+ * The address of one field of one node: what a check declares it reads. A
+ * security is addressed with its family, since a security of another family
+ * under the same id is a different security.
+ *
+ * Addresses and value types are derived from the concrete node definitions.
+ */
+export type FieldRef = FieldAddress<SecurityNode>;
+export type FieldRefValue<R extends FieldRef> = ReferenceValue<SecurityNode, R>;
+
+/** The address of a field of the security of `family` with this `security_id`. */
+export function securityField<C extends CollectionKey, P extends FieldKey<SecurityNode<C>>>(
+  family: C, id: unknown, field: P,
+): Extract<FieldRef, { kind: "security"; family: C; field: P }> {
+  return { kind: "security", family, id, field } as Extract<FieldRef, { kind: "security"; family: C; field: P }>;
+}
+
+/** The field at an address, or `undefined` if the map holds no such node. */
+export const fieldAt = <R extends FieldRef>(nodes: NodeMap, ref: R): Field<FieldRefValue<R>> | undefined => {
+  const node = nodes.security.get(ref.id);
+  if (node === undefined || node.family !== ref.family) return undefined;
+  // The family check establishes the pairing; TypeScript cannot correlate
+  // the generic address with the runtime union member selected from the map.
+  return readNodeField(node, ref.field) as Field<FieldRefValue<R>>;
+};
+
+/** An address in words, for a message: "the lifecycle of security war-1". */
+export const describeField = (ref: FieldRef): string => `the ${ref.field} of security ${show(ref.id)}`;
+
+const show = (value: unknown): string => {
+  try {
+    return typeof value === "string" ? value : JSON.stringify(value) ?? String(value);
+  } catch {
+    return "[Unserializable value]";
+  }
+};
 
 /** Whether a security is outstanding: issued, and not removed. */
 const isOutstanding = (node: SecurityNode): boolean => node.lifecycle.value === "outstanding";

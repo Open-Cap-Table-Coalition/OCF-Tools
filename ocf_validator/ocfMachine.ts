@@ -8,7 +8,7 @@ import type {
 } from "@opencaptablecoalition/ocf-types";
 import type { OcfTransaction, TransactionFor } from "../types/ocf-input";
 import type { OcfPackageContent } from "../read_ocf_package";
-import type { Finding } from "../types/finding";
+import type { Finding, Subject } from "../types/finding";
 import type { Check, GradedValidator, LifecycleWord, OcfMachineContext } from "../types/validator";
 import validators from "./validators";
 import { TX_CONVERTIBLE_ISSUANCE } from "./validators/convertible/tx_convertible_issuance";
@@ -25,7 +25,7 @@ import { TX_WARRANT_TRANSFER } from "./validators/warrant/tx_warrant_transfer";
 import { TX_WARRANT_EXERCISE } from "./validators/warrant/tx_warrant_exercise";
 import { text, toValidate } from "./validators/checkKit";
 import { noEarlierRemoval } from "./validators/checks";
-import { applyTransaction, emptyNodes, outstanding } from "./nodes";
+import { applyTransaction, emptyNodes, outstanding, type Verdict } from "./nodes";
 import { TX_EQUITY_COMPENSATION_ISSUANCE, TX_PLAN_SECURITY_ISSUANCE } from "./validators/equity_compensation/tx_equity_compensation_issuance";
 import { TX_EQUITY_COMPENSATION_ACCEPTANCE, TX_PLAN_SECURITY_ACCEPTANCE } from "./validators/equity_compensation/tx_equity_compensation_acceptance";
 import { TX_EQUITY_COMPENSATION_EXERCISE, TX_PLAN_SECURITY_EXERCISE } from "./validators/equity_compensation/tx_equity_compensation_exercise";
@@ -156,7 +156,7 @@ const legacyContext = (context: OcfMachineContext): LegacyContext => ({
  * The list isn't only documentation, though. For validators built with
  * `defineValidator`, the same check definitions produce the findings, and each
  * finding's severity is copied from its check. Changing a check's severity
- * changes whether a failing transaction is blocked.
+ * changes whether a transaction that fails it has its writes withheld.
  *
  * Every descriptor also carries its `lifecycle` word (see `LifecycleWord` in
  * `types/validator.ts`): what the transaction does to the lifecycle of the
@@ -375,7 +375,7 @@ const subjectOf = (event: ValidatorEvent): string =>
     ? event.data.id
     : event.type;
 
-/** The single blocking rule for graded findings: only an error blocks. */
+/** The one rule for which findings fail a transaction: only an error-level one does. */
 const isErrorFinding = (finding: Finding): boolean => finding.severity === "error";
 
 /**
@@ -467,11 +467,11 @@ export const malformedResult = (ocfPackageContent: OcfPackageContent, transactio
 // ---------------------------------------------------------------------------
 
 /**
- * The valid branch's change to the node map: the transaction applied by the
- * pure reducer in `nodes.ts`, driven by its descriptor's `effect`. An
- * "append" issues its security and a "remove" marks it removed. A "none" or
- * passthrough transaction, or a control event, changes nothing and returns
- * no update.
+ * The valid branch's change to the node map for a legacy transaction: the
+ * transaction applied by the pure reducer in `nodes.ts`, driven by its
+ * descriptor's `effect`. An "append" issues its security and a "remove" marks
+ * it removed. A "none" or passthrough transaction, or a control event,
+ * changes nothing and returns no update.
  */
 export function nodesUpdate(
   context: OcfMachineContext,
@@ -480,6 +480,88 @@ export function nodesUpdate(
   if (isControlEvent(event)) return {};
   const nodes = applyTransaction(context.nodes, TX_DESCRIPTORS[event.type], event.data);
   return nodes === context.nodes ? {} : { nodes };
+}
+
+// ---------------------------------------------------------------------------
+// Transactions validated by findings: record, then apply or withhold
+// ---------------------------------------------------------------------------
+
+/**
+ * What a transaction's findings decide about its writes (see `Verdict` in
+ * `nodes.ts`). Only an error-level check counts, as only an error ever failed
+ * a transaction: a warning doesn't, whether it was raised or blocked.
+ *
+ *  - No error-level finding: the writes are applied.
+ *  - Otherwise they're withheld and marked. The roots are the transaction
+ *    itself if one of its checks failed, together with the roots of every
+ *    check of its that was blocked. A transaction that was only blocked isn't
+ *    a root: it passes on the roots that blocked it.
+ */
+export function verdictOf(subject: Subject, findings: readonly Finding[]): Verdict {
+  const errors = findings.filter(isErrorFinding);
+  if (errors.length === 0) return { ok: true };
+
+  const roots: Subject[] = [];
+  const add = (root: Subject) => {
+    if (!roots.some((held) => held.object_type === root.object_type && held.id === root.id)) roots.push(root);
+  };
+  if (errors.some((finding) => finding.outcome === "failed")) add(subject);
+  for (const finding of errors) {
+    if (finding.outcome === "blocked") finding.roots.forEach(add);
+  }
+  return { ok: false, roots };
+}
+
+/**
+ * The whole update for one transaction validated by findings: its validator
+ * is run once, its findings are recorded, and the reducer applies its writes
+ * or withholds and marks them, by the verdict. The run goes on either way.
+ * `validate` is the transaction's own graded validator, or for a passthrough
+ * type the one check the machine runs on it.
+ */
+export function findingsUpdate(
+  descriptor: Descriptor,
+  validate: GradedValidator<any>,
+  context: OcfMachineContext,
+  event: ValidatorEvent,
+): Partial<OcfMachineContext> {
+  const found = validate(context, event.data);
+  const subject = { object_type: event.data?.object_type, id: event.data?.id };
+  const nodes = applyTransaction(context.nodes, descriptor, event.data, verdictOf(subject, found));
+  return {
+    ...(found.length === 0 ? {} : { findings: [...context.findings, ...found] }),
+    ...(nodes === context.nodes ? {} : { nodes }),
+  };
+}
+
+/**
+ * The `result` of a run that reached its end. A run halts only on a legacy
+ * validator's failure, an unknown transaction type, or a throw, and each of
+ * those writes its own result. Everything else is counted here from the
+ * findings.
+ *
+ * Root errors and their consequences are counted apart. An error is a check
+ * that ran and failed: something to fix. A blocked check is one that couldn't
+ * run because of an error, so it's counted as that error's consequence, not
+ * as a problem of its own. Warnings don't make a package invalid, so a valid
+ * package can have them; the result counts them, so a caller reading only
+ * `result` knows to look at `findings` (#215).
+ */
+export function completedResult(context: OcfMachineContext): string {
+  const count = (matches: (finding: Finding) => boolean) => context.findings.filter(matches).length;
+  const errors = count((finding) => finding.outcome === "failed" && finding.severity === "error");
+  const blocked = count((finding) => finding.outcome === "blocked");
+  const warnings = count((finding) => finding.outcome === "failed" && finding.severity === "warning");
+
+  const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
+  const counted = warnings === 0 ? "" : `, with ${plural(warnings, "warning")}`;
+  const { legal_name } = context.ocfPackageContent.manifest.issuer;
+
+  if (errors === 0 && blocked === 0) {
+    return text`The validation of the OCF package for ${legal_name} is complete and the package appears valid${counted}.`;
+  }
+  const consequences = blocked === 0 ? "" : ` and ${plural(blocked, "check")} blocked by ${errors === 1 ? "it" : "them"}`;
+  return text`The validation of the OCF package for ${legal_name} is complete and found ${plural(errors, "error")}${consequences}${counted}.`;
 }
 
 // ---------------------------------------------------------------------------
@@ -516,15 +598,22 @@ const notRemoved = {
 } satisfies ActiveDescriptor;
 
 /**
- * Build the `on` map for every key in `TX_DESCRIPTORS`. Active keys share the
- * two-branch transition. Graded validators declare no-earlier-removal where it
- * applies; for the transactions that can't declare it, the machine runs it
- * first. A legacy issuance runs it before its own validator, and a
- * passthrough type runs only it and is otherwise a no-op. The return to pool
- * is exempt: it records where a removed security's shares went.
+ * Build the `on` map for every key in `TX_DESCRIPTORS`.
+ *
+ * A transaction validated by findings never halts the run. A graded type has
+ * one transition: validate once, record the findings, and apply its writes or
+ * withhold and mark them (`applyByFindings`). A passthrough type has no
+ * validator of its own, so the machine runs no-earlier-removal on it and
+ * treats it the same way; the return to pool is exempt, since it records
+ * where a removed security's shares went.
+ *
+ * A legacy type keeps the two-branch transition: valid stays in `capTable`,
+ * and a failure ends the run in `validationError`. A legacy issuance can't
+ * declare no-earlier-removal either, so the machine runs it first, and that
+ * failure halts too: it's a stock failure.
  */
 function buildTransactionHandlers() {
-  const activeTransitions = [
+  const legacyTransitions = [
     {
       guard: "isValidTx",
       target: "capTable",
@@ -540,16 +629,16 @@ function buildTransactionHandlers() {
     target: "validationError",
     actions: ["recordRemoval", "setRemovalError"],
   } as const;
+  const byFindings = { target: "capTable", actions: ["applyByFindings"] } as const;
 
   const handlerFor = (type: TxKey) => {
     const descriptor = TX_DESCRIPTORS[type];
     if (descriptor.effect === "passthrough") {
-      return type === "TX_STOCK_PLAN_RETURN_TO_POOL" ? {} : [afterRemoval];
+      return type === "TX_STOCK_PLAN_RETURN_TO_POOL" ? {} : byFindings;
     }
-    if (descriptor.effect === "append" && "legacyValidate" in descriptor) {
-      return [afterRemoval, ...activeTransitions];
-    }
-    return activeTransitions;
+    if ("validate" in descriptor) return byFindings;
+    if (descriptor.effect === "append") return [afterRemoval, ...legacyTransitions];
+    return legacyTransitions;
   };
 
   return (Object.keys(TX_DESCRIPTORS) as TxKey[]).reduce(
@@ -567,24 +656,33 @@ export const ocfMachine = setup({
     events: OcfMachineEvent;
   },
   guards: {
-    // Guard the valid branch via the type's own validator, legacyValidate or
-    // validate (see isValidOutcome). Control events never reach this guard
-    // (they have their own handlers); the narrow drops them so `event` carries
-    // the `data` the validator reads.
+    // Guard a legacy type's valid branch via its validator (see
+    // isValidOutcome). Control events never reach this guard (they have their
+    // own handlers); the narrow drops them so `event` carries the `data` the
+    // validator reads.
     isValidTx: ({ context, event }) => {
       if (isControlEvent(event)) return false;
       const descriptor = activeDescriptorFor(event.type);
       return descriptor ? isValidOutcome(descriptor, context, event) : false;
     },
-    // A passthrough transaction or issuance on a removed security (see
-    // noEarlierRemoval and buildTransactionHandlers).
+    // A legacy issuance on a removed security (see noEarlierRemoval and
+    // buildTransactionHandlers).
     followsRemoval: ({ context, event }) =>
       !isControlEvent(event) && !isValidOutcome(notRemoved, context, event),
   },
   actions: {
-    // Record the validator's outcome on its shape's channel — legacy report
-    // entries onto `report`, graded findings onto `findings`. Same descriptor
-    // as the guard, so the guard and the record can never diverge.
+    // A graded or passthrough transaction: validate once, record, and apply
+    // or withhold (see findingsUpdate). The run never halts here.
+    applyByFindings: assign(({ context, event }) => {
+      if (isControlEvent(event)) return {};
+      const descriptor = TX_DESCRIPTORS[event.type];
+      if ("validate" in descriptor) return findingsUpdate(descriptor, descriptor.validate, context, event);
+      return descriptor.effect === "passthrough" ? findingsUpdate(descriptor, notRemoved.validate, context, event) : {};
+    }),
+
+    // Record a legacy validator's outcome: its report entry onto `report`.
+    // Same descriptor as the guard, so the guard and the record can never
+    // diverge.
     recordOutcome: assign(({ context, event }) => {
       if (isControlEvent(event)) return {};
       const descriptor = activeDescriptorFor(event.type);
@@ -598,8 +696,8 @@ export const ocfMachine = setup({
         failureResult(isControlEvent(event) ? undefined : activeDescriptorFor(event.type), context, event),
     }),
 
-    // Valid branch: apply the transaction to the node map (see nodesUpdate).
-    // `none` descriptors (and control events) change nothing.
+    // A legacy type's valid branch: apply the transaction to the node map
+    // (see nodesUpdate). `none` descriptors (and control events) change nothing.
     applyToNodes: assign(({ context, event }) => nodesUpdate(context, event)),
 
     // The followsRemoval branch's record and failure message, as for a
@@ -656,16 +754,7 @@ export const ocfMachine = setup({
         },
         RUN_END: {
           target: "capTable",
-          actions: assign({
-            // Warnings don't stop a run, so a valid package can have them. The
-            // result counts them, so a caller reading only `result` knows to
-            // look at `findings` (#215).
-            result: ({ context }) => {
-              const warnings = context.findings.filter((finding) => finding.severity === "warning").length;
-              const counted = warnings === 0 ? "" : `, with ${warnings} warning${warnings === 1 ? "" : "s"}`;
-              return text`The validation of the OCF package for ${context.ocfPackageContent.manifest.issuer.legal_name} is complete and the package appears valid${counted}.`;
-            },
-          }),
+          actions: assign({ result: ({ context }) => completedResult(context) }),
         },
         // Fires only for runtime `type` strings outside TxKey (genuinely unknown /
         // malformed). Builds its message from `event.type`, never `event.data`.

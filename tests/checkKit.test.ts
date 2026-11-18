@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { defineValidator, text, type CheckObject } from "../ocf_validator/validators/checkKit";
+import { defineValidator, text, toValidate, type CheckObject } from "../ocf_validator/validators/checkKit";
+import type { OcfMachineContext } from "../types/validator";
 import { stakeholderExists } from "../ocf_validator/validators/checks";
 import { issuanceExists } from "../ocf_validator/validators/equity_compensation/checks";
 import { baseContext, contextWith, runValidator } from "./helpers";
@@ -76,6 +77,10 @@ describe("a finding's outcome", () => {
   });
 });
 
+/** The messages one check gives on its own, run the way a validator runs it. */
+const messagesOf = (check: CheckObject<any>, context: OcfMachineContext, data: Record<string, unknown>): string[] =>
+  toValidate([check])(context, data).map((finding) => finding.message);
+
 describe("every check message renders a malformed package value", () => {
   // Each case puts the unprintable value where its check interpolates a
   // package value, and expects that check's one finding to show it rather
@@ -96,14 +101,14 @@ describe("every check message renders a malformed package value", () => {
     contextWith({ equityCompensation: [equityCompensation] as any, transactions: [equityCompensation, ...transactions] });
 
   it("renders a malformed security id in the undated and no-longer-outstanding issuance messages", () => {
-    expect(issuanceExists.run(contextWith(), { security_id: unprintable } as any)).toEqual([
+    expect(messagesOf(issuanceExists, contextWith(), { security_id: unprintable })).toEqual([
       `The transaction has no date, so it can't be checked against the equity compensation issuance with security_id {"toString":null}.`,
     ]);
     // An issuance in the history, under the older name, and not in the live collection.
     const context = contextWith({
       transactions: [{ object_type: "TX_PLAN_SECURITY_ISSUANCE", security_id: unprintable, date: "2020-01-01" }],
     });
-    expect(issuanceExists.run(context, { security_id: unprintable, date: "2021-01-01" })).toEqual([
+    expect(messagesOf(issuanceExists, context, { security_id: unprintable, date: "2021-01-01" })).toEqual([
       `The equity compensation issuance referenced by security_id {"toString":null} (dated 2020-01-01) is not outstanding as of this transaction's date.`,
     ]);
   });

@@ -1,5 +1,6 @@
 import type { TransactionFor } from "../../types/ocf-input";
-import type { Finding } from "../../types/finding";
+import type { Finding, Subject } from "../../types/finding";
+import { describeField, fieldAt, type FieldRef, type FieldRefValue, type NodeMap } from "../nodes";
 import type {
   Check,
   DeepReadonly,
@@ -27,6 +28,20 @@ import type { CollectionKey, TxKey } from "../ocfMachine";
  * `defineValidator` won't compile a check attached to a transaction that lacks
  * them.
  *
+ * `reads` declares what the check reads of the cap table's state: the fields
+ * of the node map it depends on, as addresses, worked out from the
+ * transaction. Before the check runs, each address is looked up. If any of
+ * those fields is marked, the check isn't run: it comes back blocked, with
+ * the roots of the defects, because its answer would rest on state an earlier
+ * failure left unreliable. The transaction's other checks still run.
+ *
+ * A check gets at the node map only through `read`, the third argument to
+ * `run`, and `read` hands back only the fields `reads` declared. Reading
+ * anything else throws, and the context a check is given has no node map on
+ * it. So a check can't depend on state it didn't declare, which is what would
+ * let it run when it should have been blocked. A check that reads only the
+ * package (its transaction history, its stakeholders) declares nothing.
+ *
  * Write a check as `{ ... } satisfies CheckObject<P>` and leave `run`'s
  * parameters unannotated. They then take their types from here, which makes the
  * context and the transaction read-only inside `run`: a check that tries to
@@ -37,8 +52,19 @@ import type { CollectionKey, TxKey } from "../ocfMachine";
  * wrong-field protection above would quietly stop working.
  */
 export type CheckObject<P = unknown> = Pick<Check, "id" | "severity" | "description"> & {
-  run?: (context: DeepReadonly<OcfMachineContext>, data: DeepReadonly<P>) => string[];
+  reads?: (data: DeepReadonly<P>) => readonly FieldRef[];
+  run?: (context: DeepReadonly<CheckContext>, data: DeepReadonly<P>, read: ReadField) => string[];
 };
+
+/** The context a check is given: the machine's without the node map, which a check reads through `read`. */
+export type CheckContext = Omit<OcfMachineContext, "nodes">;
+
+/**
+ * Reads one field of the node map for a check: its value, or `undefined` if
+ * the map holds no such node or the value isn't known. It throws for a field
+ * the check didn't declare in `reads`.
+ */
+export type ReadField = <R extends FieldRef>(ref: R) => FieldRefValue<R> | undefined;
 
 const show = (value: unknown): string => {
   try {
@@ -123,6 +149,30 @@ const toMetadata = (checks: readonly CheckObject<any>[]): readonly Check[] =>
     return metadata;
   });
 
+const sameField = (a: FieldRef, b: FieldRef): boolean =>
+  a.kind === b.kind && a.family === b.family && a.id === b.id && a.field === b.field;
+
+/** The roots marking any of the fields at `refs`, each once, with the first marked field's address. */
+const defectsOn = (nodes: NodeMap, refs: readonly FieldRef[]): { roots: Subject[]; ref?: FieldRef } => {
+  const roots: Subject[] = [];
+  let first: FieldRef | undefined;
+  for (const ref of refs) {
+    const defects = fieldAt(nodes, ref)?.defects ?? [];
+    if (defects.length > 0) first ??= ref;
+    for (const root of defects) {
+      if (!roots.some((held) => held.object_type === root.object_type && held.id === root.id)) roots.push(root);
+    }
+  }
+  return { roots, ref: first };
+};
+
+/** "TX_WARRANT_ISSUANCE wi-1", or "x, y, and z" for several roots. */
+const namesOf = (roots: readonly Subject[]): string => {
+  const names = roots.map((root) => text`${root.object_type} ${root.id}`);
+  if (names.length <= 2) return names.join(" and ");
+  return `${names.slice(0, -1).join(", ")}, and ${names[names.length - 1]}`;
+};
+
 /**
  * Builds the validator function from the checks. It runs each check that has a
  * `run`, in list order, and turns every message returned into a finding. The
@@ -131,11 +181,16 @@ const toMetadata = (checks: readonly CheckObject<any>[]): readonly Check[] =>
  * outcome is "failed": a check that returns a message ran and found its
  * problem. The only thing a check controls is the message text.
  *
+ * A check isn't run if a field it declares in `reads` is marked. It produces
+ * one finding instead, with the outcome "blocked" and the roots of the defects,
+ * at the check's own severity. The other checks still run.
+ *
  * A check that throws produces one error finding saying so, whatever the
  * check's severity: a check that couldn't finish has checked nothing, so the
  * transaction can't pass on it. The other checks still run. A package value
  * of the wrong type can make a check throw (#218), and a throw that left the
- * validator would stop the whole run.
+ * validator would stop the whole run. A check that reads a field it didn't
+ * declare throws too, so it's reported the same way.
  *
  * `data` is typed `any` here. `defineValidator` checks every check against the
  * transaction's type before building one; any other caller must make sure its
@@ -145,13 +200,33 @@ export const toValidate =
   (checks: readonly CheckObject<any>[]): GradedValidator<any> =>
   (context, data: any) => {
     const subject = { object_type: data.object_type, id: data.id };
+    const { nodes, ...checkContext } = context;
     const findings: Finding[] = [];
     for (const check of checks) {
       if (!check.run) continue;
       let severity = check.severity;
       let messages: string[];
       try {
-        messages = check.run(context, data);
+        const refs = check.reads?.(data) ?? [];
+        const { roots, ref } = defectsOn(nodes, refs);
+        if (ref !== undefined) {
+          findings.push({
+            severity,
+            outcome: "blocked",
+            check: check.id,
+            message: `Not checked: it reads ${describeField(ref)}, which can't be relied on because ${namesOf(roots)} failed.`,
+            subject,
+            roots,
+          });
+          continue;
+        }
+        const read: ReadField = (wanted) => {
+          if (!refs.some((declared) => sameField(declared, wanted))) {
+            throw new Error(`It read ${describeField(wanted)}, which it doesn't declare in its reads.`);
+          }
+          return fieldAt(nodes, wanted)?.value;
+        };
+        messages = check.run(checkContext, data, read);
       } catch (error) {
         severity = "error";
         messages = [text`The check threw ${error}`];

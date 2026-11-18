@@ -1,0 +1,27 @@
+{
+  "ocf_version": "1.1.1-alpha+main",
+  "file_type": "OCF_MANIFEST_FILE",
+  "issuer": {
+    "id": "defectDemoCo",
+    "comments": [],
+    "object_type": "ISSUER",
+    "legal_name": "Defect Demo Co",
+    "formation_date": "2020-01-01",
+    "country_of_formation": "US"
+  },
+  "as_of": "2021-12-31",
+  "generated_at": "2021-12-31T00:00:00.000Z",
+  "stock_plans_files": [],
+  "stock_legend_templates_files": [],
+  "stock_classes_files": [],
+  "transactions_files": [{ "filepath": "./Transactions.ocf.json", "md5": "00000000000000000000000000000000" }],
+  "stakeholders_files": [{ "filepath": "./Stakeholders.ocf.json", "md5": "00000000000000000000000000000000" }],
+  "vesting_terms_files": [],
+  "valuations_files": [],
+  "comments": [
+    "A package with two unrelated mistakes, for the defect propagation tests (#225, #231).",
+    "wi-1 issues a warrant to a stakeholder who isn't in the stakeholders file, and wa-1 accepts that warrant.",
+    "cv-1 converts a SAFE into a stock issuance the package doesn't have.",
+    "wi-2 and wa-2 are a second warrant with nothing wrong with it."
+  ]
+}
