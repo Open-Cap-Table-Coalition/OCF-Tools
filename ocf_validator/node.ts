@@ -7,14 +7,14 @@ import type { Subject } from "../types/finding";
  *  - `writer`: the transaction that last wrote the value, located the way a
  *              finding's subject is. `undefined` for a value no transaction
  *              wrote.
- *  - `taint`:  the transactions whose failure leaves this field unreliable.
- *              Empty for a field that can be trusted. Nothing taints a field
+ *  - `defects`: the transactions whose failure leaves this field unreliable.
+ *              Empty for a field that can be trusted. Nothing marks a field
  *              yet (#231).
  */
 export type Field<T> = {
   readonly value: T | undefined;
   readonly writer: Subject | undefined;
-  readonly taint: readonly Subject[];
+  readonly defects: readonly Subject[];
 };
 
 /** Common identity and tracked state for every kind of cap-table node. */

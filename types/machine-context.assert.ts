@@ -36,12 +36,12 @@ type _EquityComp = Expect<Equal<Outstanding<"equityCompensation">, OCFEquityComp
 // Only a legacy validator's context still carries an array, and only stock's.
 type _LegacyStock = Expect<Equal<LegacyContext["stockIssuances"], OCFStockIssuance[]>>;
 
-// Every field of a node holds its value, its last writer, and its taint, and
+// Every field of a node holds its value, its last writer, and its defects, and
 // none of the three can be assigned to.
-type _FieldKeys = Expect<Equal<keyof Field<unknown>, "value" | "writer" | "taint">>;
+type _FieldKeys = Expect<Equal<keyof Field<unknown>, "value" | "writer" | "defects">>;
 type _Lifecycle = Expect<Equal<SecurityNode["lifecycle"], Field<LifecycleState>>>;
 type _Writer = Expect<Equal<Field<unknown>["writer"], Subject | undefined>>;
-type _Taint = Expect<Equal<Field<unknown>["taint"], readonly Subject[]>>;
+type _Defects = Expect<Equal<Field<unknown>["defects"], readonly Subject[]>>;
 type _FieldIsReadonly = Expect<Equal<Field<string>, Readonly<Field<string>>>>;
 type Shape<T> = { [P in keyof T]: T[P] };
 type _NodeIsReadonly = Expect<Equal<Shape<SecurityNode>, Readonly<SecurityNode>>>;

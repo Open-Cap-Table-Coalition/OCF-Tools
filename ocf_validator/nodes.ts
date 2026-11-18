@@ -22,7 +22,7 @@ import type { CollectionElement, CollectionKey, Descriptor } from "./ocfMachine"
 // become one.
 //
 // A node's state is held field by field. Each field has its value, the
-// transaction that last wrote it, and its taint. Keeping these per field is
+// transaction that last wrote it, and its defects. Keeping these per field is
 // what later lets a check that reads one field run while another field of the
 // same node is unreliable.
 //
@@ -68,7 +68,7 @@ export type NodeMap = NodeMaps<SecurityNode>;
 export const emptyNodes = (): NodeMap => ({ security: new Map() });
 
 /** A field as a transaction writes it: the value, with that transaction as its writer. */
-const written = <T>(value: T, writer: Subject): Field<T> => ({ value, writer, taint: [] });
+const written = <T>(value: T, writer: Subject): Field<T> => ({ value, writer, defects: [] });
 
 /** The slice of a transaction the reducer reads. Everything else it carries goes into the node unread. */
 type Applied = { object_type: string; id: string; security_id?: unknown };

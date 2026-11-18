@@ -24,7 +24,7 @@ const issuance = (id: string, security_id: string, object_type = "TX_WARRANT_ISS
 const on = (object_type: string, id: string, security_id: string) => ({ id, object_type, security_id, date: "2021-06-01" });
 
 describe("a security's node", () => {
-  it("is written whole by its issuance: each field with its value, its writer, and no taint", () => {
+  it("is written whole by its issuance: each field with its value, its writer, and no defects", () => {
     const grant = issuance("wi-1", "war-1");
     const nodes = apply(emptyNodes(), grant);
 
@@ -33,8 +33,8 @@ describe("a security's node", () => {
       kind: "security",
       id: "war-1",
       family: "warrantIssuances",
-      lifecycle: { value: "outstanding", writer, taint: [] },
-      issuance: { value: grant, writer, taint: [] },
+      lifecycle: { value: "outstanding", writer, defects: [] },
+      issuance: { value: grant, writer, defects: [] },
     });
   });
 
@@ -44,7 +44,7 @@ describe("a security's node", () => {
     const removed = apply(issued, on("TX_WARRANT_CANCELLATION", "wc-1", "war-1"));
 
     const node = removed.security.get("war-1");
-    expect(node?.lifecycle).toEqual({ value: "removed", writer: { object_type: "TX_WARRANT_CANCELLATION", id: "wc-1" }, taint: [] });
+    expect(node?.lifecycle).toEqual({ value: "removed", writer: { object_type: "TX_WARRANT_CANCELLATION", id: "wc-1" }, defects: [] });
     // The cancellation wrote one field. The issuance is still the issuance's:
     // the same field object, not a copy.
     expect(node?.issuance).toBe(issued.security.get("war-1")?.issuance);
@@ -154,7 +154,7 @@ describe("a run's node map", () => {
     expect(context.nodes.security.get("safe-1")?.lifecycle).toEqual({
       value: "removed",
       writer: { object_type: "TX_CONVERTIBLE_CANCELLATION", id: "cc-1" },
-      taint: [],
+      defects: [],
     });
     expect(collection(context, "convertibleIssuances")).toEqual([kept]);
 

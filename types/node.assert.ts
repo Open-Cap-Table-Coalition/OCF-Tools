@@ -27,9 +27,9 @@ const amount = readNodeField(example, "amount");
 const note = readNodeField(example, "note");
 type _Amount = Expect<Equal<typeof amount, Field<string>>>;
 type _OptionalField = Expect<Equal<typeof note, Example["note"]>>;
-withNodeField(example, "enabled", { value: true, writer: undefined, taint: [] });
+withNodeField(example, "enabled", { value: true, writer: undefined, defects: [] });
 // @ts-expect-error — a boolean cannot be written into a numeric string field.
-withNodeField(example, "amount", { value: true, writer: undefined, taint: [] });
+withNodeField(example, "amount", { value: true, writer: undefined, defects: [] });
 // @ts-expect-error — identity is not tracked state.
 readNodeField(example, "id");
 // @ts-expect-error — callers cannot invent a field.
