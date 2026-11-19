@@ -50,15 +50,9 @@ export const baseContext = (overrides: Partial<OcfMachineContext> = {}): OcfMach
 };
 
 /**
- * Runs the whole validator over a package holding the given transactions,
- * stakeholders, and stock classes, so the run goes through the driver and
- * same-day sort as a real one does. It writes a minimal package (a manifest, a
- * stakeholders file, a stock classes file, and a transactions file) to a
- * temporary directory and removes it afterwards.
- *
- * It also runs the lifecycle charts over the package in shadow, and fails if
- * they disagree with the checks they're to replace in a way that isn't
- * explained (see tests/lifecycleShadow.ts).
+ * Write a temporary OCF package and call the public validator so tests use the real reader and
+ * same-day order. Compare the charts with the two existing checks on that order, then remove the
+ * package.
  */
 export const validatePackage = (
   transactions: Record<string, unknown>[],
@@ -83,9 +77,8 @@ export const validatePackage = (
       valuations_files: [],
     });
     const context = ocfValidator(dir);
-    // Every package a test validates also goes through the lifecycle charts in
-    // shadow (#233). The driver has sorted the package's transactions in
-    // place, so they're in run order here.
+    // The validator sorts the input in place. Compare the charts and the two checks in that same
+    // order.
     expectShadowExplained(context.ocfPackageContent.transactions);
     return context;
   } finally {
@@ -172,7 +165,7 @@ export const emittedCheckIds = <K extends string>(scenarios: FailingScenarios<K>
   return emitted;
 };
 
-/** Assert a finding carries the declared id, error severity, a failed outcome, and the transaction as subject. */
+/** Check the error level, outcome, check ID and transaction named in the finding. */
 export const expectFindingShape = (
   finding: Finding,
   check: string,

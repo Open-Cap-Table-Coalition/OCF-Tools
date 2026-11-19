@@ -4,14 +4,8 @@ import { lifecycleFamilies, TX_DESCRIPTORS, type TxKey } from "../ocf_validator/
 import { currentName, OLDER_NAMES } from "../ocf_validator/validators/checks";
 import { validatePackage } from "./helpers";
 
-// ---------------------------------------------------------------------------
-// The TX_PLAN_SECURITY_* names
-// ---------------------------------------------------------------------------
-//
-// OCF still accepts seven older names for equity compensation transactions.
-// The validator treats each as the type it stands for: the same validator,
-// collection, and lifecycle word, and the same standing in every check that
-// compares transaction types.
+// Check that the seven older names share validation and state changes with the corresponding current
+// names.
 
 const PAIRS = Object.entries(OLDER_NAMES) as [TxKey, TxKey][];
 const VALID = "The validation of the OCF package for Test Co is complete and the package appears valid.";
@@ -27,14 +21,14 @@ describe("each plan security type is its equity compensation type under an older
     const older = TX_DESCRIPTORS[olderName] as Record<string, unknown>;
     const current = TX_DESCRIPTORS[name] as Record<string, unknown>;
 
-    // The same function and the same list, not copies that could drift.
+    // Both entries must reuse the same validator and checks.
     expect(older.validate).toBe(current.validate);
     expect(older.checks).toBe(current.checks);
     expect(older.effect).toBe(current.effect);
     expect(older.collection).toBe(current.collection);
     expect(older.lifecycle).toBe(current.lifecycle);
     expect(lifecycleFamilies(TX_DESCRIPTORS[olderName])).toEqual(lifecycleFamilies(TX_DESCRIPTORS[name]));
-    // Only the name it's filed under differs.
+    // Only the descriptor's transaction name changes.
     expect(older.transaction).toBe(olderName);
     expect(current.transaction).toBe(name);
   });
@@ -59,8 +53,7 @@ describe("each plan security type is its equity compensation type under an older
     expect(currentName("TX_PLAN_SECURITY_EXERCISE")).toBe("TX_EQUITY_COMPENSATION_EXERCISE");
     expect(currentName("TX_EQUITY_COMPENSATION_EXERCISE")).toBe("TX_EQUITY_COMPENSATION_EXERCISE");
     expect(currentName("TX_WARRANT_EXERCISE")).toBe("TX_WARRANT_EXERCISE");
-    // `object_type` comes straight from the package. A key every object
-    // inherits mustn't look like an older name.
+    // An inherited JavaScript property is an unknown transaction name.
     expect(currentName("constructor")).toBe("constructor");
     expect(currentName(undefined)).toBeUndefined();
   });
@@ -80,11 +73,10 @@ describe("a history under the older names runs as the same history under the cur
     ];
     const context = validatePackage(transactions, [{ id: "sh-1" }]);
 
-    // The cancellation's no-other-transactions exempts the acceptance, the
-    // exercise, and the release under their older names too.
+    // These older acceptance, exercise and release names are allowed before cancellation.
     expect(context.findings).toEqual([]);
     expect(context.result).toBe(VALID);
-    // The grant was in the collection until the cancellation removed it.
+    // Cancellation removes the outstanding grant.
     expect(context.snapshots.map((snapshot) => snapshot.equityCompensation.length)).toEqual([1, 1, 1, 1, 0]);
     expect(context.equityCompensation).toEqual([]);
   });
@@ -119,8 +111,8 @@ describe("a history under the older names runs as the same history under the cur
   });
 
   it("fails an acceptance of a grant retracted under the older name, by no-retraction", () => {
-    // The retraction removes the grant, so issuance-exists fails as well.
-    // no-retraction is the check that has to see through the older name.
+    // The retraction also removes the grant. Check that no-retraction recognizes the older name
+    // independently of issuance-exists.
     const context = validatePackage(
       [grant("TX_EQUITY_COMPENSATION_ISSUANCE"), on("TX_PLAN_SECURITY_RETRACTION", "rt-1", "2021-02-01"), on("TX_EQUITY_COMPENSATION_ACCEPTANCE", "a-1", "2021-03-01")],
       [{ id: "sh-1" }],
@@ -144,8 +136,7 @@ describe("a history under the older names runs as the same history under the cur
   });
 
   it("fails a cancellation after a transfer under the older name, by no-other-transactions", () => {
-    // A transfer isn't one of the transactions no-other-transactions exempts,
-    // under either name.
+    // Transfers under either name conflict with a later cancellation.
     const context = validatePackage(
       [
         grant("TX_EQUITY_COMPENSATION_ISSUANCE"),
@@ -162,8 +153,7 @@ describe("a history under the older names runs as the same history under the cur
   });
 
   it("fails a second issuance of a security removed under the older name", () => {
-    // The removals index holds a plan security removal now that its effect is
-    // "remove", so no-earlier-removal sees it.
+    // The earlier-removal check must recognize a cancellation under its older name.
     const context = validatePackage(
       [
         grant("TX_PLAN_SECURITY_ISSUANCE"),
@@ -180,10 +170,8 @@ describe("a history under the older names runs as the same history under the cur
 });
 
 describe("same-day order still ranks the older names apart from their equivalents", () => {
-  // Left as it is: same-day order is #232's. The older names sort after every
-  // equity compensation type, in an order of their own, so on one day a
-  // history can pass under the current names and fail under the older ones.
-  // These pin where they sit today so the difference is on record.
+  // Older names have different same-day sort positions. Record the order because changing only the
+  // name can change validation (#232).
   const rank = (type: string) => (constants.transaction_types as readonly string[]).indexOf(type);
 
   it("puts every older name after every equity compensation type", () => {
@@ -192,9 +180,8 @@ describe("same-day order still ranks the older names apart from their equivalent
   });
 
   it("orders a same-day exercise and cancellation differently under the two sets of names", () => {
-    // Under the current names the exercise comes first, so a grant can be
-    // partly exercised and the rest cancelled on one day. Under the older
-    // names the cancellation comes first.
+    // The current names put a partial exercise before cancellation of the rest. The older names
+    // reverse that order.
     expect(rank("TX_EQUITY_COMPENSATION_EXERCISE")).toBeLessThan(rank("TX_EQUITY_COMPENSATION_CANCELLATION"));
     expect(rank("TX_PLAN_SECURITY_EXERCISE")).toBeGreaterThan(rank("TX_PLAN_SECURITY_CANCELLATION"));
   });

@@ -125,58 +125,12 @@ type Validator<T> = (
 ) => any;
 
 /**
- * Everything the machine needs to know about one transaction type, keyed on its
- * `effect`. A non-passthrough descriptor names its validator under exactly one
- * of two mutually exclusive fields — `legacyValidate` (dual-mode shape) or
- * `validate` (graded shape) — so which convention a transaction uses is part of
- * the table's static description, and the machine dispatches on field presence
- * the same way it dispatches on `effect`. The validator is referenced once so
- * the guard and the recorded outcome always use the same one. The
- * `legacyValidate` arms exist only while families migrate; the union collapses
- * to the graded arms when the last one does.
+ * A descriptor tells the machine which validator handles a transaction and how it changes
+ * outstanding securities. Issuances and removals name one collection. Other transactions list the
+ * families they can affect. The lifecycle field describes the allowed change for each family.
  *
- *  - `passthrough`: no validator or mutation. The machine checks only that its
- *                   security wasn't removed earlier (see buildTransactionHandlers).
- *  - `none`:        validate and record, but mutate no collection.
- *  - `remove`:      validate, record, and filter `collection` by `security_id`.
- *  - `append`:      validate, record, and append the issuance to `collection`.
- *                   An issuance's security mustn't have been removed earlier.
- *
- * The `none`/`remove` graded arms take `GradedValidator<any>`, not
- * `GradedValidator<unknown>`: the payload is contravariant, so `unknown` would
- * reject every family-typed validator — like `Validator<unknown>` over the
- * `event: any` validators, the `any` constrains the shape, not the payload.
- *
- * The `append` variants distribute over `CollectionKey`, tying `collection` to
- * the payload family of the validator — under either field — so a family-typed
- * validator cannot be declared under a mismatched collection (demonstrated in
- * `types/ocf-machine-table.assert.ts`).
- *
- * Graded descriptors (the ones with `validate`) must also list their checks in
- * `checks` (see `types/validator.ts`). The machine doesn't read this list while
- * validating; it's for the coverage report, which shows what each transaction
- * type checks. Making it required means no family can move to the graded style
- * without listing its checks. Legacy descriptors don't have it.
- *
- * The list isn't only documentation, though. For validators built with
- * `defineValidator`, the same check definitions produce the findings, and each
- * finding's severity is copied from its check. Changing a check's severity
- * changes whether a failing transaction is blocked.
- *
- * Every descriptor also carries its `lifecycle` word (see `LifecycleWord` in
- * `types/validator.ts`): what the transaction does to the lifecycle of the
- * security it names. Nothing reads the word while validating yet; the
- * lifecycle charts are built from it (#233). An active descriptor's word
- * follows from its `effect`, and the types hold the two together: "append"
- * is "issue", "remove" is "removes", and "none" is "stays". Only a
- * passthrough descriptor's word is a free choice.
- *
- * A word needs a family to belong to: the chart it becomes an arrow on. An
- * "append" or "remove" descriptor already names it, as its `collection`. A
- * "none" or passthrough descriptor changes no collection, so it lists its
- * `families` instead: more than one for a transaction that can name a
- * security of several families (the vesting transactions), and none for a
- * transaction that names no security at all (see `lifecycleFamilies`).
+ * The types tie an issuance to its collection and require each new validator to list its checks.
+ * Legacy validators still return a pass/fail result and a report entry.
  */
 type Descriptor =
   | { effect: "passthrough"; lifecycle: LifecycleWord; families: readonly CollectionKey[] }
@@ -217,14 +171,10 @@ export type ActiveDescriptor = Exclude<Descriptor, { effect: "passthrough" }>;
  */
 export type DescriptorTable = { [K in TxKey]: Descriptor & { transaction?: K } };
 
-/** Every key some member of the union `T` has; `keyof` alone keeps only the shared ones. */
+/** Include keys that appear on only one member of the union. */
 type KeyOfAny<T> = T extends unknown ? keyof T : never;
 
-/**
- * A family whose securities can vest: one whose issuance type carries vesting
- * terms (`vesting_terms_id`, or a v2 grant's `vesting_template_id`). It's the
- * rule `familyChecksFor` holds each family's `vests` flag to.
- */
+/** A family supports vesting if its issuance type has a vesting terms or template ID. */
 export type VestingFamily = {
   [C in CollectionKey]: Extract<KeyOfAny<CollectionElement[C]>, "vesting_terms_id" | "vesting_template_id"> extends never
     ? never
@@ -232,9 +182,8 @@ export type VestingFamily = {
 }[CollectionKey];
 
 /**
- * The families a vesting transaction can name a security of. Pinned to
- * `VestingFamily` in `types/ocf-machine-table.assert.ts`, so a family that
- * gains or loses vesting terms has to be added or dropped here.
+ * Keep this list in step with the issuance types that have vesting terms. The build checks the
+ * match.
  */
 export const VESTING_FAMILIES = [
   "stockIssuances",
@@ -243,9 +192,7 @@ export const VESTING_FAMILIES = [
 ] as const satisfies readonly VestingFamily[];
 
 export const TX_DESCRIPTORS = {
-  // The seven TX_PLAN_SECURITY_* types are the equity compensation types
-  // under their older names. Each entry is its equivalent's, filed again
-  // under the older name (see `underOlderName`), so it sits in the same group.
+  // Reuse the current equity compensation descriptors for all seven older transaction names.
 
   // --- append: issuance appended to its family collection -----------------
   TX_STOCK_ISSUANCE: { effect: "append", lifecycle: "issue", collection: "stockIssuances", legacyValidate: validators.valid_tx_stock_issuance },
@@ -293,33 +240,17 @@ export const TX_DESCRIPTORS = {
   TX_PLAN_SECURITY_CANCELLATION,
   TX_PLAN_SECURITY_TRANSFER,
 
-  // --- passthrough: no validator of their own ----------------------------
-  //   No report entry, no collection mutation. Except for the return to pool,
-  //   the machine fails one on a security an earlier transaction removed (see
-  //   buildTransactionHandlers); otherwise they stay in `capTable` with nothing
-  //   recorded, so the characterization snapshot (which contains
-  //   TX_VESTING_START) records nothing for it.
-  //   `satisfies DescriptorTable` below forces any future OCF transaction type
-  //   to be classified here — a compile error until it is.
-  //
-  //   Their lifecycle words are assigned here, since no `effect` implies one.
-  //
-  //   A vesting transaction records vesting and leaves its security
-  //   outstanding. It can name a security of any family whose issuance carries
-  //   vesting terms, which a convertible's doesn't.
+  // The machine checks these transactions for an earlier removal except when shares return to a
+  // pool. Vesting leaves stock, warrants and equity grants outstanding.
   TX_VESTING_START: { effect: "passthrough", lifecycle: "stays", families: VESTING_FAMILIES },
   TX_VESTING_EVENT: { effect: "passthrough", lifecycle: "stays", families: VESTING_FAMILIES },
   TX_VESTING_ACCELERATION: { effect: "passthrough", lifecycle: "stays", families: VESTING_FAMILIES },
-  //   A consolidation removes each stock security in its `security_ids` and
-  //   names the one that replaces them.
+  // A consolidation replaces several stock securities with one.
   TX_STOCK_CONSOLIDATION: { effect: "passthrough", lifecycle: "removes", families: ["stockIssuances"] },
-  //   A return to pool records where a removed grant's shares went, so it's
-  //   the one transaction allowed only once its security has been removed.
+  // Shares can return to a plan after the grant is removed.
   TX_STOCK_PLAN_RETURN_TO_POOL: { effect: "passthrough", lifecycle: "after removal", families: ["equityCompensation"] },
-  //   The rest name no security: each acts on a stock class, a stock plan, or
-  //   the issuer. A split changes every security in its class and the others
-  //   change none, but all of them leave every security where it is, so the
-  //   word is "stays". With no family, none is an arrow on any chart.
+  // These transactions act on a class, plan or issuer. They leave individual securities outstanding
+  // and belong to no security chart.
   TX_STOCK_CLASS_SPLIT: { effect: "passthrough", lifecycle: "stays", families: [] },
   TX_STOCK_CLASS_AUTHORIZED_SHARES_ADJUSTMENT: { effect: "passthrough", lifecycle: "stays", families: [] },
   TX_STOCK_CLASS_CONVERSION_RATIO_ADJUSTMENT: { effect: "passthrough", lifecycle: "stays", families: [] },
@@ -330,9 +261,8 @@ export const TX_DESCRIPTORS = {
 export type { Descriptor };
 
 /**
- * The families whose lifecycle chart a descriptor's word is an arrow on: its
- * `collection` if it changes one, otherwise the `families` it lists. Empty for
- * a transaction that names no security.
+ * Return the security families affected by this transaction. An empty list means it names no
+ * security.
  */
 export const lifecycleFamilies = (descriptor: Descriptor): readonly CollectionKey[] =>
   "collection" in descriptor ? [descriptor.collection] : descriptor.families;
@@ -544,10 +474,7 @@ export const earliestRemovals = (transactions: readonly OcfTransaction[]): OcfMa
   return removals;
 };
 
-/**
- * noEarlierRemoval in the shape the dispatch helpers take. It isn't any one
- * transaction's descriptor, so its lifecycle word and families say nothing.
- */
+/** Wrap the shared removal check so the machine can call it like a transaction validator. */
 const notRemoved = {
   effect: "none",
   lifecycle: "stays",

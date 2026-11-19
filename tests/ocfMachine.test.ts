@@ -299,16 +299,8 @@ describe("per-type collection placement", () => {
 // Family collections hold only issuances
 // ---------------------------------------------------------------------------
 
-// issuance-exists finds an issuance by security_id alone (decision 3 on #198).
-// That's only safe if the collections never hold anything but issuances, which
-// is true because:
-//  - they start empty (tested here);
-//  - only the family issuance types add to them (tested here), and each adds
-//    its own transaction (tested above);
-//  - removing only takes things out (tested above).
-// The issuance types are written out by hand on purpose. Equity compensation
-// has two: TX_PLAN_SECURITY_ISSUANCE is the older name for its issuance, and
-// lands in the same collection.
+// Only issuances enter these collections. This lets issuance-exists look up a security by ID within
+// its family.
 const ISSUANCE_KEYS = [
   "TX_STOCK_ISSUANCE",
   "TX_CONVERTIBLE_ISSUANCE",
