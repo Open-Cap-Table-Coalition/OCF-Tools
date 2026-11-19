@@ -4,49 +4,24 @@ import { ocfValidator } from "../ocf_validator";
 import { validatePackage } from "./helpers";
 import { disagreements, explain, expectShadowExplained, shadowRows, EXPLANATIONS, type ShadowRow } from "./lifecycleShadow";
 
-// ---------------------------------------------------------------------------
-// The lifecycle charts in shadow
-// ---------------------------------------------------------------------------
-//
-// Step 3 of #233: compare each chart's verdict with what no-earlier-removal and
-// no-other-transactions report on every existing test package, and explain
-// every difference.
-//
-// "Every existing test package" is covered in two places. The packages on disk
-// are run here. The packages tests build inline all go through
-// `validatePackage`, which runs the same comparison on each and fails the test
-// that built it on a disagreement nothing explains. So a new test package is
-// shadowed without anyone listing it.
-//
-// Across the suite, the charts and the two checks disagree in three ways the
-// run already catches by another check or allows on purpose. Each is
-// reproduced below from a test that has it. A fourth kind is the gap the chart
-// is meant to close; no existing package has it, so it's shown on a package
-// written for it.
+// Compare each family chart with no-earlier-removal and no-other-transactions. Check known
+// differences explicitly so a new disagreement fails the test.
 
-/** A package's shadow rows: its transactions in run order, as the validator leaves them. */
+/** Compare a package's transactions in the order the validator processed them. */
 const shadow = (transactions: Record<string, unknown>[], stakeholders = [{ id: "sh-1" }]): ShadowRow[] =>
   shadowRows(validatePackage(transactions, stakeholders).ocfPackageContent.transactions as any);
 
-/** The rows of one transaction, by its id. */
+/** Find the results for all securities named by this transaction. */
 const rowsOf = (rows: ShadowRow[], id: string) => rows.filter((row) => row.id === id);
 
 const fixture = (...segments: string[]) => path.resolve(__dirname, "..", ...segments);
 
-// ---------------------------------------------------------------------------
-// The packages on disk
-// ---------------------------------------------------------------------------
+// Package fixtures
 
 describe("the packages on disk", () => {
-  // testPackage is a grant and its vesting start. The Acme sample is a valid
-  // history of 39 transactions across stock and equity compensation: issuances,
-  // an acceptance, exercises, and every kind of stock removal. Its one
-  // transaction with no row is a stock class split, which names no security.
-  // markedSecurities has two mistakes in it, neither of them a lifecycle one:
-  // an unknown stakeholder and a missing resulting stock. The chart follows
-  // the transactions as written, so it has nothing to say about either.
-  // stockPlanPool's mistakes are an unknown stakeholder and an over-granted
-  // pool; its return to pool follows a cancellation, as the chart requires.
+  // testPackage and Acme cover valid security histories. Acme's class split has no security to
+  // compare. markedSecurities and stockPlanPool contain stakeholder, resulting-stock or pool errors
+  // that the lifecycle charts alone cannot detect.
   it.each([
     { name: "testing_scripts/testPackage", dir: fixture("testing_scripts", "testPackage"), transactions: 2, rows: 2 },
     { name: "sample_ocf_folders/acme_holdings_limited", dir: fixture("sample_ocf_folders", "acme_holdings_limited"), transactions: 39, rows: 38 },
@@ -58,15 +33,13 @@ describe("the packages on disk", () => {
 
     expect(context.ocfPackageContent.transactions).toHaveLength(transactions);
     expect(rows).toHaveLength(expected);
-    // The chart allows every transaction, and neither check reports one.
+    // The chart and both checks accept these transactions.
     expect(rows.every((row) => row.allowed && row.reported.length === 0)).toBe(true);
     expect(disagreements(rows)).toEqual([]);
   });
 });
 
-// ---------------------------------------------------------------------------
-// Where they agree
-// ---------------------------------------------------------------------------
+// Cases where the checks and chart agree
 
 const issuance = { id: "ci-1", object_type: "TX_CONVERTIBLE_ISSUANCE", security_id: "safe-1", stakeholder_id: "sh-1", date: "2021-01-01" };
 const cancellation = { id: "cc-1", object_type: "TX_CONVERTIBLE_CANCELLATION", security_id: "safe-1", date: "2021-06-01" };
@@ -82,10 +55,8 @@ describe("where the chart and the checks agree", () => {
     ]);
   });
 
-  // The cases of "a transaction on a security an earlier transaction removed"
-  // in tests/ocfValidator.test.ts. no-earlier-removal reports each, and the
-  // chart refuses each: a removed security allows nothing, and three of these
-  // aren't on a convertible's chart in any state.
+  // These cases also run through the public validator in ocfValidator.test.ts. The chart and the
+  // removal check both reject the transaction on the removed security.
   it.each([
     { id: "ve-1", object_type: "TX_VESTING_EVENT", security_id: "safe-1", vesting_condition_id: "vc-1", date: "2021-07-01" },
     { id: "ci-2", object_type: "TX_CONVERTIBLE_ISSUANCE", security_id: "safe-1", stakeholder_id: "sh-1", date: "2021-07-01" },
@@ -98,7 +69,8 @@ describe("where the chart and the checks agree", () => {
   });
 
   it("both refuse a cancellation after a transfer", () => {
-    // no-other-transactions reports the transfer; the chart has the security removed by it.
+    // The transfer removes the security on the chart and makes the later transaction fail the
+    // history check.
     const transfer = { id: "ct-1", object_type: "TX_CONVERTIBLE_TRANSFER", security_id: "safe-1", resulting_security_ids: [], date: "2021-03-01" };
     const [row] = rowsOf(shadow([issuance, transfer, cancellation]), "cc-1");
 
@@ -107,8 +79,7 @@ describe("where the chart and the checks agree", () => {
   });
 
   it("both refuse a vesting event on a grant cancelled under the plan security name", () => {
-    // A plan security cancellation is an equity compensation cancellation, so
-    // the `removals` index holds it like any other removal.
+    // Plan security cancellations now appear in the removal index.
     const rows = shadow([
       { id: "psi-1", object_type: "TX_PLAN_SECURITY_ISSUANCE", security_id: "opt-1", stakeholder_id: "sh-1", date: "2021-01-01" },
       { id: "psc-1", object_type: "TX_PLAN_SECURITY_CANCELLATION", security_id: "opt-1", date: "2021-06-01" },
@@ -131,17 +102,13 @@ describe("where the chart and the checks agree", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// Where they disagree, and why
-// ---------------------------------------------------------------------------
+// Known differences
 
 describe("where the chart and the checks disagree", () => {
   const grant = { id: "eci-1", object_type: "TX_EQUITY_COMPENSATION_ISSUANCE", security_id: "opt-1", stakeholder_id: "sh-1", quantity: "100", date: "2020-01-01" };
   const grantCancellation = { id: "can-1", object_type: "TX_EQUITY_COMPENSATION_CANCELLATION", security_id: "opt-1", quantity: "100", date: "2021-01-01" };
 
-  // tests/equityCompensationValidators.test.ts has both: "fails a whole-package
-  // run where the grant is repriced after it's cancelled" and "but still fails
-  // an exercise dated after the cancellation".
+  // The equity compensation tests also check repricing and exercise after cancellation.
   it.each([
     { id: "rep-1", object_type: "TX_EQUITY_COMPENSATION_REPRICING", security_id: "opt-1", date: "2021-06-01" },
     { id: "ex-1", object_type: "TX_EQUITY_COMPENSATION_EXERCISE", security_id: "opt-1", quantity: "10", resulting_security_ids: [], date: "2021-06-01" },
@@ -151,13 +118,12 @@ describe("where the chart and the checks disagree", () => {
 
     expect(disagreements(rows)).toMatchObject([{ id: transaction.id, state: "removed", allowed: false, runs: [], reported: [] }]);
     expect(disagreements(rows).map(explain)).toEqual(["removed, and neither check runs on it"]);
-    // The run does fail it, through the check the explanation names.
+    // Verify which production check catches this case.
     expect(context.findings.map((finding) => [finding.subject.id, finding.check])).toEqual([[transaction.id, "issuance-exists"]]);
   });
 
   it("the chart refuses a vesting event on the day its warrant is cancelled, which no-earlier-removal allows", () => {
-    // tests/ocfValidator.test.ts, "allows a vesting event on the day its
-    // warrant is cancelled". The package is valid today.
+    // The validator currently accepts vesting on the day a warrant is cancelled (#214).
     const context = validatePackage(
       [
         { id: "wi-1", object_type: "TX_WARRANT_ISSUANCE", security_id: "war-1", stakeholder_id: "sh-1", date: "2021-01-01" },
@@ -176,8 +142,7 @@ describe("where the chart and the checks disagree", () => {
   });
 
   it("the chart refuses a cancellation of a grant that was never issued, which neither check is about", () => {
-    // tests/stockPlanNode.test.ts has it: a cancellation that names a grant
-    // the package doesn't have.
+    // The stock plan tests also cover cancellation of a missing grant.
     const context = validatePackage(
       [{ id: "can-1", object_type: "TX_EQUITY_COMPENSATION_CANCELLATION", security_id: "opt-missing", quantity: "40", date: "2021-01-01" }],
       [{ id: "sh-1" }],
@@ -189,12 +154,10 @@ describe("where the chart and the checks disagree", () => {
     expect(context.findings.map((finding) => [finding.subject.id, finding.check])).toEqual([["can-1", "issuance-exists"]]);
   });
 
-  // The gap the chart closes: a removal the `removals` index leaves out. No
-  // existing package has one.
+  // The index still misses consolidations.
   it("the chart refuses a vesting event on consolidated stock, which no-earlier-removal doesn't know was removed", () => {
-    // Driven straight through the walker: the legacy stock issuance validator
-    // would need a stock class and legends to pass a real run, and neither
-    // the chart nor no-earlier-removal reads them.
+    // Test the comparison directly. Stock classes and legends are required only by the full stock
+    // validator.
     const rows = shadowRows([
       { id: "si-1", object_type: "TX_STOCK_ISSUANCE", security_id: "stock-1", date: "2021-01-01" },
       { id: "si-2", object_type: "TX_STOCK_ISSUANCE", security_id: "stock-2", date: "2021-01-01" },
@@ -203,7 +166,7 @@ describe("where the chart and the checks disagree", () => {
       { id: "ve-1", object_type: "TX_VESTING_EVENT", security_id: "stock-2", date: "2021-07-01" },
     ]);
 
-    // The consolidation is one transaction on two securities, and removes both.
+    // Both securities are removed by the same consolidation.
     expect(rowsOf(rows, "sc-1").map((row) => [row.security, row.state, row.allowed])).toEqual([
       ["stock-1", "outstanding", true],
       ["stock-2", "outstanding", true],
@@ -217,14 +180,11 @@ describe("where the chart and the checks disagree", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// A disagreement nothing explains
-// ---------------------------------------------------------------------------
+// Unexpected differences
 
 describe("a disagreement nothing explains", () => {
-  // A security_id issued twice while it's outstanding. The chart refuses the
-  // second issuance. Neither check reports it, and nothing else does either,
-  // so no explanation covers it: it would be a new finding.
+  // Issuing the same outstanding ID twice is rejected by the chart and accepted by the current
+  // validator. The comparison should flag that difference.
   const twice = [
     { id: "wi-1", object_type: "TX_WARRANT_ISSUANCE", security_id: "war-1", stakeholder_id: "sh-1", date: "2021-01-01" },
     { id: "wi-2", object_type: "TX_WARRANT_ISSUANCE", security_id: "war-1", stakeholder_id: "sh-1", date: "2021-02-01" },

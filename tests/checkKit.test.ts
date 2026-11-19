@@ -51,8 +51,8 @@ describe("a check that throws", () => {
 
 describe("a finding's outcome", () => {
   it("is failed for every finding a check that ran produces, at either severity", () => {
-    // Nothing can block a check yet (#231), so "failed" is the only outcome a
-    // validator emits. A blocked finding is the only kind with `roots`.
+    // The runner currently emits failed findings. Only blocked findings carry the failures that
+    // caused them.
     const warns = {
       id: "warns",
       severity: "warning",
@@ -77,7 +77,7 @@ describe("a finding's outcome", () => {
   });
 });
 
-/** The messages one check gives on its own, run the way a validator runs it. */
+/** Run one check through the production runner and return its messages. */
 const messagesOf = (check: CheckObject<any>, context: OcfMachineContext, data: Record<string, unknown>): string[] =>
   toValidate([check])(context, data).map((finding) => finding.message);
 
@@ -104,7 +104,7 @@ describe("every check message renders a malformed package value", () => {
     expect(messagesOf(issuanceExists, contextWith(), { security_id: unprintable })).toEqual([
       `The transaction has no date, so it can't be checked against the equity compensation issuance with security_id {"toString":null}.`,
     ]);
-    // An issuance in the history, under the older name, and not in the live collection.
+    // The history includes an older-name issuance that is no longer outstanding.
     const context = contextWith({
       transactions: [{ object_type: "TX_PLAN_SECURITY_ISSUANCE", security_id: unprintable, date: "2020-01-01" }],
     });

@@ -17,17 +17,12 @@ describe("ocfValidator over testPackage", () => {
   it("produces a stable validation result and report", () => {
     const context = ocfValidator(testPackagePath);
 
-    // `ocfPackageContent` is just the input package echoed back onto the machine
-    // context, and `removals` indexes it; exclude both so the snapshot captures
-    // derived behavior, not the fixture.
-    // `nodesAtStartOfDay` is the machine's own note of the node map as the
-    // last day began, and goes the way of `nodes`.
+    // Record the validator's results. Omit the input package, its removal index and the two internal
+    // maps from the comparison.
     const { ocfPackageContent, removals, nodes, nodesAtStartOfDay, ...output } = context;
 
-    // The context held four issuance arrays until the node map replaced them
-    // (#228). The snapshot was recorded with them, so they're read back off
-    // the map under their old names: the recorded snapshot passing unchanged
-    // is what shows the map holds what the arrays did.
+    // Read the outstanding issuances under the original collection names so the recorded snapshot
+    // still tests the same behavior.
     const collections = {
       stockIssuances: collection(context, "stockIssuances"),
       convertibleIssuances: collection(context, "convertibleIssuances"),

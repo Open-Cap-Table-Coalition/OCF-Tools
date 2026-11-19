@@ -6,35 +6,16 @@ import { poolNotExceeded, STOCK_PLAN_CHECKS } from "../ocf_validator/validators/
 import type { Finding, Subject } from "../types/finding";
 import { validatePackage } from "./helpers";
 
-// ---------------------------------------------------------------------------
-// The stock plan pool (#225, #235)
-// ---------------------------------------------------------------------------
-//
-// The first aggregate. A plan's grants draw shares from its pool, and at the
-// end of each day the plan's `drawn` is held against its `reserved`. The
-// check is about the plan, so the plan is its subject, and like any check it
-// is blocked when what it reads is marked.
+// Check each changed plan's reserved and drawn shares after the day's transactions. A failure
+// belongs to the plan on that date. A blocked comparison identifies the transactions that made the
+// totals unreliable.
 
 const subject = (object_type: string, id: string) => ({ object_type, id }) as Subject;
 const plan = (id: string) => subject("STOCK_PLAN", id);
 
-// ---------------------------------------------------------------------------
-// Three plans, one story each
-// ---------------------------------------------------------------------------
-//
-// testing_scripts/stockPlanPool, in date order:
-//
-//   Plan A, 1000 reserved
-//     2022-01-10  a-bad      grants 200 to a stakeholder the package doesn't have
-//     2022-01-20  a-good     grants 300 to one it does
-//   Plan B, 100 reserved
-//     2022-02-01  b-1        grants 80
-//     2022-02-15  b-2        grants 30: 110 against 100
-//   Plan C, 500 reserved
-//     2022-03-01  c-1        grants 100, under the older name TX_PLAN_SECURITY_ISSUANCE
-//     2022-04-01  c-cancel   cancels 40 of it, naming c-balance as the balance
-//     2022-04-01  c-balance  a grant of the 60 that are left
-//     2022-05-01  c-return   returns the 40 to the pool
+// In stockPlanPool, plan A has a grant to a missing stakeholder followed by a valid grant. Plan B
+// grants 110 shares against 100 reserved. Plan C grants 100, replaces a cancelled grant with a
+// 60-share balance, and returns 40.
 
 const context = ocfValidator(path.resolve(__dirname, "..", "testing_scripts", "stockPlanPool"));
 
@@ -57,8 +38,8 @@ describe("plan A: a grant to an unknown stakeholder, then a valid grant", () => 
   });
 
   it("runs the valid grant's own checks, which pass: nothing of its is blocked", () => {
-    // The bad grant marked the plan's pool, not the plan. The valid grant
-    // reads the stakeholder file and the removals, so its checks run.
+    // The failed grant makes the pool total unreliable. The next grant can still check its
+    // stakeholder and removal history.
     expect(on("a-good")).toEqual([]);
     expect(context.snapshots.at(-1)?.equityCompensation).toContainEqual({ date: "2022-01-20", custom_id: "A-2", stakeholder: "emily", quantity: "300" });
   });
@@ -66,8 +47,7 @@ describe("plan A: a grant to an unknown stakeholder, then a valid grant", () => 
   it("blocks only the plan's pool check, pointing at the bad grant", () => {
     const blocked = context.findings.filter((finding) => finding.outcome === "blocked");
 
-    // Once for each day something wrote to plan A's pool. The pool check is
-    // the only blocked check in the package.
+    // Only plan A's pool comparison is blocked, once for each day its pool changes.
     expect(blocked).toEqual(
       ["2022-01-10", "2022-01-20"].map((date) => ({
         date,
@@ -85,7 +65,7 @@ describe("plan A: a grant to an unknown stakeholder, then a valid grant", () => 
   it("counts the valid grant and not the bad one, and says the number can't be trusted", () => {
     expect(poolRow("2022-01-10", "plan-a")).toEqual({ id: "plan-a", reserved: "1000", drawn: "0", defects: { drawn: [A_BAD] } });
     expect(poolRow("2022-01-20", "plan-a")).toEqual({ id: "plan-a", reserved: "1000", drawn: "300", defects: { drawn: [A_BAD] } });
-    // reserved was never in doubt, and nothing later clears drawn.
+    // The reserve remains reliable, and the earlier failure still affects drawn shares.
     expect(poolRow("2022-05-01", "plan-a")).toEqual({ id: "plan-a", reserved: "1000", drawn: "300", defects: { drawn: [A_BAD] } });
   });
 });
@@ -110,8 +90,8 @@ describe("plan B: granted more than it has", () => {
   });
 
   it("doesn't fail the grant that took it over, or mark anything", () => {
-    // Which transaction to hold an over-granted pool against is a question
-    // for ratification (#236). Until then the plan carries the error.
+    // Attribute the excess to the plan while attribution to individual transactions remains open
+    // (#236).
     expect(on("b-2")).toEqual([]);
     expect(poolRow("2022-02-15", "plan-b")).toEqual({ id: "plan-b", reserved: "100", drawn: "110" });
   });
@@ -133,7 +113,7 @@ describe("plan C: a grant under the older name, partly cancelled with a balance 
 
   it("stays unchanged at the cancellation: the balance grant adds nothing, and the cancelled shares aren't back yet", () => {
     expect(poolRow("2022-04-01", "plan-c")).toEqual({ id: "plan-c", reserved: "500", drawn: "100" });
-    // The balance grant is on the cap table in place of the original.
+    // The balance grant replaces the original in the snapshot.
     expect(context.snapshots.find((snapshot) => snapshot.date === "2022-04-01")?.equityCompensation).toContainEqual({
       date: "2022-04-01",
       custom_id: "C-1B",
@@ -179,9 +159,7 @@ describe("the package as a whole", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// The check
-// ---------------------------------------------------------------------------
+// Daily pool comparison
 
 const PLAN = { id: "plan-1", object_type: "STOCK_PLAN", plan_name: "Plan", initial_shares_reserved: "100" };
 const stakeholders = [{ id: "sh-1" }];
@@ -239,7 +217,7 @@ describe("the pool check", () => {
   });
 
   it("judges a day on its net: grants and a return on one day are held against the pool once", () => {
-    // 60 and 60 would be over, but 40 comes back the same day.
+    // The two grants draw 120 shares before a same-day return credits 40.
     const context = run([
       grant("g-1", "60", "2022-01-01"),
       { id: "c-1", object_type: "TX_EQUITY_COMPENSATION_CANCELLATION", security_id: "opt-g-1", quantity: "60", reason_text: "Forfeited", date: "2022-02-01" },
@@ -254,7 +232,7 @@ describe("the pool check", () => {
   it("reports an over-granted plan on the day it goes over, and again only when something writes to its pool", () => {
     const context = run([
       grant("g-1", "150", "2022-01-01"),
-      // Nothing to do with the plan.
+      // This transaction leaves the plan untouched.
       { id: "ci-1", object_type: "TX_CONVERTIBLE_ISSUANCE", security_id: "safe-1", stakeholder_id: "sh-1", date: "2022-02-01" },
       grant("g-2", "10", "2022-03-01"),
     ]);
@@ -285,8 +263,7 @@ describe("the pool check", () => {
   });
 
   it("passes over a plan the package doesn't have, whose reserve isn't known", () => {
-    // testPackage is such a package: its grant names a plan, and it has no
-    // stock plan file. Reporting that is for the reference data check (#234).
+    // testPackage names a plan missing from the stock plan files. Its reserve is unknown (#234).
     const context = run([grant("g-1", "1000000", "2022-01-01")], []);
 
     expect(context.findings).toEqual([]);
@@ -294,9 +271,7 @@ describe("the pool check", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// Defects on reserved and on drawn
-// ---------------------------------------------------------------------------
+// Unreliable reserve and draw totals
 
 describe("defects on the pool", () => {
   const ADJUSTMENT = subject("TX_STOCK_PLAN_POOL_ADJUSTMENT", "adj-bad");
@@ -336,9 +311,8 @@ describe("defects on the pool", () => {
       grant("g-3", "5", "2022-05-01"),
     ]);
 
-    // Blocked while reserved was marked, on each day something wrote to the
-    // pool. Then the valid adjustment sets a figure that owes nothing to the
-    // old one: the check runs, and fails on its own account, with no roots.
+    // The bad reserve blocks checks on days with pool changes. A later valid adjustment replaces it.
+    // The next check can report the excess directly.
     expect(poolFindings(context.findings).map((finding) => [finding.outcome, finding.message.slice(0, 16)])).toEqual([
       ["blocked", "Not checked: it "],
       ["blocked", "Not checked: it "],
@@ -367,8 +341,8 @@ describe("defects on the pool", () => {
       adjustment("adj-1", "500", "2022-03-01"),
     ]);
 
-    // drawn is a running total. A new reserve says nothing about whether the
-    // failed grant's shares belong in it.
+    // A new reserve cannot resolve the missing contribution of an earlier failed grant to drawn
+    // shares.
     const pool = poolFindings(context.findings);
     expect(pool.map((finding) => finding.date)).toEqual([
       "2022-01-01", "2022-02-01", "2022-03-01",

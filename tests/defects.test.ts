@@ -5,13 +5,8 @@ import { defineValidator, toValidate, type CheckObject } from "../ocf_validator/
 import type { Finding, Subject } from "../types/finding";
 import { baseContext, collection, contextWith, validatePackage } from "./helpers";
 
-// ---------------------------------------------------------------------------
-// Defects (#231)
-// ---------------------------------------------------------------------------
-//
-// A failed transaction doesn't stop the run. What it would have written is
-// withheld and marked, a check that reads a marked field comes back blocked
-// with the roots, and everything else keeps validating.
+// Check that failures preserve the last known values, block dependent checks and allow independent
+// transactions to run.
 
 const subject = (object_type: string, id: string) => ({ object_type, id }) as Subject;
 
@@ -33,7 +28,7 @@ const on = (object_type: string, id: string, date: string, fields: Record<string
   ...fields,
 });
 
-/** A node map after the given transactions, each applied or withheld by its verdict. */
+/** Apply transactions with the supplied validation decisions. */
 const reduce = (...steps: [Record<string, any>, (readonly Subject[])?][]): NodeMap =>
   steps.reduce(
     (nodes, [transaction, roots]) =>
@@ -41,9 +36,7 @@ const reduce = (...steps: [Record<string, any>, (readonly Subject[])?][]): NodeM
     emptyNodes(),
   );
 
-// ---------------------------------------------------------------------------
-// What a failed transaction does to the map
-// ---------------------------------------------------------------------------
+// Security records after a failed transaction
 
 describe("a transaction whose writes are withheld", () => {
   it("creates its security's node when it's a failed issuance, marked, with nothing known", () => {
@@ -67,9 +60,9 @@ describe("a transaction whose writes are withheld", () => {
     });
 
     const node = nodes.security.get("war-1");
-    // Withheld: still outstanding, still written by its issuance.
+    // The security remains outstanding with its issuance as the last writer.
     expect(node?.lifecycle).toEqual({ value: "outstanding", writer: WARRANT_ISSUANCE, defects: [subject("TX_WARRANT_CANCELLATION", "wc-1")] });
-    // Defects are per field. Nothing put the issuance in doubt.
+    // The issuance field is still reliable.
     expect(node?.issuance).toBe(issued.security.get("war-1")?.issuance);
   });
 
@@ -88,8 +81,7 @@ describe("a transaction whose writes are withheld", () => {
     const issued = reduce([warrant()]);
     const roots = [subject("TX_CONVERTIBLE_ACCEPTANCE", "ca-1")];
 
-    // A convertible acceptance naming a warrant's id, and a removal of a
-    // security that was never issued.
+    // Neither transaction targets an existing security of the required family.
     expect(applyTransaction(issued, TX_DESCRIPTORS.TX_CONVERTIBLE_ACCEPTANCE, on("TX_CONVERTIBLE_ACCEPTANCE", "ca-1", "2021-02-01") as any, { ok: false, roots })).toBe(issued);
     expect(applyTransaction(issued, TX_DESCRIPTORS.TX_WARRANT_CANCELLATION, { ...on("TX_WARRANT_CANCELLATION", "wc-1", "2021-02-01"), security_id: "nothing" } as any, { ok: false, roots })).toBe(issued);
   });
@@ -119,9 +111,8 @@ describe("a transaction whose writes are withheld", () => {
   });
 
   it("is still marked after a valid transaction that writes the field", () => {
-    // The security_id is issued again, validly this time, and then cancelled.
-    // Each writes a value under its own name, and the defects from the first
-    // issuance remain: nothing clears defects.
+    // A later valid issuance and cancellation update the values and writers. Both retain the earlier
+    // issuance failure.
     const again = warrant({ id: "wi-2", date: "2021-02-01" });
     const issuedAgain = reduce([warrant(), [WARRANT_ISSUANCE]], [again]);
 
@@ -147,9 +138,7 @@ describe("a transaction whose writes are withheld", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// Checks declare what they read
-// ---------------------------------------------------------------------------
+// Fields required by a check
 
 describe("a check that declares its reads", () => {
   const lifecycleOf = (data: { security_id: string }) => securityField("warrantIssuances", data.security_id, "lifecycle");
@@ -191,7 +180,7 @@ describe("a check that declares its reads", () => {
 
     expect(validate(context, acceptance)).toEqual([
       {
-        // A blocked check keeps its own severity: this one is still a warning.
+        // Blocking a warning preserves its severity.
         severity: "warning",
         outcome: "blocked",
         check: "reads-lifecycle",
@@ -220,8 +209,8 @@ describe("a check that declares its reads", () => {
   });
 
   it("isn't blocked by defects on a field it doesn't read", () => {
-    // The issuance field of another security, and of this one, are marked.
-    // The check reads this one's lifecycle.
+    // The check only needs the lifecycle. Failures on either issuance field should leave it free to
+    // run.
     const issued = reduce([warrant()]);
     const node = outstandingSecurity(issued, "warrantIssuances", "war-1")!;
     const nodes: NodeMap = {
@@ -274,12 +263,11 @@ describe("a check that declares its reads", () => {
   });
 
   it("holds for every check in the real table: none reads a field it didn't declare", () => {
-    // Every graded validator, run on an outstanding security of its family
-    // and on one that isn't there. A check that read the map without
-    // declaring it would be reported as having thrown.
+    // Run each validator with and without an outstanding security. A read missing from its
+    // declaration produces an exception finding.
     for (const [type, descriptor] of Object.entries(TX_DESCRIPTORS)) {
       if (!("validate" in descriptor)) continue;
-      // A pool adjustment names no security and has no family, so its seed lands nowhere it looks.
+      // A pool adjustment reads no security, so the test's starting security cannot affect it.
       const family = ("collection" in descriptor ? descriptor.collection : descriptor.families[0]) ?? "stockIssuances";
       const seeded = { id: "seed", object_type: "seed", security_id: "sec-1", stakeholder_id: "sh-1", date: "2020-01-01" };
       const data = { id: "tx-1", object_type: type, security_id: "sec-1", stakeholder_id: "sh-1", resulting_security_ids: ["stock-1"], date: "2021-01-01" };
@@ -292,9 +280,7 @@ describe("a check that declares its reads", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// What a transaction's findings decide
-// ---------------------------------------------------------------------------
+// How findings affect writes
 
 describe("the verdict on a transaction's writes", () => {
   const TRANSFER = subject("TX_WARRANT_TRANSFER", "wt-1");
@@ -312,7 +298,7 @@ describe("the verdict on a transaction's writes", () => {
   it("applies them when nothing was found, or only warnings were", () => {
     expect(verdictOf(TRANSFER, [])).toEqual({ ok: true });
     expect(verdictOf(TRANSFER, [failed("warning")])).toEqual({ ok: true });
-    // A warning-level check that couldn't run wouldn't have stopped them either.
+    // A blocked warning allows the writes.
     expect(verdictOf(TRANSFER, [blocked("warning", WARRANT_ISSUANCE)])).toEqual({ ok: true });
   });
 
@@ -335,9 +321,7 @@ describe("the verdict on a transaction's writes", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// Whole runs
-// ---------------------------------------------------------------------------
+// Whole-package validation
 
 const stakeholders = [{ id: "sh-1" }];
 const outcomes = (findings: Finding[]) => findings.map((finding) => [finding.subject.id, finding.check, finding.outcome]);
@@ -359,9 +343,9 @@ describe("a failed issuance followed by transactions on its security", () => {
       ["wa-1", "issuance-exists", "blocked"],
       ["ve-1", "no-earlier-removal", "blocked"],
       ["we-1", "issuance-exists", "blocked"],
-      // These read the package, or the transaction alone, so they ran.
+      // Checks that only need the package or transaction can still run.
       ["we-1", "resulting-security-named", "failed"],
-      // resulting-stock-stakeholder reads the security too.
+      // The stakeholder comparison also reads the security record.
       ["we-1", "resulting-stock-stakeholder", "blocked"],
     ]);
     for (const finding of context.findings) {
@@ -375,10 +359,8 @@ describe("a failed issuance followed by transactions on its security", () => {
 
 describe("a transfer from a marked security", () => {
   it("is blocked, and passes the defects on to what it writes without becoming a root", () => {
-    // The transfer can't tell whether the warrant is there to transfer, so
-    // its issuance-exists is blocked. A blocked transaction's writes are
-    // withheld and marked like a failed one's, with the roots it was
-    // blocked by.
+    // The failed issuance blocks the transfer's issuance check. Carry that original failure onto the
+    // fields the transfer would change.
     const context = validatePackage(
       [
         warrant({ stakeholder_id: "nobody" }),
@@ -393,8 +375,7 @@ describe("a transfer from a marked security", () => {
       ["wt-1", "issuance-exists", "blocked"],
       ["wa-1", "issuance-exists", "blocked"],
     ]);
-    // The acceptance after the blocked transfer still points at the issuance,
-    // the one thing to fix. The transfer isn't named as a root.
+    // The acceptance should identify the original failed issuance as the cause.
     expect(context.findings[2]).toMatchObject({ roots: [WARRANT_ISSUANCE] });
     expect(context.nodes.security.get("war-1")?.lifecycle.defects).toEqual([WARRANT_ISSUANCE]);
     expect(context.result).toBe("The validation of the OCF package for Test Co is complete and found 1 error and 2 checks blocked by it.");
@@ -403,7 +384,7 @@ describe("a transfer from a marked security", () => {
 
 describe("a failed removal", () => {
   it("leaves its security outstanding and marked, and blocks what follows on it, pointing at the removal", () => {
-    // The conversion names a stock issuance the package doesn't have.
+    // The conversion names a stock issuance missing from the package.
     const context = validatePackage(
       [
         { id: "ci-1", object_type: "TX_CONVERTIBLE_ISSUANCE", security_id: "safe-1", stakeholder_id: "sh-1", custom_id: "SAFE-1", date: "2021-01-01" },
@@ -419,8 +400,7 @@ describe("a failed removal", () => {
       ["ca-1", "issuance-exists", "blocked"],
     ]);
     expect(context.findings[1]).toMatchObject({ roots: [conversion] });
-    // Withheld: the SAFE is still there, in every snapshot, marked from the
-    // day the conversion failed.
+    // The failed conversion leaves the SAFE in subsequent snapshots with an unreliable lifecycle.
     expect(collection(context, "convertibleIssuances").map((issuance) => issuance.id)).toEqual(["ci-1"]);
     expect(context.snapshots.map((snapshot) => snapshot.convertibles)).toEqual([
       [{ date: "2021-01-01", custom_id: "SAFE-1", stakeholder: "sh-1" }],
@@ -455,8 +435,7 @@ describe("an unrelated security", () => {
 
 describe("a passthrough transaction on a removed security", () => {
   it("is reported and the run goes on, with nothing to mark on a security that isn't of its families", () => {
-    // A vesting event on a cancelled convertible. Convertibles don't vest, so
-    // it has no security of its own to put in doubt.
+    // Convertibles have no vesting terms, so this vesting event has no applicable security to mark.
     const context = validatePackage(
       [
         { id: "ci-1", object_type: "TX_CONVERTIBLE_ISSUANCE", security_id: "safe-1", stakeholder_id: "sh-1", date: "2021-01-01" },
@@ -475,9 +454,8 @@ describe("a passthrough transaction on a removed security", () => {
 
 describe("a stock failure", () => {
   it("still stops the run, after the findings recorded before it", () => {
-    // The stock validators are legacy (#229 decides how they take part). The
-    // warrant's error is recorded and the run goes on, until the stock
-    // issuance to an unknown stakeholder halts it.
+    // Validation continues after the warrant failure and stops at the invalid legacy stock issuance
+    // (#229).
     const context = validatePackage(
       [
         warrant({ stakeholder_id: "nobody" }),
@@ -494,9 +472,7 @@ describe("a stock failure", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// The result of a run that reached its end
-// ---------------------------------------------------------------------------
+// Result of a completed run
 
 describe("result counts root errors, blocked checks, and warnings apart", () => {
   const finding = (severity: Finding["severity"], outcome: Finding["outcome"]): Finding =>
@@ -525,9 +501,7 @@ describe("result counts root errors, blocked checks, and warnings apart", () => 
   });
 });
 
-// ---------------------------------------------------------------------------
-// One validation per transaction
-// ---------------------------------------------------------------------------
+// Number of validator calls
 
 describe("a graded validator", () => {
   afterEach(() => {

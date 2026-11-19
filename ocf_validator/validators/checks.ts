@@ -7,12 +7,8 @@ import type { CollectionElement, CollectionKey, TxKey } from "../ocfMachine";
 import { text, type CheckContext, type CheckObject } from "./checkKit";
 
 /**
- * The seven TX_PLAN_SECURITY_* types are older names OCF still accepts for
- * equity compensation transactions: each is its equity compensation type with
- * a different `object_type` and nothing else changed. The validator treats a
- * transaction under an older name as the type it stands for, with the same
- * validator, collection, and lifecycle word (see `underOlderName` in
- * `checkKit.ts`). There is no older name for a repricing.
+ * Match the seven older plan security names to their equity compensation equivalents. Repricing has
+ * only its current name.
  */
 export const OLDER_NAMES = {
   TX_PLAN_SECURITY_ISSUANCE: "TX_EQUITY_COMPENSATION_ISSUANCE",
@@ -24,19 +20,11 @@ export const OLDER_NAMES = {
   TX_PLAN_SECURITY_TRANSFER: "TX_EQUITY_COMPENSATION_TRANSFER",
 } as const satisfies Partial<Record<TxKey, TxKey>>;
 
-/**
- * The name a check knows a transaction type by: the type an older name stands
- * for, or the type itself. `object_type` comes straight from the package, so
- * anything that isn't one of the older names comes back as it is.
- */
+/** Convert a known older transaction name to its current name. Preserve other input values. */
 export const currentName = (type: unknown): unknown =>
   typeof type === "string" && Object.hasOwn(OLDER_NAMES, type) ? OLDER_NAMES[type as keyof typeof OLDER_NAMES] : type;
 
-/**
- * Whether a transaction from the package is of `type`, under that name or an
- * older name for it. A check that scans the package for, say, a family's
- * retractions asks this, so a retraction under the older name counts too.
- */
+/** Include older names when checking the type of a transaction in the package history. */
 export const isOfType = <K extends TxKey>(
   ele: DeepReadonly<OcfTransaction>,
   type: K,
@@ -72,14 +60,8 @@ export const stakeholderExists = {
 } satisfies CheckObject<{ stakeholder_id: string }>;
 
 /**
- * Builds the check that one of a transaction's fields is a quantity the pool
- * arithmetic can count: an OCF Numeric, and not negative. Nothing checks a
- * package against the schema first, and a quantity that can't be counted
- * can't be added to a pool or taken from one, so the transaction fails here
- * and its write is withheld.
- *
- * `applies` narrows it to the transactions that touch a pool at all: a grant
- * with no `stock_plan_id` doesn't, so its quantity isn't this check's concern.
+ * Check for a nonnegative OCF quantity before changing a pool. The optional condition limits the
+ * check to transactions that affect a plan.
  */
 export const countable = <F extends string>(field: F, applies: (data: any) => boolean = () => true) =>
   ({
@@ -95,30 +77,16 @@ export const countable = <F extends string>(field: F, applies: (data: any) => bo
   }) satisfies CheckObject<Record<F, string>>;
 
 /**
- * No transaction dated before this one removed its security from the cap
- * table: no cancellation, conversion, warrant exercise, repurchase,
- * reissuance, retraction, or transfer of it (see the machine's `removals`).
- * The run takes transactions in date order, so a removal dated before this
- * transaction has already been reached. The index holds a removal whether or
- * not it passed its own checks.
- *
- * The graded issuances declare it, so a removed security_id can't be issued
- * again. The machine runs it first on the transactions that can't declare it:
- * the passthrough types and the legacy issuances (#214). A return to pool
- * doesn't declare it: it's the one transaction that follows a removal.
- *
- * A removal dated the same day doesn't count, since a security can be issued,
- * vest, and be removed on one day. A same-day reuse of the security_id is left
- * to the removal's own checks, which catch it only in part.
+ * Check whether the removal index lists an earlier date. That index includes attempts, so an
+ * uncertain lifecycle blocks the check. Allow same-day removal and vesting (#214). A return to pool
+ * has its own check for prior removal.
  */
 export const noEarlierRemoval = {
   id: "no-earlier-removal",
   severity: "error",
   description: "No transaction dated before this one removed its security from the cap table.",
-  // The index records attempted removals too. Its conclusion is unreliable
-  // when the security's lifecycle is marked; block on that root rather than
-  // reporting the attempted removal as another independent failure. This
-  // check is shared across families, including legacy stock issuances.
+  // A failed removal can appear in the index. Check the lifecycle field in every family so an
+  // earlier failure on the record can block this check.
   reads: (data) => (["stockIssuances", "convertibleIssuances", "warrantIssuances", "equityCompensation"] as const)
     .map((family) => securityField(family, data.security_id, "lifecycle")),
   run: (context, data) => {
@@ -131,30 +99,9 @@ export const noEarlierRemoval = {
 } satisfies CheckObject<{ security_id: string; date: string }>;
 
 /**
- * What the shared checks need to know about a family: its name as used in
- * messages ("convertible"), its collection key, its issuance and acceptance
- * transaction types, whether its securities can vest, whether they can be
- * granted from a stock plan, and which of its transactions leave a security
- * outstanding.
- *
- * The types catch mix-ups: `issuance` must be the transaction type that
- * `collection` actually holds, `acceptance` must be a real transaction type,
- * `vests` must be true exactly when that issuance type has vesting terms
- * (`vesting_terms_id`, or a v2 grant's `vesting_template_id`), and
- * `returnsToPool` must be true exactly when it can name a stock plan
- * (`stock_plan_id`), so a typo or a wrong flag won't compile.
- *
- * `leavesOutstanding` lists the family's transactions that act on a security
- * without retiring it, so that it's still outstanding under the same
- * `security_id` afterwards. An equity compensation exercise or release has a
- * quantity but no balance security, so after a partial one the rest stays on
- * the original security, and a repricing only changes the price. The other
- * families' exercises, conversions, and transfers retire the security, so
- * they leave this out.
- *
- * Wherever these checks compare a transaction's type with one of the family's,
- * a transaction under an older name counts as the type it stands for (see
- * `OLDER_NAMES`). So equity compensation lists only its current names here.
+ * Describe each family's issuance, acceptance, vesting, stock plan support and transactions that
+ * keep it outstanding. The shared checks use these settings to apply the same rule to matching
+ * payloads under either transaction name.
  */
 type Family = {
   [C in CollectionKey]: {
@@ -213,24 +160,9 @@ export function familyChecksFor({
   leavesOutstanding = [],
 }: Family) {
   /**
-   * The issuance named by the transaction's `security_id` is outstanding as of
-   * the transaction's date. Passes if the node map holds an outstanding
-   * security of the family under that `security_id`. Only an issuance puts a
-   * security in the map, which tests/ocfMachine.test.ts checks.
-   *
-   * It reads the security's lifecycle, so it's blocked when an earlier
-   * failure leaves that in doubt: a failed issuance, or a failed transaction
-   * on the security since.
-   *
-   * When there's no match, the message says why, worked out from the package's
-   * full transaction history: the security was never issued, it's only issued
-   * after this transaction, or it was issued on or before this date but is no
-   * longer outstanding. The reason and any date it shows come from one history
-   * record, preferring a match dated on or before the transaction over a later
-   * one. An issuance under an older name is the family's issuance like any
-   * other.
-   *
-   * A transaction with no date fails: there's no date to be outstanding on.
+   * Read this family's lifecycle to check that the security is outstanding. An unreliable lifecycle
+   * blocks the check. If the security is missing, use the package history and transaction date to
+   * explain why.
    */
   const issuanceExists = {
     id: "issuance-exists",
@@ -252,8 +184,7 @@ export function familyChecksFor({
 
       if (read(securityField(collection, data.security_id, "lifecycle")) === "outstanding") return messages;
 
-      // The type comparison comes first because it tells TypeScript this is an
-      // issuance, which is what allows reading `security_id` and `date` next.
+      // Check the transaction type before accessing fields specific to an issuance.
       const { transactions } = context.ocfPackageContent;
       let firstIssuanceDate: string | undefined;
       let onOrBeforeDate: string | undefined;
@@ -327,22 +258,9 @@ export function familyChecksFor({
       const messages: string[] = [];
       const { transactions } = context.ocfPackageContent;
 
-      // One finding for each other transaction on this security_id dated on or
-      // before this one. Many transaction types have no security_id field at
-      // all, so it checks for the field first; a transaction without one can't
-      // refer to this security. In a family whose securities can vest, vesting
-      // transactions are skipped too: they only record the security's vesting,
-      // and a security that vests before it's exercised or cancelled is the
-      // ordinary case. So are the family's transactions that leave the
-      // security outstanding: after a partial exercise, the rest can still be
-      // exercised, cancelled, or transferred. In a family whose securities can
-      // come from a stock plan, a return to pool is skipped as well: it records
-      // where a cancellation's shares went, usually on the same day. A
-      // transaction under an older name is exempt wherever the type it stands
-      // for is. The transaction being validated is in the package history
-      // too, so it's skipped. It's matched on its type as well as its id:
-      // nothing makes ids unique across types, so matching on id alone would
-      // also skip another type's transaction that shares it.
+      // Report each earlier or same-day transaction that conflicts with this one. Use both object
+      // type and ID to exclude the transaction itself. Apply family exemptions under current and
+      // older names, including vesting where the family supports it.
       transactions.forEach((ele) => {
         if (
           "security_id" in ele &&
@@ -498,10 +416,8 @@ export function resultingChecksFor({
     run: (context, data, read) => {
       const messages: string[] = [];
 
-      // The reference stakeholder comes from the outstanding issuance this
-      // transaction acts on — the same security issuance-exists matches. With none,
-      // issuance-exists already carries the failure and there is no reference
-      // to compare against, so this check stays silent.
+      // Compare the stakeholder with the outstanding issuance. If the issuance is missing,
+      // issuance-exists already explains the problem.
       const reference =
         read(securityField(collection, data.security_id, "lifecycle")) === "outstanding"
           ? read(securityField(collection, data.security_id, "issuance"))

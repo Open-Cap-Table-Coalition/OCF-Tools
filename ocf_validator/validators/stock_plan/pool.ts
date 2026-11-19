@@ -4,32 +4,16 @@ import { planField, type NodeMap } from "../../nodes";
 import { exceeds, subtract } from "../../numeric";
 import { text, toValidate, type CheckObject } from "../checkKit";
 
-// ---------------------------------------------------------------------------
-// The stock plan pool check (#235)
-// ---------------------------------------------------------------------------
-//
-// An aggregate check: it's about a stock plan, not about any one transaction,
-// and it runs at the end of a day, on the day's net. A day's transactions
-// can pass through states no one would call wrong: a balance grant is issued
-// before the cancellation that names it, so for a moment the pool holds both
-// the grant and its balance. Judging the pool once the day is done leaves
-// that order out of it.
+// Check the plan after all transactions for the day. A same-day balance issuance can temporarily
+// count shares twice until its cancellation identifies the balance.
 
-/** A stock plan on a day: what the check is run on, and its findings' subject. */
+/** Identify the plan being checked and the date of the check. */
 type PlanOnDay = { object_type: "STOCK_PLAN"; id: string; date: string };
 
 /**
- * A stock plan's grants have drawn no more shares than the plan has reserved.
- *
- * It reads both of the plan's fields, so it's blocked when either is marked:
- * by a grant that failed, whose shares may or may not belong in `drawn`, or by
- * a pool adjustment that failed. The finding then points at those
- * transactions, and the plan's other grants are still checked on their own
- * terms.
- *
- * A plan whose reserve isn't known has nothing to be held against, so the
- * check passes over it. That's a plan the package's stock plan files don't
- * have: saying so is for the reference data check (#234), not this one.
+ * Compare drawn and reserved shares. Earlier failures affecting either total block this check and
+ * identify which transactions to fix. Skip an unknown reserve because the available shares cannot be
+ * calculated (#234).
  */
 export const poolNotExceeded = {
   id: "pool-not-exceeded",
@@ -46,7 +30,7 @@ export const poolNotExceeded = {
   },
 } satisfies CheckObject<PlanOnDay>;
 
-/** The checks run on a stock plan at the end of a day, as the coverage report lists a transaction's. */
+/** Plan checks listed for the coverage report. */
 export const STOCK_PLAN_CHECKS: readonly Check[] = [
   { id: poolNotExceeded.id, severity: poolNotExceeded.severity, description: poolNotExceeded.description },
 ];
@@ -54,13 +38,8 @@ export const STOCK_PLAN_CHECKS: readonly Check[] = [
 const validatePlan = toValidate([poolNotExceeded]);
 
 /**
- * The findings of the end-of-day checks for `date`.
- *
- * A plan is checked on a day something wrote to its pool: its node isn't the
- * one the day started with. `since` is the node map as the day began, and the
- * map is immutable, so a node that is still the same object hasn't changed. A
- * plan nothing touched was checked the last time something did, and isn't
- * reported again each day after.
+ * Check a plan if its record changed since the day began. Comparing record identity works because
+ * writes preserve earlier maps. This avoids reporting the same untouched plan on successive days.
  */
 export function endOfDayFindings(context: OcfMachineContext, since: NodeMap, date: string): Finding[] {
   const findings: Finding[] = [];

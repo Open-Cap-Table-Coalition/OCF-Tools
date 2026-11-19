@@ -19,9 +19,9 @@
   "vesting_terms_files": [],
   "valuations_files": [],
   "comments": [
-    "Three stock plans, one story each, for the stock plan pool tests (#225, #235).",
-    "Plan A (1000 reserved): a-bad grants 200 to a stakeholder who isn't in the stakeholders file, then a-good grants 300 to one who is.",
-    "Plan B (100 reserved): b-1 grants 80 and b-2 grants 30, which is 10 more than the plan has.",
-    "Plan C (500 reserved): c-1 grants 100 under the older name TX_PLAN_SECURITY_ISSUANCE. c-cancel cancels 40 of it and names c-balance, a grant of the 60 that are left. c-return puts the 40 back in the pool."
+    "Check the daily share totals and findings for three stock plans (#225, #235).",
+    "Plan A reserves 1,000 shares. Grant a-bad names a missing stakeholder. Grant a-good draws 300 shares for a known stakeholder.",
+    "Plan B reserves 100 shares. Grants b-1 and b-2 draw 80 and 30 shares, exceeding the reserve by 10.",
+    "Plan C reserves 500 shares. Grant c-1 draws 100 using TX_PLAN_SECURITY_ISSUANCE. Cancellation c-cancel names c-balance for the remaining 60 shares. Return c-return credits the 40 cancelled shares."
   ]
 }
