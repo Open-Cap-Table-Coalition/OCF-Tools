@@ -8,5 +8,5 @@ export const TX_EQUITY_COMPENSATION_CANCELLATION = defineValidator({
   checks: [issuanceExists, quantityOutstanding, noOtherTransactions],
 });
 
-/** The same validator under the transaction's older name. */
+/** Reuse the validator for the older transaction name. */
 export const TX_PLAN_SECURITY_CANCELLATION = underOlderName(TX_EQUITY_COMPENSATION_CANCELLATION, "TX_PLAN_SECURITY_CANCELLATION");

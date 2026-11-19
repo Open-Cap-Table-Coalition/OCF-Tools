@@ -71,7 +71,7 @@ describe("every check message renders a malformed package value", () => {
     expect(issuanceExists.run(contextWith(), { security_id: unprintable } as any)).toEqual([
       `The transaction has no date, so it can't be checked against the equity compensation issuance with security_id {"toString":null}.`,
     ]);
-    // An issuance in the history, under the older name, and not in the live collection.
+    // The history includes an older-name issuance that is no longer outstanding.
     const context = contextWith({
       transactions: [{ object_type: "TX_PLAN_SECURITY_ISSUANCE", security_id: unprintable, date: "2020-01-01" }],
     });
