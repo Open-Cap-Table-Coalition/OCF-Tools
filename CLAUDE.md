@@ -1,3 +1,0 @@
-# Repository instructions
-
-@AGENTS.md
