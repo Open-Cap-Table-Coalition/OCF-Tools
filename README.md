@@ -1,6 +1,8 @@
 # Open Cap Table Format (OCF) Tools
 
-A cap table records who holds a company's shares, options, warrants and other securities. OCF stores those records in a set of JSON files. This TypeScript library reads the files, checks whether the transactions agree, and shows which securities were outstanding on a given date.
+OCF defines how a cap table export records issuers, stakeholders, securities and events such as grants, transfers and cancellations. **OCF-Tools checks whether those records follow the rules defined in this repository.** You can read a rule, run its tests, and check an export against it.
+
+For example, a warrant issuance can contain a correctly formatted `stakeholder_id` of `"sh1"` even when the export has no stakeholder with that ID. The `stakeholder-exists` rule checks the stakeholder records. It passes when it finds `sh1` and reports the missing ID when it does not. [Rule](ocf_validator/validators/checks.ts) · [Checks for warrant issuance](ocf_validator/validators/warrant/tx_warrant_issuance.ts) · [Passing and failing tests](tests/warrantValidators.test.ts)
 
 ## Try a sample
 
@@ -11,7 +13,13 @@ npm ci
 npx ts-node -e "import { ocfValidator } from './index'; console.log(ocfValidator('testing_scripts/testPackage').result)"
 ```
 
-The sample issues an option grant and starts its vesting on June 1, 2019. Both transactions pass the current checks. To check another package, pass the folder containing `Manifest.ocf.json`.
+The sample issues an option grant and starts its vesting on June 1, 2019. Both transactions pass the current checks. To check another export, pass the folder containing `Manifest.ocf.json`.
+
+Run the warrant tests to see the same issuance checked with and without a matching stakeholder.
+
+```sh
+npm test -- tests/warrantValidators.test.ts -t "warrant issuance validity"
+```
 
 | Task | Function | Result |
 | --- | --- | --- |
@@ -24,7 +32,7 @@ The sample issues an option grant and starts its vesting on June 1, 2019. Both t
 ```mermaid
 flowchart TD
     A["Read the manifest and its files"] --> B["Sort transactions by date"]
-    B --> C["Look up each transaction type and run its checks"]
+    B --> C["Run the rules for this transaction type"]
     C -->|Pass or warning| D["Apply the transaction"]
     C -->|Error| E["Report the failure and stop"]
     D --> F["Save a snapshot at the end of each transaction day"]
