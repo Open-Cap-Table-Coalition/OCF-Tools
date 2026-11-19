@@ -5,19 +5,13 @@ import type { Snapshot } from "./snapshot";
 import type { Finding, Severity } from "./finding";
 
 /**
- * The machine context a validator receives: the package under validation, the
- * node map built from the transactions applied so far, and the record
- * channels — `report` for legacy dual-mode validators, `findings` for graded
- * ones. `report` retires with the legacy convention once every family returns
- * findings.
+ * The context holds the input package, current records and results. Older validators write to
+ * report. Validators built from checks write to findings.
  */
 export type OcfMachineContext = {
   /**
-   * The state of the cap table: every security the run has issued, with what
-   * has become of it (see `ocf_validator/nodes.ts`). Immutable; applying a
-   * transaction replaces it with a new map. `outstanding` in that module
-   * lists a family's outstanding issuances, which is what the four issuance
-   * arrays this replaces held.
+   * Current security records. Applying a transaction returns an updated map. Use outstanding to list
+   * a family's current issuances.
    */
   nodes: NodeMap;
   ocfPackageContent: OcfPackageContent;
@@ -32,10 +26,8 @@ export type OcfMachineContext = {
   report: any[];
   findings: Finding[];
   /**
-   * Machine bookkeeping, not validator input: the error findings that halted
-   * the run, when it was halted by the one check that still can: a legacy
-   * issuance of a security removed earlier. Written at record time, read only
-   * by that failure branch to build the failure message.
+   * Store the findings that stopped a legacy issuance after an earlier removal so the failure
+   * message can identify the cause.
    */
   lastErrorFindings: Finding[];
   snapshots: Snapshot[];
@@ -56,15 +48,8 @@ export type DeepReadonly<T> = T extends readonly (infer E)[]
       : T;
 
 /**
- * A graded validator for a transaction whose payload is `T`: receives the
- * payload directly — no guard flag — and returns findings. The machine derives
- * everything else from that one return value. The findings are recorded on
- * `context.findings`, never on `context.report`. If none of them is at
- * severity "error", the transaction's writes are applied (warnings alone
- * don't stop them). Otherwise its writes are withheld and marked, and the
- * run goes on (#231). The machine runs a validator once per transaction; a
- * validator must still be pure, and its inputs are typed `DeepReadonly` so
- * mutating them is a compile error.
+ * A validator returns findings for one transaction. The machine records them and applies writes only
+ * when no error-level finding prevents it. Warnings allow writes, and later transactions still run.
  */
 export type GradedValidator<T> = (
   context: DeepReadonly<OcfMachineContext>,
@@ -72,26 +57,9 @@ export type GradedValidator<T> = (
 ) => Finding[];
 
 /**
- * One check a validator performs (or should perform), written as data. This
- * replaces the old free-text `CURRENT CHECKS` / `MISSING CHECKS` comment blocks.
- *
- * The machine doesn't read these while validating; the coverage report does.
- * But for validators built with `defineValidator` (see
- * `ocf_validator/validators/checkKit.ts`), the same definitions also produce the
- * findings, so `severity` affects behavior, not just the report.
- *
- *  - `id`:          the check's name, e.g. "issuance-exists". It must be unique
- *                   within one transaction type's list; the same id can appear
- *                   under different transaction types. Copied onto each finding.
- *  - `severity`:    "error" or "warning". Copied onto every finding the check
- *                   produces. Only an error fails a transaction, so changing
- *                   a check to "warning" lets transactions that fail it through.
- *  - `description`: the sentence the report shows for this check. Required.
- *  - `implemented`: left out for a check the validator performs; `false` for a
- *                   known gap, a check that's needed but not written yet. It
- *                   can only be `false`, never `true`, so it only ever marks a
- *                   gap. `defineValidator` sets it for you: a check with no
- *                   `run` is a gap.
+ * Describe what the coverage report should show for each check. The ID is unique within a validator.
+ * The same definition supplies the message severity used during validation. A check without run
+ * appears with implemented set to false.
  */
 export type Check = {
   id: string;
@@ -101,30 +69,14 @@ export type Check = {
 };
 
 /**
- * What a transaction does to the lifecycle of the security it names, in one
- * word. A security is not issued, then outstanding, then removed:
- *
- *  - "issue":         takes it from not issued to outstanding.
- *  - "stays":         acts on an outstanding security and leaves it outstanding.
- *  - "removes":       takes it from outstanding to removed.
- *  - "after removal": allowed only once it's removed, and leaves it removed.
- *
- * Every descriptor in `TX_DESCRIPTORS` declares one. The lifecycle charts are
- * built from these words, one chart per family (#233).
+ * A security starts unissued. Issuance makes it outstanding and removal ends that state. A "stays"
+ * transaction requires an outstanding security. An "after removal" transaction requires a removed
+ * security.
  */
 export type LifecycleWord = "issue" | "stays" | "removes" | "after removal";
 
 /**
- * A transaction's part in a stock plan's pool, in one word (see "The stock
- * plan pool" in `ocf_validator/nodes.ts`):
- *
- *  - "draws":    a grant. It adds its quantity to its plan's `drawn`.
- *  - "carries":  a removal that can name a balance or resulting grant, which
- *                then carries shares already drawn and adds nothing.
- *  - "returns":  a return to pool. It takes its quantity from the plan's
- *                `drawn`.
- *  - "reserves": a pool adjustment. It sets the plan's `reserved`.
- *
- * A descriptor with none of these leaves every pool alone.
+ * The pool operation tells the reducer whether to charge a grant, carry shares already charged,
+ * credit a return or replace the reserve.
  */
 export type PoolEffect = "draws" | "carries" | "returns" | "reserves";

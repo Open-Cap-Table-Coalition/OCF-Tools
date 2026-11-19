@@ -16,24 +16,19 @@ import type { Finding } from "../types/finding";
 import { expectShadowExplained } from "./lifecycleShadow";
 import type { Check, GradedValidator, OcfMachineContext } from "../types/validator";
 
-/** The four security families, by the names of the arrays the context once held for them. */
+/** Security families use the original collection names. */
 const FAMILIES = ["stockIssuances", "convertibleIssuances", "warrantIssuances", "equityCompensation"] as const satisfies readonly CollectionKey[];
 
 /**
- * What a test can seed a context with: any of its fields, and, per family,
- * the issuances to start with outstanding. The context held those four arrays
- * until the node map replaced them (#228); a test still states its starting
- * cap table the same way, and `baseContext` puts it in the map.
+ * Tests can supply starting issuances by family. baseContext stores them in the same form as the
+ * validator.
  */
 export type ContextSeed = Partial<OcfMachineContext> & { [C in CollectionKey]?: readonly unknown[] };
 
-/** An "append" descriptor for a family: all the reducer reads off one to issue a security. */
+/** The reducer needs only a collection and an issuance effect to seed this family. */
 const issues = (collection: CollectionKey) => ({ effect: "append", collection }) as unknown as Descriptor;
 
-/**
- * A node map holding the seeded issuances as outstanding securities, built by
- * the same reducer the machine uses. Added to `nodes` if the seed has one.
- */
+/** Add the starting issuances using the production reducer. */
 const seededNodes = (seed: ContextSeed): NodeMap =>
   FAMILIES.reduce(
     (nodes, family) =>
@@ -42,10 +37,8 @@ const seededNodes = (seed: ContextSeed): NodeMap =>
   );
 
 /**
- * A full, mostly-empty machine context; `overrides` replace top-level fields,
- * and a family's array of issuances seeds the node map (see `ContextSeed`).
- * Unless overridden, `removals` indexes the package's transactions, as START
- * builds it, so a seeded actor sees the same removals a real run would.
+ * Start with an empty context, apply test overrides and index removals from the package as the START
+ * event does.
  */
 export const baseContext = (overrides: ContextSeed = {}): OcfMachineContext => {
   const { stockIssuances, convertibleIssuances, warrantIssuances, equityCompensation, ...fields } = overrides;
@@ -74,23 +67,14 @@ export const baseContext = (overrides: ContextSeed = {}): OcfMachineContext => {
   };
 };
 
-/**
- * The issuances outstanding in a family, in the order issued: what the
- * context's array of that name held before the node map (#228).
- */
+/** Read the family's outstanding issuances in issuance order. */
 export const collection = <C extends CollectionKey>(context: OcfMachineContext, family: C) =>
   outstanding(context.nodes, family);
 
 /**
- * Runs the whole validator over a package holding the given transactions,
- * stakeholders, stock classes, and stock plans, so the run goes through the
- * driver and same-day sort as a real one does. It writes a minimal package (a
- * manifest and a file for each of those) to a temporary directory and removes
- * it afterwards.
- *
- * It also runs the lifecycle charts over the package in shadow, and fails if
- * they disagree with the checks they're to replace in a way that isn't
- * explained (see tests/lifecycleShadow.ts).
+ * Write a temporary package with the supplied transactions and reference data. Call the public
+ * validator to exercise file loading and date ordering, compare the lifecycle charts, then remove
+ * the package.
  */
 export const validatePackage = (
   transactions: Record<string, unknown>[],
@@ -117,9 +101,8 @@ export const validatePackage = (
       valuations_files: [],
     });
     const context = ocfValidator(dir);
-    // Every package a test validates also goes through the lifecycle charts in
-    // shadow (#233). The driver has sorted the package's transactions in
-    // place, so they're in run order here.
+    // The validator sorts the input in place. Compare the charts and the two checks in that same
+    // order.
     expectShadowExplained(context.ocfPackageContent.transactions);
     return context;
   } finally {
@@ -127,11 +110,7 @@ export const validatePackage = (
   }
 };
 
-/**
- * Start an actor seeded into `capTable` with the given context. A family's
- * array of issuances spread onto the context is put in its node map, as
- * `baseContext` does.
- */
+/** Start the machine in capTable with the supplied records and issuances. */
 export const startSeeded = (context: OcfMachineContext & ContextSeed) =>
   createActor(ocfMachine, {
     snapshot: ocfMachine.resolveState({ value: "capTable", context: baseContext(context) }),
@@ -210,7 +189,7 @@ export const emittedCheckIds = <K extends string>(scenarios: FailingScenarios<K>
   return emitted;
 };
 
-/** Assert a finding carries the declared id, error severity, a failed outcome, and the transaction as subject. */
+/** Check the error level, outcome, check ID and transaction named in the finding. */
 export const expectFindingShape = (
   finding: Finding,
   check: string,

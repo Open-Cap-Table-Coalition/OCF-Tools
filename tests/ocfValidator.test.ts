@@ -101,16 +101,14 @@ describe("a transaction on a security an earlier transaction removed", () => {
   ])("fails a later $object_type on it", (transaction) => {
     const context = validateAfter(transaction);
 
-    // The run goes on to its end, and the result counts the error (#231).
+    // Include the error in the completed result.
     expect(context.findings).toEqual([removed(transaction)]);
     expect(context.result).toBe("The validation of the OCF package for Test Co is complete and found 1 error.");
     expect(context.snapshots.map((s) => s.date)).toEqual(["2021-01-01", "2021-06-01", "2021-07-01"]);
   });
 
   it("still stops the run on a later TX_STOCK_ISSUANCE on it, which is a stock failure", () => {
-    // The stock validators are legacy, and a failure of theirs halts. The
-    // machine runs no-earlier-removal on a stock issuance itself, and that
-    // halts with them.
+    // A legacy stock issuance stops the run if its earlier-removal check fails.
     const transaction = { id: "si-1", object_type: "TX_STOCK_ISSUANCE", security_id: "safe-1", stakeholder_id: "sh-1", date: "2021-07-01" };
     const context = validateAfter(transaction);
 
@@ -122,10 +120,8 @@ describe("a transaction on a security an earlier transaction removed", () => {
   });
 
   it("fails a later release under the older name TX_PLAN_SECURITY_RELEASE through the release's own checks", () => {
-    // A plan security release is an equity compensation release, so it has a
-    // validator of its own and the machine no longer runs no-earlier-removal
-    // on it. Its issuance-exists fails it: safe-1 was never an equity
-    // compensation security.
+    // The release uses the equity compensation validator. Its issuance check fails because safe-1 is
+    // a convertible.
     const release = { id: "psr-1", object_type: "TX_PLAN_SECURITY_RELEASE", security_id: "safe-1", date: "2021-07-01" };
     const context = validateAfter(release);
 
@@ -141,10 +137,8 @@ describe("a transaction on a security an earlier transaction removed", () => {
   });
 
   it("names the first removal of a security removed twice", () => {
-    // The run no longer stops at the vesting event between the two (#231), so
-    // the second cancellation is reached and fails on its own: the security
-    // isn't outstanding, and the first cancellation and the vesting event
-    // both name it.
+    // The validator reaches the second cancellation. Its security was already removed, and the first
+    // cancellation and vesting event also name it.
     const vesting = { id: "ve-1", object_type: "TX_VESTING_EVENT", security_id: "safe-1", vesting_condition_id: "vc-1", date: "2021-07-01" };
     const context = validateAfter(vesting, { ...cancellation, id: "cc-2", date: "2021-08-01" });
 
@@ -164,7 +158,7 @@ describe("a transaction on a security an earlier transaction removed", () => {
     const context = validateAfter(vesting);
 
     expect(context.findings).toEqual([removed(vesting)]);
-    // The vesting event's day gets its snapshot too, now that the run goes on.
+    // Include the vesting date in the snapshots even though the transaction failed.
     expect(context.snapshots.map((s) => s.date)).toEqual(["2021-01-01", "2021-06-01", "2021-06_01"]);
   });
 
@@ -239,8 +233,7 @@ describe("malformed package values", () => {
       { id: unprintable, object_type: "TX_CONVERTIBLE_ISSUANCE", security_id: "safe-1", stakeholder_id: "nobody", date: "2021-01-01" },
     ]);
 
-    // The result counts the failure, and the finding names the transaction
-    // by the id it has.
+    // Count the failure and retain the transaction's actual ID in its finding.
     expect(context.result).toBe("The validation of the OCF package for Test Co is complete and found 1 error.");
     expect(context.findings.map((f) => f.check)).toEqual(["stakeholder-exists"]);
     expect(context.findings[0].subject).toEqual({ object_type: "TX_CONVERTIBLE_ISSUANCE", id: unprintable });

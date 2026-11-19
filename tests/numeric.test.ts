@@ -4,8 +4,7 @@ import { add, exceeds, isNegative, isNumeric, subtract } from "../ocf_validator/
 describe("OCF Numeric arithmetic", () => {
   it("recognises a Numeric and nothing else", () => {
     for (const value of ["0", "1000", "+5", "-5", "0.5", "12.0000000001"]) expect(isNumeric(value)).toBe(true);
-    // Eleven decimal places, no digits before or after the point, an
-    // exponent, a thousands separator, and values that aren't strings.
+    // Reject excess precision, incomplete decimals, exponents, separators and non-string inputs.
     for (const value of ["1.00000000001", ".5", "5.", "1e3", "1,000", "", " 1", "abc", 1000, null, undefined, {}, ["1"]]) {
       expect(isNumeric(value)).toBe(false);
     }
@@ -14,7 +13,7 @@ describe("OCF Numeric arithmetic", () => {
   it("adds and subtracts exactly, where a JavaScript number wouldn't", () => {
     expect(add("0.1", "0.2")).toBe("0.3");
     expect(subtract("0.3", "0.1")).toBe("0.2");
-    // Beyond what a double can hold exactly.
+    // This value exceeds JavaScript's safe integer precision.
     expect(add("9007199254740993", "1")).toBe("9007199254740994");
     expect(add("123456789012345678901234567890.0000000001", "0.0000000009")).toBe("123456789012345678901234567890.000000001");
   });

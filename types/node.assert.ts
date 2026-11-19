@@ -1,4 +1,4 @@
-/** Compile-time guarantees for node composition and derived field access. */
+/** The build checks record identity and the value types of fields. */
 import { readNodeField, withNodeField, type Field, type FieldKey, type FieldValue, type NodeBase, type NodeMaps } from "../ocf_validator/node";
 import { fieldAt, planField, securityField, isSecurityFamily, type Draw, type NodeMap, type PlanNode, type SecurityNode } from "../ocf_validator/nodes";
 import type { CollectionElement } from "../ocf_validator/ocfMachine";
@@ -18,7 +18,7 @@ if (isSecurityFamily(security, "warrantIssuances")) {
   type _Narrowed = Expect<Equal<typeof narrowed.issuance, typeof warrant.issuance>>;
 }
 
-// A new kind and a new field need no changes to the common helpers.
+// Common field helpers also work for a new record type.
 type Example = NodeBase<"example", { amount: string; enabled: boolean; note?: string }>;
 declare const example: Example;
 type _Keys = Expect<Equal<FieldKey<Example>, "amount" | "enabled" | "note">>;
@@ -42,7 +42,7 @@ withNodeField(security, "issuance", convertible.issuance);
 // @ts-expect-error — node identity remains readonly.
 example.id = "different";
 
-// Values follow the addressed field, including refs authored as plain objects.
+// Infer the value type even when the caller writes the field address as an object literal.
 declare const nodes: NodeMap;
 const issuance = fieldAt(nodes, securityField("warrantIssuances", "w", "issuance"));
 type _RefIssuance = Expect<Equal<typeof issuance, Field<CollectionElement["warrantIssuances"]> | undefined>>;
@@ -53,7 +53,7 @@ securityField("warrantIssuances", "w", "id");
 // @ts-expect-error — a caller cannot choose a value type independent of the address.
 fieldAt<number>(nodes, securityField("warrantIssuances", "w", "issuance"));
 
-// Family-specific state is present only on the family that owns it.
+// Only equity compensation records carry grant pool fields.
 declare const grant: SecurityNode<"equityCompensation">;
 const provenance = readNodeField(grant, "provenance");
 const draw = fieldAt(nodes, securityField("equityCompensation", "g", "draw"));

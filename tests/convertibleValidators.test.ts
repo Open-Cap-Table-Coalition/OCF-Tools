@@ -84,13 +84,12 @@ describe("convertible issuance validity", () => {
     actor.send(ev("TX_CONVERTIBLE_ISSUANCE", issuance()));
 
     const snapshot = actor.getSnapshot();
-    // A failing transaction no longer stops the run (#231).
+    // The validator continues after this transaction fails.
     expect(snapshot.value).toBe("capTable");
     expect(snapshot.context.findings).toHaveLength(1);
     expect(snapshot.context.findings[0].check).toBe("stakeholder-exists");
     expect(collection(snapshot.context, "convertibleIssuances")).toEqual([]);
-    // The security has a node all the same: nothing is known of it, and it's
-    // marked with the issuance that failed.
+    // Keep a record with unknown values and identify the failed issuance.
     const root = snapshot.context.findings[0].subject;
     expect(snapshot.context.nodes.security.get("sec1")).toMatchObject({
       lifecycle: { value: undefined, defects: [root] },
@@ -905,7 +904,7 @@ describe("a conflicting transaction pair flags the later transaction, not the ea
 
     actor.send(ev("TX_CONVERTIBLE_RETRACTION", retraction));
     const { context, value } = actor.getSnapshot();
-    // A failing transaction no longer stops the run (#231).
+    // The validator continues after this transaction fails.
     expect(value).toBe("capTable");
 
     const errors = context.findings.filter((f) => f.severity === "error");
@@ -937,7 +936,7 @@ describe("a conflicting transaction pair flags the later transaction, not the ea
 
     actor.send(ev("TX_CONVERTIBLE_ACCEPTANCE", acceptance));
     const { context, value } = actor.getSnapshot();
-    // A failing transaction no longer stops the run (#231).
+    // The validator continues after this transaction fails.
     expect(value).toBe("capTable");
 
     const errors = context.findings.filter((f) => f.severity === "error");
@@ -1052,7 +1051,7 @@ describe("convertible family findings migrate to the findings channel", () => {
     }));
 
     const { context, value } = actor.getSnapshot();
-    // A failing transaction no longer stops the run (#231).
+    // The validator continues after this transaction fails.
     expect(value).toBe("capTable");
     // The errors landed on findings…
     expect(context.findings.length).toBeGreaterThan(0);
@@ -1060,7 +1059,7 @@ describe("convertible family findings migrate to the findings channel", () => {
     // …no report entry was written for a migrated convertible type…
     const migrated = MIGRATED_KEYS as readonly string[];
     expect(context.report.some((entry: any) => migrated.includes(entry?.transaction_type))).toBe(false);
-    // …and the result, written when the run ends, counts them.
+    // The final result counts the findings.
     actor.send({ type: "RUN_END", date: "2021-01-01" });
     expect(actor.getSnapshot().context.result).toBe(
       `The validation of the OCF package for Test Co is complete and found ${context.findings.length} error${context.findings.length === 1 ? "" : "s"}.`,

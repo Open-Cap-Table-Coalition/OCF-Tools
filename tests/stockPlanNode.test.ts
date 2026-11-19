@@ -5,14 +5,8 @@ import type { Subject } from "../types/finding";
 import { toValidate, type CheckObject } from "../ocf_validator/validators/checkKit";
 import { baseContext, validatePackage } from "./helpers";
 
-// ---------------------------------------------------------------------------
-// The stock plan node (#235)
-// ---------------------------------------------------------------------------
-//
-// A stock plan has a node with two fields: `reserved`, the shares it has to
-// grant, and `drawn`, the shares its grants have taken. Nothing checks one
-// against the other yet. These hold the arithmetic: what moves each number,
-// what doesn't, and what a failure does to them.
+// Check how transactions change reserved and drawn shares. The plan stores each total separately so
+// a failure affecting one can leave the other reliable.
 
 const subject = (object_type: string, id: string) => ({ object_type, id }) as Subject;
 
@@ -57,15 +51,15 @@ const adjustment = (id: string, shares_reserved: unknown, fields: Record<string,
   ...fields,
 });
 
-/** A run over the plan and these transactions. */
+/** Validate this plan with the supplied transactions. */
 const run = (transactions: Record<string, unknown>[], plans: Record<string, unknown>[] = [PLAN]) =>
   validatePackage(transactions, stakeholders, [], plans);
 
-/** What each day's snapshot shows for a plan: [date, drawn]. */
+/** Compare each snapshot date with the plan's drawn shares. */
 const drawnByDay = (context: ReturnType<typeof run>, plan = "plan-1") =>
   context.snapshots.map((snapshot) => [snapshot.date, snapshot.stockPlans.find((row) => row.id === plan)?.drawn]);
 
-/** The reducer on its own: each transaction applied, or withheld with the given roots. */
+/** Exercise the reducer directly with known validation decisions. */
 const reduce = (start: NodeMap, ...steps: [Record<string, any>, (readonly Subject[])?][]): NodeMap =>
   steps.reduce(
     (nodes, [transaction, roots]) =>
@@ -74,9 +68,7 @@ const reduce = (start: NodeMap, ...steps: [Record<string, any>, (readonly Subjec
   );
 const withPlan = () => withPlans(emptyNodes(), [PLAN]);
 
-// ---------------------------------------------------------------------------
-// The node
-// ---------------------------------------------------------------------------
+// Plan records
 
 describe("a stock plan's node", () => {
   it("starts with the plan's initial reserve, written by no transaction, and nothing drawn", () => {
@@ -118,15 +110,13 @@ describe("a stock plan's node", () => {
     const after = reduce(before, [{ id: "a-1", object_type: "TX_EQUITY_COMPENSATION_ACCEPTANCE", security_id: "opt-1", date: "2022-01-02" }]);
 
     expect(after).toBe(before);
-    // A grant from no plan leaves the plan map itself alone.
+    // A grant without a plan leaves the plan map unchanged.
     const planless = reduce(before, [grant("g-2", "opt-2", "100", { stock_plan_id: undefined })]);
     expect(planless.plan).toBe(before.plan);
   });
 });
 
-// ---------------------------------------------------------------------------
-// drawn
-// ---------------------------------------------------------------------------
+// Shares drawn
 
 describe("drawn", () => {
   it("counts each grant's quantity once, exactly, with the grant as its last writer", () => {
@@ -142,7 +132,7 @@ describe("drawn", () => {
       writer: subject("TX_EQUITY_COMPENSATION_ISSUANCE", "g-3"),
       defects: [],
     });
-    // Each grant records what it holds against the pool.
+    // Record which plan supplied each grant's shares.
     expect(securityAt(context.nodes, "equityCompensation", "opt-1")?.draw).toEqual({
       value: { plan: "plan-1", quantity: "100.25" },
       writer: subject("TX_EQUITY_COMPENSATION_ISSUANCE", "g-1"),
@@ -164,7 +154,7 @@ describe("drawn", () => {
   });
 
   it("doesn't count a security_id a second time when it's issued again", () => {
-    // Removed and issued again the same day, which no-earlier-removal allows.
+    // The date check allows removal and reissuance on the same day.
     const nodes = reduce(
       withPlan(),
       [grant("g-1", "opt-1", "100")],
@@ -208,8 +198,8 @@ describe("drawn", () => {
       [PLAN, successor],
     );
 
-    // OCF allows it: shares can return to a different pool after a plan
-    // rollover. Nothing stops the successor's count going below zero yet.
+    // A rollover can send shares to a different plan. The validator can currently produce a negative
+    // drawn total there.
     expect(context.snapshots.at(-1)?.stockPlans).toEqual([
       { id: "plan-1", reserved: "1000", drawn: "100" },
       { id: "plan-2", reserved: "1000", drawn: "-100" },
@@ -217,9 +207,7 @@ describe("drawn", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
 // Balance and resulting grants
-// ---------------------------------------------------------------------------
 
 describe("a grant another transaction names as its balance or resulting security", () => {
   const partial = cancellation("c-1", "opt-1", "40", { balance_security_id: "opt-1-balance" });
@@ -237,9 +225,8 @@ describe("a grant another transaction names as its balance or resulting security
   });
 
   it("gives back what it drew when it's issued before the transaction that names it", () => {
-    // The order a run takes them in: an issuance sorts ahead of a
-    // cancellation on the same day. The balance grant draws, and the
-    // cancellation takes that draw back when it names it.
+    // The balance issuance runs before the same-day cancellation. Reverse its separate charge when
+    // the cancellation names it.
     const drew = reduce(withPlan(), [grant("g-1", "opt-1", "100")], [balance]);
     expect(drew.plan.get("plan-1")?.drawn.value).toBe("160");
 
@@ -252,10 +239,8 @@ describe("a grant another transaction names as its balance or resulting security
   });
 
   it("draws nothing when the transaction that names it comes first, and ends in the same place", () => {
-    // The other order, which the older names produce: a plan security
-    // issuance sorts after an equity compensation cancellation. The
-    // cancellation leaves a node holding the provenance, and the reducer
-    // never looks ahead for the issuance.
+    // The older issuance name sorts after a current-name cancellation. Remember the balance ID so
+    // the later issuance can skip the charge.
     const named = reduce(withPlan(), [grant("g-1", "opt-1", "100")], [partial]);
     expect(named.security.get("opt-1-balance")).toEqual({
       kind: "security",
@@ -278,7 +263,7 @@ describe("a grant another transaction names as its balance or resulting security
   });
 
   it("isn't outstanding, or shown, while it has been named and not yet issued", () => {
-    // A whole run in that order: the balance grant under the older name.
+    // Use the older name to exercise this order through the public validator.
     const context = run([grant("g-1", "opt-1", "100"), partial, { ...balance, object_type: "TX_PLAN_SECURITY_ISSUANCE", custom_id: "BAL" }]);
 
     expect(context.findings).toEqual([]);
@@ -321,9 +306,7 @@ describe("a grant another transaction names as its balance or resulting security
   });
 });
 
-// ---------------------------------------------------------------------------
-// reserved
-// ---------------------------------------------------------------------------
+// Reserved shares
 
 describe("reserved", () => {
   it("is set by a pool adjustment, which becomes its writer and leaves drawn alone", () => {
@@ -351,9 +334,7 @@ describe("reserved", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// Failures
-// ---------------------------------------------------------------------------
+// Failed plan changes
 
 describe("a failed transaction's writes to the pool", () => {
   it("withholds a return from a marked security, including a return to another plan", () => {
@@ -402,13 +383,13 @@ describe("a failed transaction's writes to the pool", () => {
       [{ id: "plan-1", reserved: "1000", drawn: "0", defects: { drawn: [BAD] } }],
       [{ id: "plan-1", reserved: "1000", drawn: "300", defects: { drawn: [BAD] } }],
     ]);
-    // The valid grant wrote the number. The defects stay: nothing clears drawn.
+    // The valid grant updates drawn shares, but the earlier failure still affects the total.
     expect(context.nodes.plan.get("plan-1")?.drawn).toEqual({
       value: "300",
       writer: subject("TX_EQUITY_COMPENSATION_ISSUANCE", "g-good"),
       defects: [BAD],
     });
-    // reserved was never in doubt.
+    // The reserve remains reliable.
     expect(context.nodes.plan.get("plan-1")?.reserved.defects).toEqual([]);
     expect(securityAt(context.nodes, "equityCompensation", "opt-1")?.draw).toEqual({ value: undefined, writer: undefined, defects: [BAD] });
   });
@@ -456,15 +437,14 @@ describe("a failed transaction's writes to the pool", () => {
     expect(context.findings.map((finding) => [finding.check, finding.message])).toEqual([
       ["shares-reserved-countable", "The transaction's shares_reserved (plenty) is not a number written the way OCF writes one."],
     ]);
-    // reserved keeps the plan's initial figure, marked. drawn isn't touched.
+    // Retain the initial reserve and mark it unreliable. Drawn shares stay reliable.
     expect(context.snapshots.at(-1)?.stockPlans).toEqual([{ id: "plan-1", reserved: "1000", drawn: "100", defects: { reserved: [ADJUSTMENT] } }]);
     expect(context.nodes.plan.get("plan-1")?.reserved).toEqual({ value: "1000", writer: undefined, defects: [ADJUSTMENT] });
   });
 
   it("mark the pool when a cancellation that fails names a balance grant that had drawn", () => {
-    // The cancellation is of a grant that was never issued, so it fails. Its
-    // balance grant was issued earlier that day and drew 60, which the
-    // cancellation would have taken back.
+    // Cancellation of the missing grant fails. Its balance grant already drew 60 shares, so the
+    // failure makes that charge uncertain.
     const partial = cancellation("c-1", "opt-missing", "40", { balance_security_id: "opt-balance" });
     const context = run([grant("g-balance", "opt-balance", "60", { date: "2022-02-01" }), partial]);
     const CANCELLATION = subject("TX_EQUITY_COMPENSATION_CANCELLATION", "c-1");
@@ -478,10 +458,8 @@ describe("a failed transaction's writes to the pool", () => {
   });
 
   it("leave whether a grant draws in doubt when the transaction that named it first had failed", () => {
-    // The naming came first and failed, so its provenance is marked. The
-    // grant itself is valid, but whether it adds to the pool depends on that
-    // naming: its draw is withheld, and drawn is marked with the naming's
-    // root.
+    // The failed cancellation named the balance before issuance. Record that failure on the draw
+    // because the validator cannot establish whether to charge the plan.
     const CANCELLATION = subject("TX_EQUITY_COMPENSATION_CANCELLATION", "c-1");
     const partial = cancellation("c-1", "opt-1", "40", { balance_security_id: "opt-balance" });
     const nodes = reduce(withPlan(), [grant("g-1", "opt-1", "100")], [partial, [CANCELLATION]], [grant("g-balance", "opt-balance", "60", { date: "2022-02-01" })]);
@@ -491,14 +469,12 @@ describe("a failed transaction's writes to the pool", () => {
       writer: subject("TX_EQUITY_COMPENSATION_ISSUANCE", "g-1"),
       defects: [CANCELLATION],
     });
-    // The balance grant itself is fine: issued, and outstanding.
+    // The balance grant itself remains outstanding.
     expect(nodes.security.get("opt-balance")).toMatchObject({ lifecycle: { value: "outstanding", defects: [] }, draw: { value: undefined, defects: [CANCELLATION] } });
   });
 });
 
-// ---------------------------------------------------------------------------
-// What isn't counted yet
-// ---------------------------------------------------------------------------
+// Pool rules still to implement
 
 describe("stock issued from a plan", () => {
   it("isn't counted against the pool: the stock validators are legacy, and only a grant draws", () => {
@@ -514,7 +490,7 @@ describe("stock issued from a plan", () => {
   });
 });
 
-// Declared reads must cover fields contributed by a concrete security family.
+// A check can depend on a field specific to one security family.
 describe("equity compensation field reads", () => {
   it.each(["provenance", "draw"] as const)("blocks a check that reads marked %s", (field) => {
     const failed = subject("TX_EQUITY_COMPENSATION_CANCELLATION", "c-1");

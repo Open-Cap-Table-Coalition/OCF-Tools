@@ -2,13 +2,8 @@ import { securityField } from "../../nodes";
 import { defineValidator, text, type CheckObject } from "../checkKit";
 import { countable } from "../checks";
 
-// A return to pool is the one transaction that follows a security's removal:
-// it records which plan the removed grant's shares went back to. It takes its
-// quantity out of that plan's `drawn`. The plan needn't be the one the grant
-// came from.
-//
-// The source must have been removed reliably before its shares can credit a
-// pool, including a different plan's pool. Quantity limits remain a gap.
+// A return credits the named plan, which can differ from the source plan. Require a reliably removed
+// equity compensation security. The quantity limit still needs implementation.
 
 const securityRemoved = {
   id: "security-removed",

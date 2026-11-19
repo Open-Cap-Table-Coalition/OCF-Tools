@@ -37,5 +37,5 @@ export const TX_EQUITY_COMPENSATION_ACCEPTANCE = defineValidator({
   checks: [issuanceExists, noRetraction],
 });
 
-/** The same validator under the transaction's older name. */
+/** Reuse the validator for the older transaction name. */
 export const TX_PLAN_SECURITY_ACCEPTANCE = underOlderName(TX_EQUITY_COMPENSATION_ACCEPTANCE, "TX_PLAN_SECURITY_ACCEPTANCE");

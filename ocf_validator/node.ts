@@ -1,14 +1,8 @@
 import type { Subject } from "../types/finding";
 
 /**
- * One field of a node.
- *
- *  - `value`:  what the field holds. `undefined` means not known.
- *  - `writer`: the transaction that last wrote the value, located the way a
- *              finding's subject is. `undefined` for a value no transaction
- *              wrote.
- *  - `defects`: the root transactions whose failure leaves this field
- *              unreliable. Empty for a field that can be trusted.
+ * A field stores its last known value, the transaction that wrote it and any failures that make it
+ * unreliable. A missing value means unknown. Initial values can have no writer.
  */
 export type Field<T> = {
   readonly value: T | undefined;
@@ -16,44 +10,43 @@ export type Field<T> = {
   readonly defects: readonly Subject[];
 };
 
-/** Common identity and tracked state for every kind of cap-table node. */
+/** Identity and tracked fields shared by security records and other record types. */
 export type NodeBase<Kind extends string, State> = {
   readonly kind: Kind;
   readonly id: unknown;
 } & { readonly [P in keyof State]: Field<State[P]> };
 
-/** One map per node kind, derived from the concrete node definitions. */
+/** Create a separate ID lookup for each record type. */
 export type NodeMaps<Nodes extends { readonly kind: string; readonly id: unknown }> = {
   readonly [K in Nodes["kind"]]: ReadonlyMap<unknown, Extract<Nodes, { kind: K }>>;
 };
 
-/** Only tracked state fields, excluding node identity and discriminators. */
+/** Select the fields whose values can change. */
 export type FieldKey<N> = {
   [P in keyof N]-?: NonNullable<N[P]> extends Field<unknown> ? P : never;
 }[keyof N];
 
-/** The value a tracked field holds, derived from its node's definition. */
+/** Get the value type from the field definition. */
 export type FieldValue<N, P extends FieldKey<N>> = NonNullable<N[P]> extends Field<infer V> ? V : never;
 
-/** Read a declared field without erasing its value type or optionality. */
+/** Preserve the field's value type, including when it may be missing. */
 export const readNodeField = <N, P extends FieldKey<N>>(node: N, field: P): N[P] => node[field];
 
-// For a union node, a write must fit every possible variant. Narrow the
-// family before replacing a family-specific field such as its issuance.
+// Select a specific family before writing a value that only that family accepts.
 type FieldWrite<N, P extends keyof N> =
   (N extends unknown ? (value: N[P]) => void : never) extends (value: infer V) => void ? V : never;
 
-/** Replace one tracked field, sharing all others. Identity is never a field write. */
+/** Return a copy with one updated field and the same identity. */
 export const withNodeField = <N, P extends FieldKey<N>>(node: N, field: P, value: NoInfer<FieldWrite<N, P>>): N =>
   ({ ...node, [field]: value });
 
-/** Addresses follow each concrete node's discriminators and tracked fields. */
+/** Use the record's kind, family and field name to identify a value. */
 export type FieldAddress<N extends { kind: string; id: unknown }> = N extends unknown ? {
   [P in FieldKey<N>]: Pick<N, "kind" | "id"> &
     (N extends { family: unknown } ? Pick<N, "family"> : {}) & { readonly field: P };
 }[FieldKey<N>] : never;
 
-/** Resolve the value type from an address, never from a caller-supplied type parameter. */
+/** Determine the value type from the requested field. */
 export type ReferenceValue<Nodes extends { kind: string; id: unknown }, Ref> =
   Nodes extends unknown ? Ref extends FieldAddress<Nodes>
     ? Ref["field"] extends FieldKey<Nodes> ? FieldValue<Nodes, Ref["field"]> : never

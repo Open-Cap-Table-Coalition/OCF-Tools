@@ -1,24 +1,17 @@
-// ---------------------------------------------------------------------------
-// OCF Numeric arithmetic
-// ---------------------------------------------------------------------------
-//
-// OCF writes a quantity as a Numeric: a fixed-point decimal in a string, with
-// up to ten decimal places ("1000", "0.5", "12.0000000001"). The aggregates
-// add and compare these, and a cap table's share counts have to come out
-// exact, so nothing here goes through a JavaScript number. A Numeric is read
-// into a BigInt count of ten-billionths, and the arithmetic is done on that.
+// OCF share quantities are decimal strings with up to ten fractional digits. Convert them to integer
+// ten-billionths so arithmetic stays exact for large and fractional share counts.
 
-/** The schema's pattern for a Numeric. */
+/** Accepted format for an OCF decimal string. */
 const NUMERIC = /^[+-]?[0-9]+(\.[0-9]{1,10})?$/;
 
-/** How many decimal places a Numeric can carry. */
+/** OCF supports ten fractional digits. */
 const PLACES = 10;
 const SCALE = 10n ** BigInt(PLACES);
 
-/** Whether a package value is an OCF Numeric. Nothing checks a package against the schema first, so it may not be. */
+/** Check values from disk before doing arithmetic. */
 export const isNumeric = (value: unknown): value is string => typeof value === "string" && NUMERIC.test(value);
 
-/** A Numeric as a count of ten-billionths. The value must be one (see `isNumeric`). */
+/** Convert a validated decimal string to integer ten-billionths. */
 const toScaled = (value: string): bigint => {
   const negative = value.startsWith("-");
   const [whole, fraction = ""] = value.replace(/^[+-]/, "").split(".");
@@ -26,7 +19,7 @@ const toScaled = (value: string): bigint => {
   return negative ? -scaled : scaled;
 };
 
-/** A count of ten-billionths as a Numeric, with no sign on zero and no trailing zeros. */
+/** Convert back to a decimal string, trimming trailing fractional zeros and the sign on zero. */
 const fromScaled = (scaled: bigint): string => {
   const magnitude = scaled < 0n ? -scaled : scaled;
   const whole = magnitude / SCALE;
@@ -34,14 +27,14 @@ const fromScaled = (scaled: bigint): string => {
   return `${scaled < 0n ? "-" : ""}${whole}${fraction === "" ? "" : `.${fraction}`}`;
 };
 
-/** The sum of two Numerics, exactly. */
+/** Add two OCF quantities exactly. */
 export const add = (a: string, b: string): string => fromScaled(toScaled(a) + toScaled(b));
 
-/** The first Numeric less the second, exactly. */
+/** Subtract the second OCF quantity from the first. */
 export const subtract = (a: string, b: string): string => fromScaled(toScaled(a) - toScaled(b));
 
-/** Whether the first Numeric is greater than the second. */
+/** Compare two quantities at OCF precision. */
 export const exceeds = (a: string, b: string): boolean => toScaled(a) > toScaled(b);
 
-/** Whether a Numeric is below zero. */
+/** Check the sign of a validated quantity. */
 export const isNegative = (value: string): boolean => toScaled(value) < 0n;

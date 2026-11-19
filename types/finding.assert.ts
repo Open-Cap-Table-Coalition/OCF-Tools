@@ -1,8 +1,4 @@
-/**
- * Compile-time assertions for the graded findings model (#156) and its
- * outcome field (#227). No runtime — this file is type-checked by `tsc` (the
- * build), so a broken invariant fails the build.
- */
+/** The build checks the public finding types. */
 import type { OcfMachineContext } from "../ocf_validator/ocfMachine";
 import type { BlockedFinding, FailedFinding, Finding, Outcome, Severity, Subject } from "./finding";
 import type { ObjectTypeMap } from "@opencaptablecoalition/ocf-types";
@@ -14,15 +10,12 @@ type _FindingsChannel = Expect<Equal<OcfMachineContext["findings"], Finding[]>>;
 // Pin 2: Severity is exactly "error" | "warning" — no other string is assignable.
 type _Severity = Expect<Equal<Severity, "error" | "warning">>;
 
-// Pin 2b: Outcome is exactly "failed" | "blocked", and it is a field of its
-// own: neither value is a Severity, so a blocked check keeps its severity.
+// Severity describes the problem. Outcome records whether the check failed or was blocked.
 type _Outcome = Expect<Equal<Outcome, "failed" | "blocked">>;
 type _OutcomeIsNotSeverity = Expect<Equal<Extract<Outcome, Severity>, never>>;
 type _FindingOutcome = Expect<Equal<Finding["outcome"], Outcome>>;
 
-// Pin 3: every finding has exactly these fields — catches drift if a field is
-// added or renamed. A blocked finding has `roots` as well, and a failed one
-// doesn't.
+// Check the fields on failed and blocked findings, including roots on blocked findings.
 type _FindingKeys = Expect<
   Equal<keyof Finding, "severity" | "outcome" | "check" | "message" | "subject">
 >;
@@ -37,7 +30,7 @@ type _SubjectObjectType = Expect<
   Equal<Finding["subject"]["object_type"], keyof ObjectTypeMap>
 >;
 
-// Pin 3c: a blocked finding carries all its roots, each located as a subject is.
+// Each root identifies a transaction by type and ID.
 type _Roots = Expect<Equal<BlockedFinding["roots"], Subject[]>>;
 
 // Pin 4: All fields are required — no field may be accidentally made optional.
@@ -87,8 +80,7 @@ const _badSubject: Finding = {
   },
 };
 
-// Pin 5e: A blocked finding names its roots, and keeps a severity of its own:
-// here a warning-level check that couldn't run.
+// A blocked warning keeps warning severity and names the failures that blocked it.
 const _blockedFinding: Finding = {
   severity: "warning",
   outcome: "blocked",
@@ -101,8 +93,7 @@ const _blockedFinding: Finding = {
   ],
 };
 
-// Pin 5f: Negative — a blocked finding must say what blocked it.
-// @ts-expect-error — a blocked finding requires `roots`.
+// @ts-expect-error A blocked finding must identify its roots.
 const _blockedNoRoots: Finding = {
   severity: "error",
   outcome: "blocked",
@@ -111,19 +102,18 @@ const _blockedNoRoots: Finding = {
   subject: { object_type: "TX_WARRANT_ACCEPTANCE", id: "tx_004" },
 };
 
-// Pin 5g: Negative — a check that ran has no roots: it is one.
+// A failed check reports its own problem.
 const _failedWithRoots: Finding = {
   severity: "error",
   outcome: "failed",
   check: "EXAMPLE_CHECK",
   message: "Example error message",
   subject: { object_type: "TX_WARRANT_ISSUANCE", id: "tx_002" },
-  // @ts-expect-error — only a blocked finding has `roots`.
+  // @ts-expect-error Only blocked findings carry roots.
   roots: [],
 };
 
-// Pin 5h: Negative — every finding states its outcome.
-// @ts-expect-error — a finding requires `outcome`.
+// @ts-expect-error Every finding needs an outcome.
 const _noOutcome: Finding = {
   severity: "error",
   check: "EXAMPLE_CHECK",
@@ -131,7 +121,7 @@ const _noOutcome: Finding = {
   subject: { object_type: "TX_WARRANT_ISSUANCE", id: "tx_002" },
 };
 
-// Pin 5i: `outcome` narrows a finding, so `roots` is read only off a blocked one.
+// Checking the outcome tells TypeScript when roots can be read.
 const _rootsOf = (finding: Finding): Subject[] => (finding.outcome === "blocked" ? finding.roots : []);
 
 // Pin 6: Accumulation guard — xstate-style append must type-check.
