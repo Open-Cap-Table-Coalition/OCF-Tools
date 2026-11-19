@@ -10,5 +10,5 @@ export const TX_EQUITY_COMPENSATION_TRANSFER = defineValidator({
   checks: [issuanceExists, quantityOutstanding, asGap(noOtherTransactions)],
 });
 
-/** The same validator under the transaction's older name. */
+/** Reuse the validator for the older transaction name. */
 export const TX_PLAN_SECURITY_TRANSFER = underOlderName(TX_EQUITY_COMPENSATION_TRANSFER, "TX_PLAN_SECURITY_TRANSFER");

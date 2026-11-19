@@ -42,15 +42,11 @@ import run_EOD from "./eod";
 // types/validator.ts directly.
 export type { GradedValidator, OcfMachineContext } from "../types/validator";
 
-// ---------------------------------------------------------------------------
 // Security families
-// ---------------------------------------------------------------------------
 
 /**
- * The issuance type of each security family, by the family's key. The keys
- * are the names of the four arrays the context once held, one per family;
- * they now name the family itself: on a descriptor's `collection`, on a
- * security's node (see `nodes.ts`), and on a lifecycle chart.
+ * These keys identify the family in the transaction table, security records and charts. They come
+ * from the original collection names.
  */
 export interface CollectionElement {
   stockIssuances: OCFStockIssuance;
@@ -101,10 +97,8 @@ type Validator<T> = (
 ) => any;
 
 /**
- * The context a legacy validator receives: the machine's, plus the
- * `stockIssuances` array the legacy stock validators loop over. The machine
- * keeps no such array any more. `legacyContext` reads it off the node map for
- * each call, so those validators run unchanged until they move to findings.
+ * Legacy stock validators still read an array of outstanding stock. Build that array from the
+ * current records for each call.
  */
 export type LegacyContext = OcfMachineContext & { stockIssuances: OCFStockIssuance[] };
 
@@ -114,64 +108,12 @@ const legacyContext = (context: OcfMachineContext): LegacyContext => ({
 });
 
 /**
- * Everything the machine needs to know about one transaction type, keyed on its
- * `effect`. A non-passthrough descriptor names its validator under exactly one
- * of two mutually exclusive fields — `legacyValidate` (dual-mode shape) or
- * `validate` (graded shape) — so which convention a transaction uses is part of
- * the table's static description, and the machine dispatches on field presence
- * the same way it dispatches on `effect`. The validator is referenced once so
- * the guard and the recorded outcome always use the same one. The
- * `legacyValidate` arms exist only while families migrate; the union collapses
- * to the graded arms when the last one does.
+ * A descriptor specifies which validator runs, which families it handles and how a valid transaction
+ * changes a security. The reducer uses its effect. Charts use its lifecycle field.
  *
- *  - `passthrough`: no validator or mutation. The machine checks only that its
- *                   security wasn't removed earlier (see buildTransactionHandlers).
- *  - `none`:        validate and record, but change no security.
- *  - `remove`:      validate, record, and mark the security removed. Its
- *                   `collection` names the family it must belong to.
- *  - `append`:      validate, record, and issue the security into the family
- *                   `collection` names. An issuance's security mustn't have
- *                   been removed earlier.
- *
- * `applyTransaction` in `nodes.ts` is what carries an effect out.
- *
- * The `none`/`remove` graded arms take `GradedValidator<any>`, not
- * `GradedValidator<unknown>`: the payload is contravariant, so `unknown` would
- * reject every family-typed validator — like `Validator<unknown>` over the
- * `event: any` validators, the `any` constrains the shape, not the payload.
- *
- * The `append` variants distribute over `CollectionKey`, tying `collection` to
- * the payload family of the validator — under either field — so a family-typed
- * validator cannot be declared under a mismatched collection (demonstrated in
- * `types/ocf-machine-table.assert.ts`). That is what keeps a security's node
- * holding an issuance of its own family: the node takes its family from the
- * descriptor that issued it.
- *
- * Graded descriptors (the ones with `validate`) must also list their checks in
- * `checks` (see `types/validator.ts`). The machine doesn't read this list while
- * validating; it's for the coverage report, which shows what each transaction
- * type checks. Making it required means no family can move to the graded style
- * without listing its checks. Legacy descriptors don't have it.
- *
- * The list isn't only documentation, though. For validators built with
- * `defineValidator`, the same check definitions produce the findings, and each
- * finding's severity is copied from its check. Changing a check's severity
- * changes whether a transaction that fails it has its writes withheld.
- *
- * Every descriptor also carries its `lifecycle` word (see `LifecycleWord` in
- * `types/validator.ts`): what the transaction does to the lifecycle of the
- * security it names. Nothing reads the word while validating yet; the
- * lifecycle charts are built from it (#233). An active descriptor's word
- * follows from its `effect`, and the types hold the two together: "append"
- * is "issue", "remove" is "removes", and "none" is "stays". Only a
- * passthrough descriptor's word is a free choice.
- *
- * A word needs a family to belong to: the chart it becomes an arrow on. An
- * "append" or "remove" descriptor already names it, as its `collection`. A
- * "none" or passthrough descriptor changes no collection, so it lists its
- * `families` instead: more than one for a transaction that can name a
- * security of several families (the vesting transactions), and none for a
- * transaction that names no security at all (see `lifecycleFamilies`).
+ * Each validator that returns findings declares its checks. Error findings withhold writes and
+ * warnings allow them. Legacy validators still use their guard and report. The types tie an issuance
+ * payload to its family.
  */
 type Descriptor =
   | { effect: "passthrough"; lifecycle: LifecycleWord; families: readonly CollectionKey[] }
@@ -212,14 +154,10 @@ export type ActiveDescriptor = Exclude<Descriptor, { effect: "passthrough" }>;
  */
 export type DescriptorTable = { [K in TxKey]: Descriptor & { transaction?: K } };
 
-/** Every key some member of the union `T` has; `keyof` alone keeps only the shared ones. */
+/** Include keys that appear on only one member of the union. */
 type KeyOfAny<T> = T extends unknown ? keyof T : never;
 
-/**
- * A family whose securities can vest: one whose issuance type carries vesting
- * terms (`vesting_terms_id`, or a v2 grant's `vesting_template_id`). It's the
- * rule `familyChecksFor` holds each family's `vests` flag to.
- */
+/** A family supports vesting if its issuance type has a vesting terms or template ID. */
 export type VestingFamily = {
   [C in CollectionKey]: Extract<KeyOfAny<CollectionElement[C]>, "vesting_terms_id" | "vesting_template_id"> extends never
     ? never
@@ -227,9 +165,8 @@ export type VestingFamily = {
 }[CollectionKey];
 
 /**
- * The families a vesting transaction can name a security of. Pinned to
- * `VestingFamily` in `types/ocf-machine-table.assert.ts`, so a family that
- * gains or loses vesting terms has to be added or dropped here.
+ * Keep this list in step with the issuance types that have vesting terms. The build checks the
+ * match.
  */
 export const VESTING_FAMILIES = [
   "stockIssuances",
@@ -238,9 +175,7 @@ export const VESTING_FAMILIES = [
 ] as const satisfies readonly VestingFamily[];
 
 export const TX_DESCRIPTORS = {
-  // The seven TX_PLAN_SECURITY_* types are the equity compensation types
-  // under their older names. Each entry is its equivalent's, filed again
-  // under the older name (see `underOlderName`), so it sits in the same group.
+  // Reuse the current equity compensation descriptors for all seven older transaction names.
 
   // --- append: issuance appended to its family collection -----------------
   TX_STOCK_ISSUANCE: { effect: "append", lifecycle: "issue", collection: "stockIssuances", legacyValidate: validators.valid_tx_stock_issuance },
@@ -288,33 +223,17 @@ export const TX_DESCRIPTORS = {
   TX_PLAN_SECURITY_CANCELLATION,
   TX_PLAN_SECURITY_TRANSFER,
 
-  // --- passthrough: no validator of their own ----------------------------
-  //   No report entry, no collection mutation. Except for the return to pool,
-  //   the machine fails one on a security an earlier transaction removed (see
-  //   buildTransactionHandlers); otherwise they stay in `capTable` with nothing
-  //   recorded, so the characterization snapshot (which contains
-  //   TX_VESTING_START) records nothing for it.
-  //   `satisfies DescriptorTable` below forces any future OCF transaction type
-  //   to be classified here — a compile error until it is.
-  //
-  //   Their lifecycle words are assigned here, since no `effect` implies one.
-  //
-  //   A vesting transaction records vesting and leaves its security
-  //   outstanding. It can name a security of any family whose issuance carries
-  //   vesting terms, which a convertible's doesn't.
+  // The machine checks these transactions for an earlier removal except when shares return to a
+  // pool. Vesting leaves stock, warrants and equity grants outstanding.
   TX_VESTING_START: { effect: "passthrough", lifecycle: "stays", families: VESTING_FAMILIES },
   TX_VESTING_EVENT: { effect: "passthrough", lifecycle: "stays", families: VESTING_FAMILIES },
   TX_VESTING_ACCELERATION: { effect: "passthrough", lifecycle: "stays", families: VESTING_FAMILIES },
-  //   A consolidation removes each stock security in its `security_ids` and
-  //   names the one that replaces them.
+  // A consolidation replaces several stock securities with one.
   TX_STOCK_CONSOLIDATION: { effect: "passthrough", lifecycle: "removes", families: ["stockIssuances"] },
-  //   A return to pool records where a removed grant's shares went, so it's
-  //   the one transaction allowed only once its security has been removed.
+  // Shares can return to a plan after the grant is removed.
   TX_STOCK_PLAN_RETURN_TO_POOL: { effect: "passthrough", lifecycle: "after removal", families: ["equityCompensation"] },
-  //   The rest name no security: each acts on a stock class, a stock plan, or
-  //   the issuer. A split changes every security in its class and the others
-  //   change none, but all of them leave every security where it is, so the
-  //   word is "stays". With no family, none is an arrow on any chart.
+  // These transactions act on a class, plan or issuer. They leave individual securities outstanding
+  // and belong to no security chart.
   TX_STOCK_CLASS_SPLIT: { effect: "passthrough", lifecycle: "stays", families: [] },
   TX_STOCK_CLASS_AUTHORIZED_SHARES_ADJUSTMENT: { effect: "passthrough", lifecycle: "stays", families: [] },
   TX_STOCK_CLASS_CONVERSION_RATIO_ADJUSTMENT: { effect: "passthrough", lifecycle: "stays", families: [] },
@@ -325,9 +244,8 @@ export const TX_DESCRIPTORS = {
 export type { Descriptor };
 
 /**
- * The families whose lifecycle chart a descriptor's word is an arrow on: its
- * `collection` if it changes one, otherwise the `families` it lists. Empty for
- * a transaction that names no security.
+ * Return the security families affected by this transaction. An empty list means it names no
+ * security.
  */
 export const lifecycleFamilies = (descriptor: Descriptor): readonly CollectionKey[] =>
   "collection" in descriptor ? [descriptor.collection] : descriptor.families;
@@ -375,7 +293,7 @@ const subjectOf = (event: ValidatorEvent): string =>
     ? event.data.id
     : event.type;
 
-/** The one rule for which findings fail a transaction: only an error-level one does. */
+/** Only an error-level finding prevents the transaction's writes. */
 const isErrorFinding = (finding: Finding): boolean => finding.severity === "error";
 
 /**
@@ -466,13 +384,7 @@ export const malformedResult = (ocfPackageContent: OcfPackageContent, transactio
 // The machine — typed via setup({ types, actions, guards })
 // ---------------------------------------------------------------------------
 
-/**
- * The valid branch's change to the node map for a legacy transaction: the
- * transaction applied by the pure reducer in `nodes.ts`, driven by its
- * descriptor's `effect`. An "append" issues its security and a "remove" marks
- * it removed. A "none" or passthrough transaction, or a control event,
- * changes nothing and returns no update.
- */
+/** Apply a valid legacy transaction's effect and return any change to the security records. */
 export function nodesUpdate(
   context: OcfMachineContext,
   event: OcfMachineEvent,
@@ -482,20 +394,12 @@ export function nodesUpdate(
   return nodes === context.nodes ? {} : { nodes };
 }
 
-// ---------------------------------------------------------------------------
-// Transactions validated by findings: record, then apply or withhold
-// ---------------------------------------------------------------------------
+// Applying transactions that return findings
 
 /**
- * What a transaction's findings decide about its writes (see `Verdict` in
- * `nodes.ts`). Only an error-level check counts, as only an error ever failed
- * a transaction: a warning doesn't, whether it was raised or blocked.
- *
- *  - No error-level finding: the writes are applied.
- *  - Otherwise they're withheld and marked. The roots are the transaction
- *    itself if one of its checks failed, together with the roots of every
- *    check of its that was blocked. A transaction that was only blocked isn't
- *    a root: it passes on the roots that blocked it.
+ * Apply the writes unless an error-level check failed or was blocked. A failure contributes the
+ * current transaction as a cause. A blocked check carries the original failures forward. Warnings
+ * allow writes in either case.
  */
 export function verdictOf(subject: Subject, findings: readonly Finding[]): Verdict {
   const errors = findings.filter(isErrorFinding);
@@ -513,11 +417,8 @@ export function verdictOf(subject: Subject, findings: readonly Finding[]): Verdi
 }
 
 /**
- * The whole update for one transaction validated by findings: its validator
- * is run once, its findings are recorded, and the reducer applies its writes
- * or withholds and marks them, by the verdict. The run goes on either way.
- * `validate` is the transaction's own graded validator, or for a passthrough
- * type the one check the machine runs on it.
+ * Run the validator once. Record its findings, apply or withhold the writes, then continue to the
+ * next transaction.
  */
 export function findingsUpdate(
   descriptor: Descriptor,
@@ -535,17 +436,8 @@ export function findingsUpdate(
 }
 
 /**
- * The `result` of a run that reached its end. A run halts only on a legacy
- * validator's failure, an unknown transaction type, or a throw, and each of
- * those writes its own result. Everything else is counted here from the
- * findings.
- *
- * Root errors and their consequences are counted apart. An error is a check
- * that ran and failed: something to fix. A blocked check is one that couldn't
- * run because of an error, so it's counted as that error's consequence, not
- * as a problem of its own. Warnings don't make a package invalid, so a valid
- * package can have them; the result counts them, so a caller reading only
- * `result` knows to look at `findings` (#215).
+ * Count failed errors, warnings and blocked checks separately so the result distinguishes problems
+ * to fix from checks to retry. Runs that stop early report the event that stopped them.
  */
 export function completedResult(context: OcfMachineContext): string {
   const count = (matches: (finding: Finding) => boolean) => context.findings.filter(matches).length;
@@ -568,11 +460,7 @@ export function completedResult(context: OcfMachineContext): string {
 // Removed securities
 // ---------------------------------------------------------------------------
 
-/**
- * The earliest transaction in `transactions` that removes each security (an
- * effect of "remove"), by security_id: the machine's
- * `removals`, which no-earlier-removal reads. START builds it, once per run.
- */
+/** Index the earliest recorded removal attempt for each security ID when the run starts. */
 export const earliestRemovals = (transactions: readonly OcfTransaction[]): OcfMachineContext["removals"] => {
   const removals = new Map<unknown, OcfTransaction>();
   for (const ele of transactions) {
@@ -585,10 +473,7 @@ export const earliestRemovals = (transactions: readonly OcfTransaction[]): OcfMa
   return removals;
 };
 
-/**
- * noEarlierRemoval in the shape the dispatch helpers take. It isn't any one
- * transaction's descriptor, so its lifecycle word and families say nothing.
- */
+/** Wrap the shared removal check so the machine can call it like a transaction validator. */
 const notRemoved = {
   effect: "none",
   lifecycle: "stays",
@@ -598,19 +483,9 @@ const notRemoved = {
 } satisfies ActiveDescriptor;
 
 /**
- * Build the `on` map for every key in `TX_DESCRIPTORS`.
- *
- * A transaction validated by findings never halts the run. A graded type has
- * one transition: validate once, record the findings, and apply its writes or
- * withhold and mark them (`applyByFindings`). A passthrough type has no
- * validator of its own, so the machine runs no-earlier-removal on it and
- * treats it the same way; the return to pool is exempt, since it records
- * where a removed security's shares went.
- *
- * A legacy type keeps the two-branch transition: valid stays in `capTable`,
- * and a failure ends the run in `validationError`. A legacy issuance can't
- * declare no-earlier-removal either, so the machine runs it first, and that
- * failure halts too: it's a stock failure.
+ * Use one transition for validators that return findings. Record failures and continue checking
+ * later transactions. Passthrough transactions use the earlier-removal check, except returns to
+ * pool. Legacy stock validation stops on failure, including an issuance after removal.
  */
 function buildTransactionHandlers() {
   const legacyTransitions = [
@@ -656,23 +531,19 @@ export const ocfMachine = setup({
     events: OcfMachineEvent;
   },
   guards: {
-    // Guard a legacy type's valid branch via its validator (see
-    // isValidOutcome). Control events never reach this guard (they have their
-    // own handlers); the narrow drops them so `event` carries the `data` the
-    // validator reads.
+    // Use the legacy validator to choose the success or failure transition. Control events have
+    // their own handlers.
     isValidTx: ({ context, event }) => {
       if (isControlEvent(event)) return false;
       const descriptor = activeDescriptorFor(event.type);
       return descriptor ? isValidOutcome(descriptor, context, event) : false;
     },
-    // A legacy issuance on a removed security (see noEarlierRemoval and
-    // buildTransactionHandlers).
+    // Check a legacy issuance for an earlier removal.
     followsRemoval: ({ context, event }) =>
       !isControlEvent(event) && !isValidOutcome(notRemoved, context, event),
   },
   actions: {
-    // A graded or passthrough transaction: validate once, record, and apply
-    // or withhold (see findingsUpdate). The run never halts here.
+    // Record the findings and apply the transaction only if its checks allow it.
     applyByFindings: assign(({ context, event }) => {
       if (isControlEvent(event)) return {};
       const descriptor = TX_DESCRIPTORS[event.type];
@@ -680,9 +551,7 @@ export const ocfMachine = setup({
       return descriptor.effect === "passthrough" ? findingsUpdate(descriptor, notRemoved.validate, context, event) : {};
     }),
 
-    // Record a legacy validator's outcome: its report entry onto `report`.
-    // Same descriptor as the guard, so the guard and the record can never
-    // diverge.
+    // Use the same legacy validator for the report and the pass/fail decision.
     recordOutcome: assign(({ context, event }) => {
       if (isControlEvent(event)) return {};
       const descriptor = activeDescriptorFor(event.type);
@@ -696,8 +565,7 @@ export const ocfMachine = setup({
         failureResult(isControlEvent(event) ? undefined : activeDescriptorFor(event.type), context, event),
     }),
 
-    // A legacy type's valid branch: apply the transaction to the node map
-    // (see nodesUpdate). `none` descriptors (and control events) change nothing.
+    // Apply a successful legacy transaction's effect.
     applyToNodes: assign(({ context, event }) => nodesUpdate(context, event)),
 
     // The followsRemoval branch's record and failure message, as for a
@@ -710,8 +578,7 @@ export const ocfMachine = setup({
 }).createMachine({
   id: "OCF-xstate",
   initial: "capTable",
-  // A function, so each run starts with its own arrays and node map: a caller
-  // that changes one in a run's returned context can't change the next run's.
+  // Create fresh collections for each run so a caller cannot change another run's results.
   context: () => ({
     nodes: emptyNodes(),
     ocfPackageContent: {

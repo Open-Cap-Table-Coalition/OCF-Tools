@@ -3,14 +3,9 @@ import { applyTransaction, emptyNodes, outstanding, outstandingSecurity, securit
 import { TX_DESCRIPTORS, type TxKey } from "../ocf_validator/ocfMachine";
 import { collection, validatePackage } from "./helpers";
 
-// ---------------------------------------------------------------------------
-// The node map
-// ---------------------------------------------------------------------------
-//
-// The cap table's state is one immutable map of nodes (#228). These drive the
-// reducer directly, then a whole run.
+// Test security records directly and through a complete package run.
 
-/** Apply transactions to a map in order, each under its own type's descriptor. */
+/** Apply each transaction using its descriptor, in the supplied order. */
 const apply = (nodes: NodeMap, ...transactions: { object_type: string; id: string; security_id?: unknown }[]): NodeMap =>
   transactions.reduce((map, transaction) => applyTransaction(map, TX_DESCRIPTORS[transaction.object_type as TxKey], transaction), nodes);
 
@@ -45,12 +40,11 @@ describe("a security's node", () => {
 
     const node = removed.security.get("war-1");
     expect(node?.lifecycle).toEqual({ value: "removed", writer: { object_type: "TX_WARRANT_CANCELLATION", id: "wc-1" }, defects: [] });
-    // The cancellation wrote one field. The issuance is still the issuance's:
-    // the same field object, not a copy.
+    // Cancellation changes the lifecycle and reuses the original issuance field.
     expect(node?.issuance).toBe(issued.security.get("war-1")?.issuance);
     expect(node?.issuance.writer).toEqual({ object_type: "TX_WARRANT_ISSUANCE", id: "wi-1" });
 
-    // It's no longer outstanding, but it hasn't gone anywhere.
+    // The map retains the removed security.
     expect(outstanding(removed, "warrantIssuances")).toEqual([]);
     expect(outstandingSecurity(removed, "warrantIssuances", "war-1")).toBeUndefined();
     expect(securitiesIn(removed, "warrantIssuances").map((security) => security.id)).toEqual(["war-1"]);
@@ -61,7 +55,7 @@ describe("a security's node", () => {
 
     expect(outstandingSecurity(nodes, "warrantIssuances", "sec-1")).toBeDefined();
     expect(outstandingSecurity(nodes, "convertibleIssuances", "sec-1")).toBeUndefined();
-    // A convertible cancellation naming a warrant's security_id changes nothing.
+    // A convertible cancellation cannot remove a warrant with that ID.
     expect(apply(nodes, on("TX_CONVERTIBLE_CANCELLATION", "cc-1", "sec-1"))).toBe(nodes);
   });
 });
@@ -91,12 +85,11 @@ describe("the reducer", () => {
   it("returns the same map for a transaction that changes nothing", () => {
     const nodes = apply(emptyNodes(), issuance("wi-1", "war-1"));
 
-    // An acceptance and a vesting event leave the security as it is, and a
-    // removal of a security that isn't there has nothing to act on.
+    // Acceptance, vesting and removal of a missing security leave the records alone.
     expect(apply(nodes, on("TX_WARRANT_ACCEPTANCE", "wa-1", "war-1"))).toBe(nodes);
     expect(apply(nodes, on("TX_VESTING_EVENT", "ve-1", "war-1"))).toBe(nodes);
     expect(apply(nodes, on("TX_WARRANT_CANCELLATION", "wc-1", "nothing"))).toBe(nodes);
-    // A second removal doesn't overwrite the first as the lifecycle's writer.
+    // Preserve the transaction that first removed the security.
     const removed = apply(nodes, on("TX_WARRANT_CANCELLATION", "wc-1", "war-1"));
     expect(apply(removed, on("TX_WARRANT_TRANSFER", "wt-1", "war-1"))).toBe(removed);
   });
@@ -121,8 +114,7 @@ describe("the order of the map", () => {
   });
 
   it("puts a security_id issued again after its removal where the newer issuance belongs", () => {
-    // As appending to an array did: the earlier issuance was taken out, and
-    // the newer one went on the end.
+    // Reissuance puts the record at the end of the issuance order.
     const again = { ...issuance("wi-3", "war-1"), date: "2021-06-01" };
     const second = issuance("wi-2", "war-2");
     const nodes = apply(emptyNodes(), issuance("wi-1", "war-1"), second, on("TX_WARRANT_CANCELLATION", "wc-1", "war-1"), again);
@@ -131,9 +123,8 @@ describe("the order of the map", () => {
   });
 
   it("holds one node per security_id, so a second issuance of an outstanding one replaces the first", () => {
-    // A difference from the arrays, which held both. Nothing reports a
-    // security_id issued twice yet; the lifecycle chart refuses it (see
-    // tests/lifecycleShadow.test.ts).
+    // A second outstanding issuance replaces the first record. The old arrays retained both. Only
+    // the chart currently rejects the duplicate.
     const again = { ...issuance("wi-2", "war-1"), stakeholder_id: "sh-2" };
     const nodes = apply(emptyNodes(), issuance("wi-1", "war-1"), again);
 

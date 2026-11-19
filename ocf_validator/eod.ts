@@ -5,19 +5,13 @@ import { securitiesIn, type NodeMap, type SecurityNode } from "./nodes";
 import type { CollectionElement, CollectionKey } from "./ocfMachine";
 
 /**
- * Whether a security has an entry in the snapshot.
- *
- * Which securities are on the cap table is the lifecycle chart's answer: the
- * snapshot asks for the chart's on-the-cap-table tag and names no state
- * itself (#233). A removed security is still in the node map and isn't shown.
- *
- * A security whose issuance failed has no lifecycle value to ask the chart
- * about. It's shown, marked, since the validator can't say it isn't there.
+ * Include securities the chart marks as outstanding. Also show a failed issuance with unknown status
+ * so its uncertainty is visible in the snapshot.
  */
 const isShown = ({ family, lifecycle }: SecurityNode): boolean =>
   lifecycle.value === undefined ? lifecycle.defects.length > 0 : isOnCapTable(family, lifecycle.value);
 
-/** The defect marker for a security's entry, or nothing if both its fields can be trusted. */
+/** List the failures that affect the lifecycle or issuance fields in this snapshot row. */
 const markOf = ({ lifecycle, issuance }: SecurityNode): DefectMark | undefined => {
   if (lifecycle.defects.length === 0 && issuance.defects.length === 0) return undefined;
   return {
@@ -29,10 +23,8 @@ const markOf = ({ lifecycle, issuance }: SecurityNode): DefectMark | undefined =
 };
 
 /**
- * A family's entries: one for each of its securities that is shown, in the
- * order issued. `row` projects an issuance to the entry's fields. An entry
- * for a security that can be trusted is exactly that row. A marked one
- * carries the mark too, and has no other fields if its issuance isn't known.
+ * Show securities in issuance order. A failed issuance can produce a row with only the failures
+ * because its details are unknown.
  */
 const entries = <C extends CollectionKey, Row>(
   nodes: NodeMap,
@@ -47,7 +39,7 @@ const entries = <C extends CollectionKey, Row>(
       return mark === undefined ? (fields as Row) : { ...fields, ...mark };
     });
 
-/** The cap table at the end of a day, read off the node map. */
+/** Build the snapshot from the security records at the end of the day. */
 const RUN_EOD = (context: OcfMachineContext, event: { date: string }): Snapshot => {
   const { nodes } = context;
 

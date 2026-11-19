@@ -1,13 +1,6 @@
-// The lifecycle charts, run in shadow against the two checks they're meant to
-// replace: no-earlier-removal and no-other-transactions (#233). Nothing in the
-// validator consults a chart yet. This walks a package's transactions in run
-// order, asks the chart about each one, asks the two checks about the same
-// one, and reports where they disagree.
-//
-// `validatePackage` (tests/helpers.ts) runs it on every package a test
-// validates, and tests/lifecycleShadow.test.ts runs it on the packages on
-// disk. Each disagreement has to be one of the explained kinds below, or the
-// test that validated the package fails.
+// Compare each chart's decisions with no-earlier-removal and no-other-transactions (#233). Follow
+// transaction order even when validation fails. Whole-package tests use this comparison to catch new
+// differences.
 
 import { lifecycleStep, type LifecycleState } from "../ocf_validator/lifecycle";
 import { lifecycleFamilies, TX_DESCRIPTORS, type CollectionKey, type Descriptor } from "../ocf_validator/ocfMachine";
@@ -22,32 +15,32 @@ const NO_EARLIER_REMOVAL = "no-earlier-removal";
 const NO_OTHER_TRANSACTIONS = "no-other-transactions";
 const SHADOWED = [NO_EARLIER_REMOVAL, NO_OTHER_TRANSACTIONS];
 
-/** A transaction as the walker reads it: its type and date, and whichever fields name its securities. */
+/** Package fields used to compare a transaction with its chart. */
 type Transaction = { id?: unknown; object_type: string; date: string; security_id?: unknown; security_ids?: unknown; [field: string]: unknown };
 
-/** One transaction on one security: what the chart said, and what the two checks said. */
+/** One comparison for each security named by a transaction. */
 export type ShadowRow = {
   id: unknown;
   object_type: string;
   date: string;
   security: unknown;
-  /** The security's family, once something has issued it. */
+  /** Family assigned at issuance. */
   family: CollectionKey | undefined;
-  /** The state the chart had the security in before this transaction. */
+  /** State before this transaction. */
   state: LifecycleState;
-  /** Whether the chart allowed the transaction. */
+  /** Whether the chart accepts this transaction. */
   allowed: boolean;
-  /** Which of the two checks the run performs on this transaction. */
+  /** Checks the validator uses for this transaction. */
   runs: string[];
-  /** Which of them reported a finding. */
+  /** Checks that reported a problem. */
   reported: string[];
-  /** The transaction that removed the security on the chart, if one has. */
+  /** Earlier transaction that removed this security, if known. */
   removedBy: Transaction | undefined;
 };
 
 /**
- * The securities a transaction names. All but one name a single `security_id`.
- * A consolidation names several, in `security_ids`.
+ * A consolidation lists several security IDs. Other transactions that name a security use a single
+ * ID.
  */
 const securitiesOf = (transaction: Transaction): unknown[] => {
   if ("security_id" in transaction) return [transaction.security_id];
@@ -58,10 +51,8 @@ const securitiesOf = (transaction: Transaction): unknown[] => {
 };
 
 /**
- * Which of the two checks the run performs on a transaction of this type. A
- * graded validator performs the ones it declares as implemented. The machine
- * runs no-earlier-removal itself on the transactions that can't declare it:
- * every passthrough type but the return to pool, and a legacy issuance.
+ * Include implemented checks from the descriptor. The machine adds the earlier-removal check for
+ * legacy issuances and passthrough types except returns to pool.
  */
 const checksRunOn = (type: string, descriptor: Descriptor): string[] => {
   if ("validate" in descriptor) {
@@ -73,15 +64,18 @@ const checksRunOn = (type: string, descriptor: Descriptor): string[] => {
   return descriptor.effect === "append" ? [NO_EARLIER_REMOVAL] : [];
 };
 
-/** A check as the shadow runs it: on any transaction, whatever fields the check's own type asks for. */
+/** Run a check on a transaction read from the test package. */
 type ShadowedCheck = { run: (context: any, data: any, read: any) => string[] };
 
-/** Compare the checks' structural verdicts, before the runner's defect gate. */
+/**
+ * Compare the rules on the recorded transactions before checking whether earlier failures make their
+ * inputs unreliable.
+ */
 const noReads = () => {
   throw new Error("A shadowed check read the node map.");
 };
 
-/** Each graded family's own no-other-transactions, by the family's collection. */
+/** Look up the transaction history check for each family that implements it. */
 const NO_OTHER_TRANSACTIONS_OF: Partial<Record<CollectionKey, ShadowedCheck>> = {
   convertibleIssuances: convertibleNoOtherTransactions,
   warrantIssuances: warrantNoOtherTransactions,
@@ -89,10 +83,8 @@ const NO_OTHER_TRANSACTIONS_OF: Partial<Record<CollectionKey, ShadowedCheck>> = 
 };
 
 /**
- * Which of the two checks report a finding on this transaction. Each check is
- * run on its own, not through the transaction's validator, so the answer is
- * the check's and nothing else's. The runner's defect gate is intentionally
- * excluded: the shadow follows transactions as written, including failures.
+ * Run each rule directly to compare lifecycle decisions. This comparison includes transactions that
+ * failed in the validator.
  */
 const checksReportedOn = (context: OcfMachineContext, transaction: Transaction, descriptor: Descriptor, runs: string[]): string[] =>
   runs.filter((id) => {
@@ -103,9 +95,8 @@ const checksReportedOn = (context: OcfMachineContext, transaction: Transaction, 
   });
 
 /**
- * Walks `transactions`, which must be in run order, and returns a row for
- * every transaction on every security it names. A transaction of a type the
- * validator doesn't know is skipped: it stops the run, and no chart has it.
+ * Compare each named security in processing order. Skip unknown transaction types because there is
+ * no chart entry for them.
  */
 export function shadowRows(transactions: readonly Transaction[]): ShadowRow[] {
   const context = baseContext({
@@ -124,9 +115,7 @@ export function shadowRows(transactions: readonly Transaction[]): ShadowRow[] {
       let known = securities.get(security);
       const state = known?.state ?? "notIssued";
 
-      // A security nothing has issued has no family yet. An issuance gives it
-      // one; anything else is asked of the transaction's own family, where a
-      // security that isn't issued allows nothing but an issuance.
+      // Issuance establishes the family. Before then, try the family named by the transaction.
       const family = known?.family ?? lifecycleFamilies(descriptor)[0];
       const step = family === undefined ? { allowed: false as const } : lifecycleStep(family, state, transaction.object_type);
 
@@ -156,60 +145,32 @@ export function shadowRows(transactions: readonly Transaction[]): ShadowRow[] {
   return rows;
 }
 
-/** The rows where the chart and the two checks disagree: one allows what the other reports. */
+/** Return transactions where the chart and checks give different answers. */
 export const disagreements = (rows: readonly ShadowRow[]): ShadowRow[] =>
   rows.filter((row) => row.allowed !== (row.reported.length === 0));
 
-// ---------------------------------------------------------------------------
-// Explained disagreements
-// ---------------------------------------------------------------------------
+// Reasons for known differences
 
-/**
- * Every way the charts are known to disagree with the two checks, and why.
- * `explain` decides which one a disagreement is from the row alone.
- *
- * In all three the chart refuses a transaction the two checks say nothing
- * about. No package in the suite has a transaction the checks report and the
- * chart allows.
- */
+/** Use the transaction and its history to identify each known reason for a disagreement. */
 export const EXPLANATIONS = {
   /**
-   * The security was removed, and the transaction is one neither check runs
-   * on: an acceptance, a retraction, a transfer, or one that leaves the
-   * security outstanding, such as a repricing or an equity compensation
-   * exercise. The run still fails it today, through issuance-exists, which no
-   * longer finds the security in its collection. So the run and the chart
-   * agree; it's only these two checks that don't cover it. When the chart
-   * becomes the source of truth, it reports this case with the removal that
-   * caused it, where issuance-exists can only say "not outstanding".
+   * The two checks omit this transaction type. The full validator still rejects it because
+   * issuance-exists requires an outstanding security.
    */
   "removed, and neither check runs on it":
     "The run fails it through issuance-exists; neither of the two checks runs on this transaction type.",
 
   /**
-   * The security was removed earlier the same day. no-earlier-removal only
-   * counts a removal dated before the transaction, on purpose: a security can
-   * vest and be cancelled on one day (#214). The chart has no dates. It takes
-   * transactions in run order, and the same-day order ranks a cancellation
-   * before a vesting event, so it sees the vesting event arrive after the
-   * removal.
-   *
-   * This one is a real difference. A package that passes today would fail if
-   * the chart became the source of truth as it stands. It goes away when
-   * same-day order comes from what each transaction references (#232), or the
-   * charts have to allow for it some other way before step 4 of #233.
+   * The date check allows vesting on the day of removal (#214). The chart follows processing order,
+   * which puts cancellation first. Resolve this difference before using the chart to reject packages
+   * (#232).
    */
   "removed earlier the same day":
     "no-earlier-removal ignores a removal dated the same day; the chart follows run order, which puts the removal first.",
 
   /**
-   * The security was removed by a transaction the `removals` index doesn't
-   * hold, so no-earlier-removal doesn't know it's gone. The index keeps
-   * transactions whose effect is "remove", by their `security_id`. That
-   * leaves out a consolidation, which is passthrough and names its securities
-   * in `security_ids`. This is the gap #224 left and #233 says the chart
-   * closes. (The plan security removals were the other half of it until they
-   * became equity compensation removals.)
+   * A consolidation lists several security IDs and has no removal effect in the validator. The chart
+   * sees each removal, while the index misses them (#224).
    */
   "removed by a transaction the removals index doesn't hold":
     "The chart removed the security on a consolidation, which no-earlier-removal's index leaves out.",
@@ -217,12 +178,12 @@ export const EXPLANATIONS = {
 
 export type Explanation = keyof typeof EXPLANATIONS;
 
-/** Whether the `removals` index holds a transaction: its effect is "remove" and it names one `security_id`. */
+/** The removal index requires a removal effect and one security_id. */
 const isIndexedRemoval = (transaction: Transaction): boolean =>
   "security_id" in transaction &&
   (TX_DESCRIPTORS as Record<string, Descriptor>)[transaction.object_type]?.effect === "remove";
 
-/** Which explained disagreement a row is, or `undefined` for one nothing explains yet. */
+/** Identify a known difference so tests can report any new one. */
 export function explain(row: ShadowRow): Explanation | undefined {
   const refusedInSilence = !row.allowed && row.reported.length === 0;
   if (!refusedInSilence || row.state !== "removed" || row.removedBy === undefined) return undefined;
@@ -241,10 +202,8 @@ const show = (row: ShadowRow): string =>
   (row.reported.length ? `${row.reported.join(" and ")} reported it` : `the checks run on it (${row.runs.join(", ") || "neither"}) reported nothing`);
 
 /**
- * Fails if the charts and the two checks disagree about a package in a way
- * nothing explains. `transactions` is the package's, in run order. A package
- * whose run never starts (a transaction with no usable date or type) has no
- * run order, so it's passed over.
+ * Fail on unexplained differences. Skip packages with unusable dates or transaction types because
+ * the driver cannot order them.
  */
 export function expectShadowExplained(transactions: readonly unknown[]): void {
   const runnable = transactions.every(

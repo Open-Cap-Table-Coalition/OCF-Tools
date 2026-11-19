@@ -37,28 +37,14 @@ export interface SnapshotEquityCompensation {
 }
 
 /**
- * The mark on a snapshot entry that can't be fully trusted (#231). The run no
- * longer stops at a failing transaction: it withholds what the transaction
- * would have written and marks it. `defects` says which of the security's
- * fields that happened to, and for each, the transactions whose failure is
- * behind it:
- *
- *  - `lifecycle`: whether the security is still outstanding is in doubt. A
- *    transaction that would have removed it, or otherwise acted on it,
- *    failed, so the entry shows the security as it stood before.
- *  - `issuance`:  the issuance itself failed, so nothing about the security
- *    is known. The entry has no other fields: it's there to say that
- *    something claims a place on the cap table that the validator can't
- *    vouch for.
- *
- * An entry without the mark is as trustworthy as it was when a failure
- * stopped the run.
+ * A snapshot lists the failed transactions that make a field unreliable. A failed issuance can leave
+ * both the issuance and lifecycle unknown. A later failed transaction may affect only the lifecycle.
  */
 export interface DefectMark {
   defects: { lifecycle?: Subject[]; issuance?: Subject[] };
 }
 
-/** A snapshot entry: a row as before, or a marked one, whose values may be missing. */
+/** A marked snapshot row may have missing values. */
 export type SnapshotEntry<Row> = Row | (Partial<Row> & DefectMark);
 
 export interface Snapshot {
