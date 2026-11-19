@@ -1,33 +1,6 @@
 /**
- * Compile-time assertions for the per-transaction descriptors. No runtime — this
- * file is type-checked by `tsc` (the build), so a broken invariant fails the
- * build.
- *
- * Covers:
- *  - the descriptors are exhaustive over every `TxKey` (dropping any key fails);
- *  - `appendToCollection` rejects a wrong-family payload;
- *  - an `append` descriptor rejects a collection whose family does not match the
- *    payload its `legacyValidate` checks;
- *  - the same family match holds for graded `validate` descriptors;
- *  - a `Check` literal requires `id`, `severity`, and `description`, and admits
- *    `implemented` only when absent or literally `false`;
- *  - every graded descriptor arm carries its declared `checks`, and a graded
- *    descriptor missing `checks` is not a `Descriptor`;
- *  - `defineValidator` rejects a collection on a "none" declaration, a check
- *    that reads a field the transaction doesn't have, and (through
- *    `Descriptor`) an "append" to another family's collection;
- *  - a check can't modify the transaction it's given;
- *  - a descriptor listed under another transaction's key is rejected, and the
- *    real table is checked against `DescriptorTable` directly;
- *  - `familyChecksFor` rejects an issuance type that doesn't match the
- *    collection, a misspelled acceptance type, a `vests` flag that
- *    contradicts whether the issuance type has vesting terms, a
- *    `returnsToPool` flag that contradicts whether it can name a stock plan,
- *    and a misspelled type in `leavesOutstanding`;
- *  - every descriptor carries a lifecycle word, an active descriptor's word is
- *    the one its `effect` implies, `defineValidator` fills that word in, a
- *    "none" declaration must list its `families`, and the vesting
- *    transactions' families are exactly the families that vest.
+ * The build checks that every transaction has a descriptor, its validator accepts the correct
+ * payload, and each effect has the required family and lifecycle fields.
  */
 import type {
   OCFWarrantIssuance,
@@ -259,36 +232,31 @@ const _wrongPool = familyChecksFor({ name: "warrant", collection: "warrantIssuan
 // @ts-expect-error — TX_EQUITY_COMPENSATION_EXCERCISE is not a transaction key.
 const _mistypedLeavesOutstanding = familyChecksFor({ name: "equity compensation", collection: "equityCompensation", issuance: "TX_EQUITY_COMPENSATION_ISSUANCE", acceptance: "TX_EQUITY_COMPENSATION_ACCEPTANCE", vests: true, returnsToPool: true, leavesOutstanding: ["TX_EQUITY_COMPENSATION_EXCERCISE"] });
 
-// --- Lifecycle words ----------------------------------------------------------
+// Lifecycle types
 
-// Every descriptor in the real table carries one of the four words.
+// Each transaction must declare a supported lifecycle change.
 type _EveryDescriptorHasAWord = Expect<
   Equal<(typeof TX_DESCRIPTORS)[TxKey]["lifecycle"] extends LifecycleWord ? true : false, true>
 >;
 
-// A passthrough descriptor has no effect to imply a word, so it must state one…
+// A transaction without a validator must specify its lifecycle change.
 const _passthroughWithWord: Descriptor = { effect: "passthrough", lifecycle: "after removal", families: ["equityCompensation"] };
-// …and leaving it out (the one-field delta) is not a Descriptor.
-// @ts-expect-error — a passthrough descriptor must declare its lifecycle word.
+// @ts-expect-error A passthrough descriptor needs a lifecycle value.
 const _passthroughNoWord: Descriptor = { effect: "passthrough", families: ["equityCompensation"] };
 
-// An active descriptor's word is the one its effect implies: a "remove" removes…
+// Removing a security ends its outstanding state.
 const _removeRemoves: Descriptor = { effect: "remove", lifecycle: "removes", collection: "stockIssuances", validate: gradedValidate, checks: [] };
-// …so the same descriptor can't claim its security stays outstanding.
-// @ts-expect-error — a "remove" descriptor's lifecycle word is "removes".
+// @ts-expect-error A removal must declare the lifecycle value "removes".
 const _removeStays: Descriptor = { effect: "remove", lifecycle: "stays", collection: "stockIssuances", validate: gradedValidate, checks: [] };
 
-// defineValidator fills the word in from the declared effect.
+// The validator declaration supplies the effect used to derive the lifecycle.
 type _NoneStays = Expect<Equal<(typeof _noneSpec)["lifecycle"], "stays">>;
 type _AppendIssues = Expect<Equal<(typeof _defineAppendWarrant)["lifecycle"], "issue">>;
 type _RemoveRemoves = Expect<Equal<(typeof _warrantRetraction)["lifecycle"], "removes">>;
 
-// A "none" declaration names no collection, so it must list its families.
-// @ts-expect-error — an effect-none spec lists the families whose securities it can name.
+// @ts-expect-error An effect of "none" requires a list of security families.
 const _noneSpecNoFamilies = defineValidator({ transaction: "TX_CONVERTIBLE_ACCEPTANCE", effect: "none", checks: [] });
 
-// The vesting transactions' families are exactly the families whose issuance
-// carries vesting terms: a family that gains or loses them has to be listed or
-// dropped.
+// The list of vesting families must match the issuance types that support vesting terms.
 type _VestingFamilies = Expect<Equal<(typeof VESTING_FAMILIES)[number], VestingFamily>>;
 type _ConvertiblesDontVest = Expect<Equal<Extract<VestingFamily, "convertibleIssuances">, never>>;
