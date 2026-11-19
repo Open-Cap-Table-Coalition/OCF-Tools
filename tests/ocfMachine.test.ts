@@ -197,7 +197,7 @@ const ACTIVE_KEYS = (Object.keys(TX_DESCRIPTORS) as TxKey[]).filter(
   (key) => TX_DESCRIPTORS[key].effect !== "passthrough",
 );
 
-// The four families, by their collection keys.
+// The four security families use their collection names.
 const FAMILIES: CollectionKey[] = ["stockIssuances", "convertibleIssuances", "warrantIssuances", "equityCompensation"];
 
 // The active keys that name a collection (append/remove), derived the same way.
@@ -205,11 +205,9 @@ const COLLECTION_KEYS = (Object.keys(TX_DESCRIPTORS) as TxKey[]).filter(
   (key) => "collection" in TX_DESCRIPTORS[key],
 );
 
-// Independent oracle: the collection each append/remove key must declare, written
-// out by hand — no prefix logic, no mapping helper imported from the interpreter.
-// The reducer trusts `descriptor.collection` verbatim, for the family an
-// issuance's security joins and the family a removal acts on, so this oracle is
-// the independent check that each declaration is right.
+// List the expected family for each issuance and removal independently of the table. A descriptor
+// assigned to the wrong family would otherwise make the same mistake in both the update and its
+// test.
 const EXPECTED_COLLECTION: Record<string, CollectionKey> = {
   // append
   TX_STOCK_ISSUANCE: "stockIssuances",
@@ -255,7 +253,7 @@ describe("per-type collection placement", () => {
     const descriptor = TX_DESCRIPTORS[key];
 
     if (!("collection" in descriptor)) {
-      // none: validate and record, but change nothing.
+      // An effect of "none" records validation without changing a collection.
       expect(descriptor.effect).toBe("none");
       const result = nodesUpdate(baseContext(), ev(key, { id: "incoming", security_id: "SEC", object_type: key }));
       expect(Object.keys(result)).toHaveLength(0);
@@ -267,12 +265,11 @@ describe("per-type collection placement", () => {
     const other = { id: "other", security_id: "OTHER", object_type: "seed" };
     const ctx = baseContext({ [fam]: [matching, other] });
 
-    // An issuance brings a security of its own; a removal names the seeded one.
+    // Issue a new security or remove the one supplied by the test.
     const data = { id: "incoming", security_id: descriptor.effect === "append" ? "NEW" : "SEC", object_type: key };
     const result = nodesUpdate(ctx, ev(key, data));
 
-    // The change lands in the node map, and in exactly the family the
-    // descriptor names: the other families still hold nothing.
+    // Only the descriptor's family should gain a security.
     expect(Object.keys(result)).toEqual(["nodes"]);
     const after = { ...ctx, ...result };
     for (const family of FAMILIES) {
@@ -282,7 +279,7 @@ describe("per-type collection placement", () => {
     if (descriptor.effect === "append") {
       expect(collection(after, fam)).toEqual([matching, other, data]);
     } else {
-      // remove: the matching security_id is no longer outstanding, the rest retained.
+      // Remove the named security and keep the others outstanding.
       expect(collection(after, fam)).toEqual([other]);
     }
   });
@@ -307,16 +304,8 @@ describe("per-type collection placement", () => {
 // Family collections hold only issuances
 // ---------------------------------------------------------------------------
 
-// issuance-exists finds an issuance by security_id alone (decision 3 on #198).
-// That's only safe if the collections never hold anything but issuances, which
-// is true because:
-//  - they start empty (tested here);
-//  - only the family issuance types add to them (tested here), and each adds
-//    its own transaction (tested above);
-//  - removing only takes things out (tested above).
-// The issuance types are written out by hand on purpose. Equity compensation
-// has two: TX_PLAN_SECURITY_ISSUANCE is the older name for its issuance, and
-// lands in the same collection.
+// Only issuances enter these collections. This lets issuance-exists look up a security by ID within
+// its family.
 const ISSUANCE_KEYS = [
   "TX_STOCK_ISSUANCE",
   "TX_CONVERTIBLE_ISSUANCE",

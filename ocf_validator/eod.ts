@@ -4,13 +4,7 @@ import { isOnCapTable } from "./lifecycle";
 import { securitiesIn, type NodeMap } from "./nodes";
 import type { CollectionElement, CollectionKey } from "./ocfMachine";
 
-/**
- * The issuances of a family's securities that are on the cap table, in the
- * order issued. A removed security is still in the node map and isn't shown.
- *
- * Which securities to show is the lifecycle chart's answer: the snapshot asks
- * for the chart's on-the-cap-table tag and names no state itself (#233).
- */
+/** List issuances in order. Use the chart's cap-table tag to decide which ones to show. */
 const shown = <C extends CollectionKey>(nodes: NodeMap, family: C): CollectionElement[C][] => {
   const issuances: CollectionElement[C][] = [];
   for (const { lifecycle, issuance } of securitiesIn(nodes, family)) {
@@ -21,7 +15,7 @@ const shown = <C extends CollectionKey>(nodes: NodeMap, family: C): CollectionEl
   return issuances;
 };
 
-/** The cap table at the end of a day, read off the node map. */
+/** Build the snapshot from the security records at the end of the day. */
 const RUN_EOD = (context: OcfMachineContext, event: { date: string }): Snapshot => {
   const { nodes } = context;
 

@@ -1,4 +1,4 @@
-/** Compile-time guarantees for node composition and derived field access. */
+/** The build checks record identity and the value types of fields. */
 import { readNodeField, withNodeField, type Field, type FieldKey, type FieldValue, type NodeBase, type NodeMaps } from "../ocf_validator/node";
 import { isSecurityFamily, type SecurityNode } from "../ocf_validator/nodes";
 import type { CollectionElement } from "../ocf_validator/ocfMachine";
@@ -17,7 +17,7 @@ if (isSecurityFamily(security, "warrantIssuances")) {
   type _Narrowed = Expect<Equal<typeof narrowed.issuance, typeof warrant.issuance>>;
 }
 
-// A new kind and a new field need no changes to the common helpers.
+// Common field helpers also work for a new record type.
 type Example = NodeBase<"example", { amount: string; enabled: boolean; note?: string }>;
 declare const example: Example;
 type _Keys = Expect<Equal<FieldKey<Example>, "amount" | "enabled" | "note">>;

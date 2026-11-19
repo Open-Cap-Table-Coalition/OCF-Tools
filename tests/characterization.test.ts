@@ -22,10 +22,8 @@ describe("ocfValidator over testPackage", () => {
     // derived behavior, not the fixture.
     const { ocfPackageContent, removals, nodes, ...output } = context;
 
-    // The context held four issuance arrays until the node map replaced them
-    // (#228). The snapshot was recorded with them, so they're read back off
-    // the map under their old names: the recorded snapshot passing unchanged
-    // is what shows the map holds what the arrays did.
+    // Read the outstanding issuances under the original collection names so the recorded snapshot
+    // still tests the same behavior.
     const collections = {
       stockIssuances: collection(context, "stockIssuances"),
       convertibleIssuances: collection(context, "convertibleIssuances"),

@@ -5,19 +5,13 @@ import type { Snapshot } from "./snapshot";
 import type { Finding, Severity } from "./finding";
 
 /**
- * The machine context a validator receives: the package under validation, the
- * node map built from the transactions applied so far, and the record
- * channels — `report` for legacy dual-mode validators, `findings` for graded
- * ones. `report` retires with the legacy convention once every family returns
- * findings.
+ * The context holds the input package, current records and results. Older validators write to
+ * report. Validators built from checks write to findings.
  */
 export type OcfMachineContext = {
   /**
-   * The state of the cap table: every security the run has issued, with what
-   * has become of it (see `ocf_validator/nodes.ts`). Immutable; applying a
-   * transaction replaces it with a new map. `outstanding` in that module
-   * lists a family's outstanding issuances, which is what the four issuance
-   * arrays this replaces held.
+   * Current security records. Applying a transaction returns an updated map. Use outstanding to list
+   * a family's current issuances.
    */
   nodes: NodeMap;
   ocfPackageContent: OcfPackageContent;
@@ -99,15 +93,8 @@ export type Check = {
 };
 
 /**
- * What a transaction does to the lifecycle of the security it names, in one
- * word. A security is not issued, then outstanding, then removed:
- *
- *  - "issue":         takes it from not issued to outstanding.
- *  - "stays":         acts on an outstanding security and leaves it outstanding.
- *  - "removes":       takes it from outstanding to removed.
- *  - "after removal": allowed only once it's removed, and leaves it removed.
- *
- * Every descriptor in `TX_DESCRIPTORS` declares one. The lifecycle charts are
- * built from these words, one chart per family (#233).
+ * A security starts unissued. Issuance makes it outstanding and removal ends that state. A "stays"
+ * transaction requires an outstanding security. An "after removal" transaction requires a removed
+ * security.
  */
 export type LifecycleWord = "issue" | "stays" | "removes" | "after removal";

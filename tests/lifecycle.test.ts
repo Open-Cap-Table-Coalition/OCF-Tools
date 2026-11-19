@@ -11,12 +11,7 @@ import { TX_DESCRIPTORS, type CollectionKey, type Descriptor } from "../ocf_vali
 const FAMILIES: CollectionKey[] = ["stockIssuances", "convertibleIssuances", "warrantIssuances", "equityCompensation"];
 const STATES: LifecycleState[] = ["notIssued", "outstanding", "removed"];
 
-/**
- * Walks one security through a history on a family's chart, the way a caller
- * would: keep the state value, ask the chart about each transaction, and store
- * the state that follows. Returns the state after each transaction, or
- * "not allowed" where the chart refuses it (the state is then left as it was).
- */
+/** Keep the last allowed state while testing the next transaction in the sequence. */
 const walk = (family: CollectionKey, history: string[]): (LifecycleState | "not allowed")[] => {
   let state: LifecycleState = "notIssued";
   return history.map((type) => {
@@ -27,13 +22,9 @@ const walk = (family: CollectionKey, history: string[]): (LifecycleState | "not 
   });
 };
 
-// ---------------------------------------------------------------------------
-// The charts, as data
-// ---------------------------------------------------------------------------
+// Chart definitions
 
-// The table in #233, written out by hand: per family, what leaves a security
-// outstanding and what removes it. The plan security names sit on the equity
-// compensation chart beside the types they're older names for.
+// Expected transitions from #233. Include both names for equity compensation transactions.
 const VESTING = ["TX_VESTING_START", "TX_VESTING_EVENT", "TX_VESTING_ACCELERATION"];
 const EXPECTED: Record<CollectionKey, { issue: string[]; stays: string[]; removes: string[]; afterRemoval: string[] }> = {
   stockIssuances: {
@@ -88,7 +79,7 @@ const EXPECTED: Record<CollectionKey, { issue: string[]; stays: string[]; remove
 
 describe("a family's chart, read as data", () => {
   it.each(FAMILIES)("%s has the three states and exactly the arrows #233 lists", (family) => {
-    // The definition is plain data, so it can be read without running anything.
+    // Read the chart configuration directly.
     const { states } = lifecycleChart(family).config as {
       states: Record<LifecycleState, { on: Record<string, { target: LifecycleState }> }>;
     };
@@ -105,8 +96,7 @@ describe("a family's chart, read as data", () => {
     expect(arrows("outstanding", "removed")).toEqual([...expected.removes].sort());
     expect(arrows("removed", "removed")).toEqual([...expected.afterRemoval].sort());
 
-    // Nothing else: no arrow out of removed but the ones that stay there, and
-    // none back to notIssued.
+    // A removed security can only stay removed.
     const count = (state: LifecycleState) => Object.keys(states[state].on).length;
     expect(count("notIssued")).toBe(expected.issue.length);
     expect(count("outstanding")).toBe(expected.stays.length + expected.removes.length);
@@ -130,9 +120,7 @@ describe("a family's chart, read as data", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// The lookup, on short real histories
-// ---------------------------------------------------------------------------
+// Transaction histories
 
 describe("the lookup on short real histories", () => {
   it("issues, accepts, and cancels a convertible, and allows nothing after", () => {
@@ -243,13 +231,11 @@ describe("the lookup on short real histories", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// The lookup keeps nothing
-// ---------------------------------------------------------------------------
+// Independent securities
 
 describe("the lookup is a pure function of the stored state", () => {
   it("answers from the state value it's handed, whatever it was asked before", () => {
-    // Two securities of one family share a chart and can't affect each other.
+    // Two securities can use the same chart and keep separate states.
     expect(lifecycleStep("warrantIssuances", "outstanding", "TX_WARRANT_EXERCISE")).toEqual({ allowed: true, next: "removed" });
     expect(lifecycleStep("warrantIssuances", "outstanding", "TX_WARRANT_ACCEPTANCE")).toEqual({ allowed: true, next: "outstanding" });
     expect(lifecycleStep("warrantIssuances", "removed", "TX_WARRANT_ACCEPTANCE")).toEqual({ allowed: false });
@@ -257,8 +243,7 @@ describe("the lookup is a pure function of the stored state", () => {
   });
 
   it("allows a transaction that leaves the security where it is", () => {
-    // An arrow with no target and no action counts as not allowed on the
-    // pinned XState, so every "stays" arrow names its target.
+    // XState 5.18.2 needs an explicit target for a transition that does nothing else.
     for (const type of EXPECTED.equityCompensation.stays) {
       expect(lifecycleStep("equityCompensation", "outstanding", type)).toEqual({ allowed: true, next: "outstanding" });
     }
@@ -266,8 +251,8 @@ describe("the lookup is a pure function of the stored state", () => {
   });
 
   it("takes the security's fields as the chart's context", () => {
-    // No arrow has a guard yet, so the fields change nothing. This holds the
-    // lookup to accepting them, which is what a guard will read.
+    // The chart accepts fields for future guards. Its current decisions are independent of those
+    // fields.
     expect(lifecycleStep("equityCompensation", "outstanding", "TX_EQUITY_COMPENSATION_EXERCISE", { quantity: "100" })).toEqual({
       allowed: true,
       next: "outstanding",
@@ -275,9 +260,7 @@ describe("the lookup is a pure function of the stored state", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// On the cap table
-// ---------------------------------------------------------------------------
+// Snapshot visibility
 
 describe("the on-the-cap-table tag", () => {
   it.each(FAMILIES)("marks only an outstanding %s security", (family) => {
@@ -285,13 +268,10 @@ describe("the on-the-cap-table tag", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// The factory
-// ---------------------------------------------------------------------------
+// Building charts
 
 describe("the factory builds a chart from the descriptors it's given", () => {
-  // A stand-in table: one family, one transaction per word, and one
-  // transaction of another family that mustn't appear.
+  // Use one transaction per lifecycle change and one transaction the family should exclude.
   const descriptor = (lifecycle: Descriptor["lifecycle"], families: CollectionKey[]): Descriptor => ({
     effect: "passthrough",
     lifecycle,

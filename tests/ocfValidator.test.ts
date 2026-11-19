@@ -109,10 +109,8 @@ describe("a transaction on a security an earlier transaction removed", () => {
   });
 
   it("fails a later release under the older name TX_PLAN_SECURITY_RELEASE through the release's own checks", () => {
-    // A plan security release is an equity compensation release, so it has a
-    // validator of its own and the machine no longer runs no-earlier-removal
-    // on it. Its issuance-exists fails it: safe-1 was never an equity
-    // compensation security.
+    // The release uses the equity compensation validator. Its issuance check fails because safe-1 is
+    // a convertible.
     const release = { id: "psr-1", object_type: "TX_PLAN_SECURITY_RELEASE", security_id: "safe-1", date: "2021-07-01" };
     const context = validateAfter(release);
 
