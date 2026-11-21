@@ -2,7 +2,9 @@ import { describe, it, expect } from "vitest";
 import { lifecycleFamilies, TX_DESCRIPTORS, type CollectionKey, type TxKey } from "../ocf_validator/ocfMachine";
 import type { LifecycleWord } from "../types/validator";
 
-// Security lifecycle by transaction type
+// Lifecycle change for the input security
+// Conversion and reissuance retire the original security_id. Each replacement becomes
+// outstanding through its own issuance record.
 
 // List the expected change and families for each transaction independently of the production table.
 // A wrong table entry should fail a test even if the chart faithfully uses it (#233).
