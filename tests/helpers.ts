@@ -81,7 +81,7 @@ export const validatePackage = (
     const context = ocfValidator(dir);
     // The validator sorts the input in place. Compare the charts and the two checks in that same
     // order.
-    expectShadowExplained(context.ocfPackageContent.transactions);
+    expectShadowExplained(context.ocfPackageContent.transactions, context.findings);
     return context;
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });

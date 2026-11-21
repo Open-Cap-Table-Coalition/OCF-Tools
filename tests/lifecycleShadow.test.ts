@@ -8,8 +8,10 @@ import { disagreements, explain, expectShadowExplained, shadowRows, EXPLANATIONS
 // differences explicitly so a new disagreement fails the test.
 
 /** Compare a package's transactions in the order the validator processed them. */
-const shadow = (transactions: Record<string, unknown>[], stakeholders = [{ id: "sh-1" }]): ShadowRow[] =>
-  shadowRows(validatePackage(transactions, stakeholders).ocfPackageContent.transactions as any);
+const shadow = (transactions: Record<string, unknown>[], stakeholders = [{ id: "sh-1" }]): ShadowRow[] => {
+  const context = validatePackage(transactions, stakeholders);
+  return shadowRows(context.ocfPackageContent.transactions as any, context.findings);
+};
 
 /** Find the results for all securities named by this transaction. */
 const rowsOf = (rows: ShadowRow[], id: string) => rows.filter((row) => row.id === id);
@@ -100,10 +102,11 @@ describe("where the chart and the checks disagree", () => {
     { id: "ex-1", object_type: "TX_EQUITY_COMPENSATION_EXERCISE", security_id: "opt-1", quantity: "10", resulting_security_ids: [], date: "2021-06-01" },
   ])("the chart refuses a $object_type on a cancelled grant, which neither check runs on", (transaction) => {
     const context = validatePackage([grant, grantCancellation, transaction], [{ id: "sh-1" }]);
-    const rows = shadowRows(context.ocfPackageContent.transactions as any);
+    const rows = shadowRows(context.ocfPackageContent.transactions as any, context.findings);
 
     expect(disagreements(rows)).toMatchObject([{ id: transaction.id, state: "removed", allowed: false, runs: [], reported: [] }]);
     expect(disagreements(rows).map(explain)).toEqual(["removed, and neither check runs on it"]);
+    expect(disagreements(shadowRows([grant, grantCancellation, transaction])).map(explain)).toEqual([undefined]);
     // Verify which production check catches this case.
     expect(context.findings.map((finding) => [finding.subject.id, finding.check])).toEqual([[transaction.id, "issuance-exists"]]);
   });
@@ -173,6 +176,22 @@ describe("a disagreement nothing explains", () => {
     { id: "wi-1", object_type: "TX_WARRANT_ISSUANCE", security_id: "war-1", stakeholder_id: "sh-1", date: "2021-01-01" },
     { id: "wi-2", object_type: "TX_WARRANT_ISSUANCE", security_id: "war-1", stakeholder_id: "sh-1", date: "2021-02-01" },
   ];
+
+  it("skips unknown types even when their name is inherited", () => {
+    expect(shadowRows([{ ...issuance, object_type: "constructor" }])).toEqual([]);
+  });
+
+  it.each([
+    ["TX_WARRANT_ISSUANCE", "TX_WARRANT_CANCELLATION", "TX_STOCK_PLAN_RETURN_TO_POOL", "2021-07-01"],
+    ["TX_EQUITY_COMPENSATION_ISSUANCE", "TX_PLAN_SECURITY_CANCELLATION", "TX_EQUITY_COMPENSATION_REPRICING", "2021-07-01"],
+    ["TX_CONVERTIBLE_ISSUANCE", "TX_CONVERTIBLE_TRANSFER", "TX_VESTING_EVENT", cancellation.date],
+  ])("flags the last step in %s → %s → %s", (issue, remove, last, date) => {
+    expect(() => validatePackage([
+      { ...issuance, object_type: issue },
+      { ...cancellation, object_type: remove },
+      { ...cancellation, object_type: last, id: "last", date },
+    ], [{ id: "sh-1" }])).toThrow(`${last} "last" on security "safe-1" (removed)`);
+  });
 
   it("is left unexplained", () => {
     const [row] = disagreements(shadowRows(twice));
