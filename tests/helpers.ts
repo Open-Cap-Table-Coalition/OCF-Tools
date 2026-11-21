@@ -58,6 +58,7 @@ export const validatePackage = (
   transactions: Record<string, unknown>[],
   stakeholders: { id: string }[] = [],
   stockClasses: { id: string }[] = [],
+  stockPlans: Record<string, unknown>[] = [],
 ): OcfMachineContext => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ocf-tools-test-"));
   try {
@@ -65,6 +66,7 @@ export const validatePackage = (
       fs.writeFileSync(path.join(dir, name), JSON.stringify(content));
     write("Stakeholders.ocf.json", { items: stakeholders });
     write("StockClasses.ocf.json", { items: stockClasses });
+    if (stockPlans.length) write("StockPlans.ocf.json", { items: stockPlans });
     write("Transactions.ocf.json", { items: transactions });
     write("Manifest.ocf.json", {
       issuer: { legal_name: "Test Co" },
@@ -72,7 +74,7 @@ export const validatePackage = (
       transactions_files: [{ filepath: "Transactions.ocf.json" }],
       stock_classes_files: [{ filepath: "StockClasses.ocf.json" }],
       vesting_terms_files: [],
-      stock_plans_files: [],
+      stock_plans_files: stockPlans.length ? [{ filepath: "StockPlans.ocf.json" }] : [],
       stock_legend_templates_files: [],
       valuations_files: [],
     });
