@@ -9,9 +9,11 @@ import * as os from "os";
 import * as path from "path";
 import { expect } from "vitest";
 import { createActor } from "xstate";
-import { ocfValidator } from "../ocf_validator";
+import { validateOcfPackage } from "../ocf_validator";
+import { readOcfPackage } from "../read_ocf_package";
 import { earliestRemovals, ocfMachine, TX_DESCRIPTORS, type OcfMachineEvent } from "../ocf_validator/ocfMachine";
 import type { Finding } from "../types/finding";
+import { expectShadowExplained } from "./lifecycleShadow";
 import type { Check, GradedValidator, OcfMachineContext } from "../types/validator";
 
 /**
@@ -48,19 +50,23 @@ export const baseContext = (overrides: Partial<OcfMachineContext> = {}): OcfMach
   };
 };
 
+export const validateWithShadow = (dir: string) => {
+  const visits: Finding[][] = [];
+  const context = validateOcfPackage(readOcfPackage(dir), (findings) => visits.push(findings));
+  return { ...context, shadow: expectShadowExplained(context.ocfPackageContent.transactions, { context, visits }) };
+};
+
 /**
- * Runs the whole validator over a package holding the given transactions,
- * stakeholders, and stock classes, so the run goes through the driver and
- * same-day sort as a real one does. It writes a minimal package (a manifest, a
- * stakeholders file, a stock classes file, and a transactions file) to a
- * temporary directory and removes it afterwards.
+ * Write a temporary OCF package and validate it so tests use the real reader and
+ * same-day order. Compare the charts with the two existing checks on that order, then remove the
+ * package.
  */
 export const validatePackage = (
   transactions: Record<string, unknown>[],
   stakeholders: { id: string }[] = [],
   stockClasses: { id: string }[] = [],
   stockPlans: Record<string, unknown>[] = [],
-): OcfMachineContext => {
+) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ocf-tools-test-"));
   try {
     const write = (name: string, content: unknown) =>
@@ -79,7 +85,7 @@ export const validatePackage = (
       stock_legend_templates_files: [],
       valuations_files: [],
     });
-    return ocfValidator(dir);
+    return validateWithShadow(dir);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

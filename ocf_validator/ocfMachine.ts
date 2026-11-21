@@ -483,6 +483,11 @@ const notRemoved = {
   checks: [noEarlierRemoval],
 } satisfies ActiveDescriptor;
 
+/** Some transactions need a separate check for an earlier removal. */
+export const checksRemovalFirst = (type: string, descriptor: Descriptor): boolean =>
+  (descriptor.effect === "passthrough" && type !== "TX_STOCK_PLAN_RETURN_TO_POOL") ||
+  (descriptor.effect === "append" && "legacyValidate" in descriptor);
+
 /**
  * Build the `on` map for every key in `TX_DESCRIPTORS`. Active keys share the
  * two-branch transition. Graded validators declare no-earlier-removal where it
@@ -511,13 +516,9 @@ function buildTransactionHandlers() {
 
   const handlerFor = (type: TxKey) => {
     const descriptor = TX_DESCRIPTORS[type];
-    if (descriptor.effect === "passthrough") {
-      return type === "TX_STOCK_PLAN_RETURN_TO_POOL" ? {} : [afterRemoval];
-    }
-    if (descriptor.effect === "append" && "legacyValidate" in descriptor) {
-      return [afterRemoval, ...activeTransitions];
-    }
-    return activeTransitions;
+    const checkRemoval = checksRemovalFirst(type, descriptor);
+    if (descriptor.effect === "passthrough") return checkRemoval ? [afterRemoval] : {};
+    return checkRemoval ? [afterRemoval, ...activeTransitions] : activeTransitions;
   };
 
   return (Object.keys(TX_DESCRIPTORS) as TxKey[]).reduce(
