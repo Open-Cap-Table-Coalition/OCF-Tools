@@ -256,6 +256,8 @@ describe("a check that declares its reads", () => {
     toValidate([looks])(baseContext({ warrantIssuances: [warrant()] }), acceptance);
 
     expect(seen).not.toHaveProperty("nodes");
+    expect(seen).not.toHaveProperty("nodesAtStartOfDay");
+    expect(seen).not.toHaveProperty("snapshots");
     expect(seen).toHaveProperty("ocfPackageContent");
     expect(seen).toHaveProperty("removals");
   });

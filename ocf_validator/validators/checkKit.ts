@@ -1,6 +1,6 @@
 import type { TransactionFor } from "../../types/ocf-input";
 import type { Finding, Subject } from "../../types/finding";
-import { describeField, fieldAt, type FieldRef, type FieldRefValue, type NodeMap } from "../nodes";
+import { describeField, fieldAt, sameField, type FieldRef, type FieldRefValue, type NodeMap } from "../nodes";
 import type {
   Check,
   DeepReadonly,
@@ -27,8 +27,11 @@ export type CheckObject<P = unknown> = Pick<Check, "id" | "severity" | "descript
   run?: (context: DeepReadonly<CheckContext>, data: DeepReadonly<P>, read: ReadField) => string[];
 };
 
-/** Checks use the supplied reader for current security records. */
-export type CheckContext = Omit<OcfMachineContext, "nodes">;
+/**
+ * Checks can read the input package and its removal index. Use declared field reads for derived
+ * values.
+ */
+export type CheckContext = Pick<OcfMachineContext, "ocfPackageContent" | "removals">;
 
 /** Read a declared field. A missing or unknown value produces undefined. An undeclared read throws. */
 export type ReadField = <R extends FieldRef>(ref: R) => FieldRefValue<R> | undefined;
@@ -110,10 +113,6 @@ const toMetadata = (checks: readonly CheckObject<any>[]): readonly Check[] =>
     return metadata;
   });
 
-const sameField = (a: FieldRef, b: FieldRef): boolean =>
-  a.kind === b.kind && a.id === b.id && a.field === b.field &&
-  (a.kind !== "security" || (b.kind === "security" && a.family === b.family));
-
 /** Collect the distinct failures affecting these fields and the first affected field for the message. */
 const defectsOn = (nodes: NodeMap, refs: readonly FieldRef[]): { roots: Subject[]; ref?: FieldRef } => {
   const roots: Subject[] = [];
@@ -144,7 +143,10 @@ export const toValidate =
   (checks: readonly CheckObject<any>[]): GradedValidator<any> =>
   (context, data: any) => {
     const subject = { object_type: data.object_type, id: data.id };
-    const { nodes, ...checkContext } = context;
+    const { nodes, ocfPackageContent, removals } = context;
+    // Select the allowed context fields explicitly so future machine state cannot bypass the check's
+    // declared reads.
+    const checkContext = { ocfPackageContent, removals };
     const findings: Finding[] = [];
     for (const check of checks) {
       if (!check.run) continue;

@@ -1,6 +1,7 @@
 import type { Subject } from "../types/finding";
 import { withNodeField, type Field, type FieldAddress, type FieldKey, type NodeBase, type NodeMaps, type ReferenceValue } from "./node";
 export type { Field, NodeBase } from "./node";
+import type { PoolEffect } from "../types/validator";
 import type { LifecycleState } from "./lifecycle";
 import { add, isNumeric, subtract } from "./numeric";
 import type { CollectionElement, CollectionKey, Descriptor } from "./ocfMachine";
@@ -55,7 +56,10 @@ export type NodeMap = NodeMaps<Node>;
 /** Initial state before reading any transactions. */
 export const emptyNodes = (): NodeMap => ({ security: new Map(), plan: new Map() });
 
-/** Record the value and its writer. Preserve earlier failures on this field. */
+/**
+ * A normal write preserves failures already affecting the field. An adjustment that replaces the
+ * entire reserve can clear earlier reserve failures.
+ */
 const written = <T>(value: T | undefined, writer: Subject, was?: Field<T>): Field<T> => ({ value, writer, defects: was?.defects ?? [] });
 
 /** Fields the reducer needs to decide what to update. It retains the complete issuance. */
@@ -196,10 +200,10 @@ function withheld(nodes: NodeMap, descriptor: Descriptor, transaction: Applied, 
   return withSecurity(nodes, { ...held, lifecycle: markDefects(held.lifecycle, roots) });
 }
 
-// Charge a grant to its plan on first issuance. A balance or resulting grant carries shares already
-// charged to its source. If its issuance ran first, undo its separate charge when the source names
-// it. If the source ran first, remember the relationship and skip the charge at issuance. Removing
-// the source grants no credit by itself. A return transaction credits its named plan.
+// Charge a new grant once. For a balance or resulting grant, keep the source's charge and undo any
+// separate charge already recorded. Only an explicit return credits the plan for a removal. A
+// replacement reserve can clear earlier reserve failures. Drawn shares depend on prior transactions,
+// so their failures carry forward.
 
 /** Identify the transaction that wrote the field or the failures that prevented the write. */
 type Stamp = { readonly ok: true; readonly writer: Subject } | { readonly ok: false; readonly roots: readonly Subject[] };
@@ -207,6 +211,27 @@ type Stamp = { readonly ok: true; readonly writer: Subject } | { readonly ok: fa
 /** Store the new value on success. On failure, keep the previous value and record the cause. */
 const stamped = <T>(field: Field<T> | undefined, value: T | undefined, by: Stamp): Field<T> =>
   by.ok ? written(value, by.writer, field) : markDefects(field ?? unknown<T>(), by.roots);
+
+/**
+ * A replacement reserve supplies the whole value and clears earlier failures on that field. Adding
+ * or subtracting shares depends on the previous total, so preserve failures affecting drawn shares.
+ */
+export const POOL_WRITES = {
+  draws: { field: "drawn", write: "adjusts" },
+  carries: { field: "drawn", write: "adjusts" },
+  carriesStock: { field: "drawn", write: "adjusts" },
+  returns: { field: "drawn", write: "adjusts" },
+  reserves: { field: "reserved", write: "sets" },
+} as const satisfies Record<PoolEffect, { field: FieldKey<PlanNode>; write: "sets" | "adjusts" }>;
+
+/**
+ * Keep the previous value after failure. On success, clear earlier failures only if this operation
+ * replaces the whole total.
+ */
+const settled = (field: Field<string>, value: () => string, by: Stamp, word: PoolEffect): Field<string> => {
+  if (!by.ok) return markDefects(field, by.roots);
+  return POOL_WRITES[word].write === "sets" ? { value: value(), writer: by.writer, defects: [] } : written(value(), by.writer, field);
+};
 
 const ZERO = "0";
 
@@ -254,7 +279,7 @@ function poolWrites(before: NodeMap, nodes: NodeMap, descriptor: Descriptor, tra
     case "carriesStock":
       return carriedStock(nodes, transaction, by);
     case "returns":
-      return adjusted(nodes, transaction.stock_plan_id, transaction.quantity, subtract, by);
+      return adjusted(nodes, transaction.stock_plan_id, transaction.quantity, subtract, by, "returns");
     case "reserves":
       return reserved(nodes, transaction, by);
     default:
@@ -262,15 +287,16 @@ function poolWrites(before: NodeMap, nodes: NodeMap, descriptor: Descriptor, tra
   }
 }
 
-/** Add to or subtract from the plan's drawn shares. */
-function adjusted(nodes: NodeMap, planId: unknown, quantity: unknown, move: typeof add, by: Stamp): NodeMap {
+/** Update drawn shares by the transaction quantity and retain failures affecting the previous total. */
+function adjusted(nodes: NodeMap, planId: unknown, quantity: unknown, move: typeof add, by: Stamp, word: PoolEffect): NodeMap {
   if (!names(planId)) return nodes;
   const plan = planAt(nodes, planId);
-  if (!by.ok) return withPlan(nodes, withNodeField(plan, "drawn", markDefects(plan.drawn, by.roots)));
-
-  // The quantity check should have rejected a value the arithmetic cannot use.
-  if (!isNumeric(quantity)) throw new Error(`${by.writer.object_type} ${by.writer.id} reached the pool with a quantity that isn't a Numeric.`);
-  return withPlan(nodes, withNodeField(plan, "drawn", written(move(plan.drawn.value ?? ZERO, quantity), by.writer, plan.drawn)));
+  const moved = () => {
+    // The quantity check should have rejected a value the arithmetic cannot use.
+    if (!by.ok || !isNumeric(quantity)) throw new Error(`A transaction reached stock plan ${String(planId)}'s pool with a quantity that isn't a Numeric.`);
+    return move(plan.drawn.value ?? ZERO, quantity);
+  };
+  return withPlan(nodes, withNodeField(plan, POOL_WRITES[word].field, settled(plan[POOL_WRITES[word].field], moved, by, word)));
 }
 
 /** A source can name a balance grant or settlement stock before that security is issued. */
@@ -309,7 +335,7 @@ function drawn(before: NodeMap, nodes: NodeMap, transaction: Applied, by: Stamp)
           ...node,
           draw: stamped(node.draw, { plan: transaction.stock_plan_id, quantity: transaction.quantity as string }, how),
         });
-  return adjusted(marked, transaction.stock_plan_id, transaction.quantity, add, how);
+  return adjusted(marked, transaction.stock_plan_id, transaction.quantity, add, how, "draws");
 }
 
 /**
@@ -334,7 +360,7 @@ function carried(nodes: NodeMap, transaction: Applied, by: Stamp): NodeMap {
       provenance: stamped(node.provenance, source, by),
       ...(gaveBack ? { draw: stamped(node.draw, { plan: drew.plan, quantity: ZERO }, by) } : {}),
     });
-    return gaveBack ? adjusted(next, drew.plan, drew.quantity, subtract, by) : next;
+    return gaveBack ? adjusted(next, drew.plan, drew.quantity, subtract, by, "carries") : next;
   }, nodes);
 }
 
@@ -386,23 +412,27 @@ function carriedStock(nodes: NodeMap, transaction: Applied, by: Stamp): NodeMap 
     if (!draw || draw.quantity === ZERO || !isStockPlanId(draw.plan)) continue;
     if (plans.size > 0 && !plans.has(draw.plan)) continue;
     nodes = withSecurity(nodes, { ...stock, draw: stamped(stock.draw, { ...draw, quantity: ZERO }, by) });
-    nodes = adjusted(nodes, draw.plan, draw.quantity, subtract, by);
+    nodes = adjusted(nodes, draw.plan, draw.quantity, subtract, by, "carriesStock");
   }
   return nodes;
 }
 
-/** Set the plan's reserve from the adjustment. */
+/**
+ * A valid adjustment replaces the reserve and clears its earlier failures. A failed adjustment
+ * leaves the previous reserve in place and marks it unreliable.
+ */
 function reserved(nodes: NodeMap, transaction: Applied, by: Stamp): NodeMap {
   if (!names(transaction.stock_plan_id)) return nodes;
   const plan = planAt(nodes, transaction.stock_plan_id);
-  return withPlan(nodes, withNodeField(plan, "reserved", stamped(plan.reserved, transaction.shares_reserved as string, by)));
+  const figure = () => transaction.shares_reserved as string;
+  return withPlan(nodes, withNodeField(plan, POOL_WRITES.reserves.field, settled(plan.reserved, figure, by, "reserves")));
 }
 
 // Reading tracked fields
 
 /**
- * Identify the security family, ID and field a check needs. The field definition determines the
- * returned value's type.
+ * Identify the kind, ID and field a check needs. A security address also specifies its family so a
+ * different family's record cannot supply the value.
  */
 export type FieldRef = FieldAddress<Node>;
 export type FieldRefValue<R extends FieldRef> = ReferenceValue<Node, R>;
@@ -419,6 +449,13 @@ export function planField<P extends FieldKey<PlanNode>>(id: unknown, field: P): 
   return { kind: "plan", id, field } as Extract<FieldRef, { kind: "plan"; field: P }>;
 }
 
+/** Check whether two reads refer to the same field on the same record. */
+export const sameField = (a: FieldRef, b: FieldRef): boolean =>
+  a.kind === b.kind &&
+  a.id === b.id &&
+  a.field === b.field &&
+  (a.kind !== "security" || b.kind !== "security" || a.family === b.family);
+
 /** Look up the requested field. A missing record or optional field yields undefined. */
 export const fieldAt = <R extends FieldRef>(nodes: NodeMap, ref: R): Field<FieldRefValue<R>> | undefined => {
   const node = nodes[ref.kind].get(ref.id);
@@ -429,8 +466,11 @@ export const fieldAt = <R extends FieldRef>(nodes: NodeMap, ref: R): Field<Field
   return fields[ref.field] as Field<FieldRefValue<R>> | undefined;
 };
 
-/** Name the security and field in a finding. */
-export const describeField = (ref: FieldRef): string => `the ${ref.field} of ${ref.kind === "plan" ? "stock plan" : "security"} ${show(ref.id)}`;
+/** Name the field and affected security or plan in a finding. */
+export const describeField = (ref: FieldRef): string => {
+  if (ref.kind === "security") return `the ${ref.field} of security ${show(ref.id)}`;
+  return ref.field === "drawn" ? `the shares drawn from stock plan ${show(ref.id)}` : `the shares reserved for stock plan ${show(ref.id)}`;
+};
 
 const show = (value: unknown): string => {
   try {

@@ -23,6 +23,8 @@ export type OcfMachineContext = {
    * no-earlier-removal check.
    */
   removals: ReadonlyMap<unknown, DeepReadonly<OcfTransaction>>;
+  /** Save the records at the start of the day so daily checks can identify which plans changed. */
+  nodesAtStartOfDay: NodeMap;
   report: any[];
   findings: Finding[];
   /**
