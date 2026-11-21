@@ -1,20 +1,28 @@
-import { securityField } from "../../nodes";
+import { isStockPlanId, securityField } from "../../nodes";
 import { defineValidator, text, type CheckObject } from "../checkKit";
 import { countable } from "../checks";
 
 // A return credits the named plan, which can differ from the source plan. Require a reliably removed
-// equity compensation security. The quantity limit still needs implementation.
+// equity compensation security or plan-issued stock. The quantity limit still needs implementation.
 
 const securityRemoved = {
   id: "security-removed",
   severity: "error",
   description:
-    "The security the shares are returned from is an equity compensation security that a transaction dated on or before this one removed.",
-  reads: (data) => [securityField("equityCompensation", data.security_id, "lifecycle")],
-  run: (_context, data, read) =>
-    read(securityField("equityCompensation", data.security_id, "lifecycle")) === "removed"
-      ? []
-      : [text`The equity compensation security ${data.security_id} has not been removed, so its shares cannot be returned to a pool.`],
+    "The shares come from a removed equity compensation security or removed stock issued from a plan.",
+  reads: ({ security_id }) => [
+    securityField("equityCompensation", security_id, "lifecycle"),
+    securityField("stockIssuances", security_id, "lifecycle"),
+    securityField("stockIssuances", security_id, "issuance"),
+  ],
+  run: (_context, { security_id }, read) => {
+    if (read(securityField("equityCompensation", security_id, "lifecycle")) === "removed") return [];
+    if (read(securityField("stockIssuances", security_id, "lifecycle")) === "removed") {
+      const stock = read(securityField("stockIssuances", security_id, "issuance"));
+      if (isStockPlanId(stock?.stock_plan_id)) return [];
+    }
+    return [text`The security ${security_id} must be a removed equity compensation security or removed plan-issued stock to return shares to a pool.`];
+  },
 } satisfies CheckObject<{ security_id: string }>;
 
 const quantityReturnable = {
@@ -27,7 +35,7 @@ export const TX_STOCK_PLAN_RETURN_TO_POOL = defineValidator({
   transaction: "TX_STOCK_PLAN_RETURN_TO_POOL",
   effect: "none",
   lifecycle: "after removal",
-  families: ["equityCompensation"],
+  families: ["stockIssuances", "equityCompensation"],
   pool: "returns",
   checks: [countable("quantity"), securityRemoved, quantityReturnable],
 });

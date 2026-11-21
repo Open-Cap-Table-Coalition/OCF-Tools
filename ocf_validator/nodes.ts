@@ -17,13 +17,15 @@ export type Issuance = CollectionElement[CollectionKey];
 
 /**
  * Store the issuance and lifecycle by security family. A failed first issuance can leave both
- * unknown. Equity grants can also record which transaction named them as a balance or result and how
- * many shares they drew. A transaction can name a grant before its issuance.
+ * unknown. Stock and equity compensation can draw on a plan or carry an earlier charge. A source
+ * transaction can name a balance grant or settlement stock before that security is issued.
  */
 export type SecurityState<C extends CollectionKey> = {
   lifecycle: LifecycleState;
   issuance: CollectionElement[C];
-} & (C extends "equityCompensation" ? { provenance?: Subject; draw?: Draw } : {});
+} & (C extends "equityCompensation" | "stockIssuances" ? { draw?: Draw } : {})
+  & (C extends "equityCompensation" ? { provenance?: Subject } : {})
+  & (C extends "stockIssuances" ? { carriedPlans?: readonly string[] } : {});
 
 /** The family determines which issuance and additional fields a security can have. */
 type SecuritiesByFamily = {
@@ -64,6 +66,10 @@ type Applied = {
   stock_plan_id?: unknown;
   quantity?: unknown;
   shares_reserved?: unknown;
+  date?: unknown;
+  settlement_date?: unknown;
+  security_ids?: unknown;
+  resulting_security_id?: unknown;
   balance_security_id?: unknown;
   resulting_security_ids?: unknown;
 };
@@ -211,6 +217,9 @@ const planAt = (nodes: NodeMap, id: unknown): PlanNode =>
 /** Copy the plan index and reuse the other plan records. */
 const withPlan = (nodes: NodeMap, plan: PlanNode): NodeMap => ({ ...nodes, plan: new Map(nodes.plan).set(plan.id, plan) });
 
+/** A stock issuance draws from a plan when it names that plan. */
+export const isStockPlanId = (id: unknown): id is string => typeof id === "string" && id.length > 0;
+
 /** An ID is present if its value is neither null nor undefined. */
 const names = (id: unknown): boolean => id !== undefined && id !== null;
 
@@ -242,6 +251,8 @@ function poolWrites(before: NodeMap, nodes: NodeMap, descriptor: Descriptor, tra
       return drawn(before, nodes, transaction, by);
     case "carries":
       return "collection" in descriptor && descriptor.collection === "equityCompensation" ? carried(nodes, transaction, by) : nodes;
+    case "carriesStock":
+      return carriedStock(nodes, transaction, by);
     case "returns":
       return adjusted(nodes, transaction.stock_plan_id, transaction.quantity, subtract, by);
     case "reserves":
@@ -262,16 +273,28 @@ function adjusted(nodes: NodeMap, planId: unknown, quantity: unknown, move: type
   return withPlan(nodes, withNodeField(plan, "drawn", written(move(plan.drawn.value ?? ZERO, quantity), by.writer, plan.drawn)));
 }
 
+/** A source can name a balance grant or settlement stock before that security is issued. */
+function carriedCharge(node: SecurityNode | undefined, planId: unknown): Field<unknown> | undefined {
+  if (node?.family === "equityCompensation") return node.provenance;
+  if (node?.family === "stockIssuances" && isStockPlanId(planId)) {
+    const source = node.carriedPlans;
+    if (source?.defects.length || source?.value?.includes(planId)) return source;
+  }
+  return undefined;
+}
+
 /** Charge the plan for a grant's first independent issuance. */
 function drawn(before: NodeMap, nodes: NodeMap, transaction: Applied, by: Stamp): NodeMap {
   if (!names(transaction.stock_plan_id)) return nodes;
+  const node = nodes.security.get(transaction.security_id);
+  if (node?.family === "stockIssuances" && !isStockPlanId(transaction.stock_plan_id)) return nodes;
   const held = before.security.get(transaction.security_id);
 
   // An earlier issuance already accounted for this ID.
   if (held !== undefined && held.lifecycle.value !== undefined) return nodes;
 
   // The source already accounted for these shares when it named this grant.
-  const provenance = held !== undefined && isSecurityFamily(held, "equityCompensation") ? held.provenance : undefined;
+  const provenance = carriedCharge(held, transaction.stock_plan_id);
   const inDoubt = provenance !== undefined && provenance.defects.length > 0;
   if (provenance?.value !== undefined && !inDoubt) return nodes;
 
@@ -279,9 +302,8 @@ function drawn(before: NodeMap, nodes: NodeMap, transaction: Applied, by: Stamp)
   // failure.
   const how: Stamp = inDoubt ? { ok: false, roots: by.ok ? provenance.defects : withRoots(by.roots, provenance.defects) } : by;
 
-  const node = nodes.security.get(transaction.security_id);
   const marked =
-    node === undefined || !isSecurityFamily(node, "equityCompensation")
+    node?.family !== "equityCompensation" && node?.family !== "stockIssuances"
       ? nodes
       : withSecurity(nodes, {
           ...node,
@@ -314,6 +336,42 @@ function carried(nodes: NodeMap, transaction: Applied, by: Stamp): NodeMap {
     });
     return gaveBack ? adjusted(next, drew.plan, drew.quantity, subtract, by) : next;
   }, nodes);
+}
+
+/**
+ * A balance or resulting stock issuance carries the charge of its source. Undo a separate draw
+ * when the stock was issued first on the same date. Remember the source plans for stock issued
+ * later, such as a release that settles on a later day.
+ */
+function carriedStock(nodes: NodeMap, transaction: Applied, by: Stamp): NodeMap {
+  const sources = Array.isArray(transaction.security_ids) ? transaction.security_ids : [transaction.security_id];
+  const plans = new Set<string>();
+  for (const id of sources) {
+    const issuance = nodes.security.get(id)?.issuance.value;
+    if (issuance && "stock_plan_id" in issuance && isStockPlanId(issuance.stock_plan_id)) plans.add(issuance.stock_plan_id);
+  }
+  if (plans.size === 0 && by.ok) return nodes;
+
+  const results = Array.isArray(transaction.resulting_security_ids) ? transaction.resulting_security_ids : [];
+  const ids = new Set([transaction.balance_security_id, transaction.resulting_security_id, ...results].filter(names));
+  for (const id of ids) {
+    if (sources.includes(id)) continue;
+    const held = nodes.security.get(id);
+    if (held && held.family !== "stockIssuances") continue;
+    const stock = held ?? blankSecurity(id, "stockIssuances");
+    const issued = stock.issuance.value;
+    if (!issued) {
+      nodes = withSecurity(nodes, { ...stock, carriedPlans: stamped(stock.carriedPlans, [...plans], by) });
+      continue;
+    }
+    if (issued.date !== transaction.date && issued.date !== transaction.settlement_date) continue;
+    const draw = stock.draw?.value;
+    if (!draw || draw.quantity === ZERO || !isStockPlanId(draw.plan)) continue;
+    if (plans.size > 0 && !plans.has(draw.plan)) continue;
+    nodes = withSecurity(nodes, { ...stock, draw: stamped(stock.draw, { ...draw, quantity: ZERO }, by) });
+    nodes = adjusted(nodes, draw.plan, draw.quantity, subtract, by);
+  }
+  return nodes;
 }
 
 /** Set the plan's reserve from the adjustment. */

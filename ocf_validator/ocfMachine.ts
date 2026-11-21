@@ -188,7 +188,7 @@ export const TX_DESCRIPTORS = {
   // Reuse the current equity compensation descriptors for all seven older transaction names.
 
   // --- append: issuance appended to its family collection -----------------
-  TX_STOCK_ISSUANCE: { effect: "append", lifecycle: "issue", collection: "stockIssuances", legacyValidate: validators.valid_tx_stock_issuance },
+  TX_STOCK_ISSUANCE: { pool: "draws", effect: "append", lifecycle: "issue", collection: "stockIssuances", legacyValidate: validators.valid_tx_stock_issuance },
   TX_CONVERTIBLE_ISSUANCE,
   TX_WARRANT_ISSUANCE,
   TX_EQUITY_COMPENSATION_ISSUANCE,
@@ -210,18 +210,18 @@ export const TX_DESCRIPTORS = {
   TX_PLAN_SECURITY_ACCEPTANCE,
   TX_PLAN_SECURITY_EXERCISE,
   TX_PLAN_SECURITY_RELEASE,
-  // A return credits a plan after the grant's removal. An adjustment sets the plan's reserve and
+  // A return credits a plan after the security's removal. An adjustment sets the plan's reserve and
   // needs no security.
   TX_STOCK_PLAN_RETURN_TO_POOL,
   TX_STOCK_PLAN_POOL_ADJUSTMENT,
 
   // --- remove: filter the family collection by security_id ---------------
   TX_STOCK_RETRACTION: { effect: "remove", lifecycle: "removes", collection: "stockIssuances", legacyValidate: validators.valid_tx_stock_retraction },
-  TX_STOCK_CANCELLATION: { effect: "remove", lifecycle: "removes", collection: "stockIssuances", legacyValidate: validators.valid_tx_stock_cancellation },
-  TX_STOCK_CONVERSION: { effect: "remove", lifecycle: "removes", collection: "stockIssuances", legacyValidate: validators.valid_tx_stock_conversion },
-  TX_STOCK_REISSUANCE: { effect: "remove", lifecycle: "removes", collection: "stockIssuances", legacyValidate: validators.valid_tx_stock_reissuance },
-  TX_STOCK_REPURCHASE: { effect: "remove", lifecycle: "removes", collection: "stockIssuances", legacyValidate: validators.valid_tx_stock_repurchase },
-  TX_STOCK_TRANSFER: { effect: "remove", lifecycle: "removes", collection: "stockIssuances", legacyValidate: validators.valid_tx_stock_transfer },
+  TX_STOCK_CANCELLATION: { pool: "carriesStock", effect: "remove", lifecycle: "removes", collection: "stockIssuances", legacyValidate: validators.valid_tx_stock_cancellation },
+  TX_STOCK_CONVERSION: { pool: "carriesStock", effect: "remove", lifecycle: "removes", collection: "stockIssuances", legacyValidate: validators.valid_tx_stock_conversion },
+  TX_STOCK_REISSUANCE: { pool: "carriesStock", effect: "remove", lifecycle: "removes", collection: "stockIssuances", legacyValidate: validators.valid_tx_stock_reissuance },
+  TX_STOCK_REPURCHASE: { pool: "carriesStock", effect: "remove", lifecycle: "removes", collection: "stockIssuances", legacyValidate: validators.valid_tx_stock_repurchase },
+  TX_STOCK_TRANSFER: { pool: "carriesStock", effect: "remove", lifecycle: "removes", collection: "stockIssuances", legacyValidate: validators.valid_tx_stock_transfer },
   TX_CONVERTIBLE_RETRACTION,
   TX_CONVERTIBLE_CANCELLATION,
   TX_CONVERTIBLE_TRANSFER,
@@ -244,7 +244,7 @@ export const TX_DESCRIPTORS = {
   TX_VESTING_EVENT: { effect: "passthrough", lifecycle: "stays", families: VESTING_FAMILIES },
   TX_VESTING_ACCELERATION: { effect: "passthrough", lifecycle: "stays", families: VESTING_FAMILIES },
   // A consolidation replaces several stock securities with one.
-  TX_STOCK_CONSOLIDATION: { effect: "passthrough", lifecycle: "removes", families: ["stockIssuances"] },
+  TX_STOCK_CONSOLIDATION: { pool: "carriesStock", effect: "passthrough", lifecycle: "removes", families: ["stockIssuances"] },
   // Class and issuer transactions name no individual security. They have no entry on a security
   // family's chart.
   TX_STOCK_CLASS_SPLIT: { effect: "passthrough", lifecycle: "stays", families: [] },
@@ -497,7 +497,7 @@ const notRemoved = {
 /**
  * Run validators that return findings once per transaction and continue after recording the result.
  * Passthrough transactions use the earlier-removal check. Returns to pool have their own check for a
- * removed grant. Legacy stock validation still stops on failure.
+ * removed security. Legacy stock validation still stops on failure.
  */
 function buildTransactionHandlers() {
   const legacyTransitions = [

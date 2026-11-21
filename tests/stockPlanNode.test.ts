@@ -3,7 +3,7 @@ import { applyTransaction, emptyNodes, fieldAt, securityAt, securityField, withP
 import { TX_DESCRIPTORS, type TxKey } from "../ocf_validator/ocfMachine";
 import type { Subject } from "../types/finding";
 import { toValidate, type CheckObject } from "../ocf_validator/validators/checkKit";
-import { baseContext, validatePackage } from "./helpers";
+import { baseContext, runValidator, validatePackage } from "./helpers";
 
 // Check how transactions change reserved and drawn shares. The plan stores each total separately so
 // a failure affecting one can leave the other reliable.
@@ -474,19 +474,45 @@ describe("a failed transaction's writes to the pool", () => {
   });
 });
 
-// Pool rules still to implement
-
 describe("stock issued from a plan", () => {
-  it("isn't counted against the pool: the stock validators are legacy, and only a grant draws", () => {
-    const context = validatePackage(
-      [{ id: "si-1", object_type: "TX_STOCK_ISSUANCE", security_id: "rsa-1", stakeholder_id: "sh-1", stock_class_id: "common", stock_plan_id: "plan-1", quantity: "500", stock_legend_ids: [], date: "2022-01-01" }],
-      stakeholders,
-      [{ id: "common" }],
-      [PLAN],
-    );
+  const stock = {
+    id: "si-1", object_type: "TX_STOCK_ISSUANCE", security_id: "stock-1", stakeholder_id: "sh-1",
+    stock_class_id: "common", stock_plan_id: "plan-1", quantity: "50", stock_legend_ids: [], date: "2022-02-01",
+  };
+  const runStock = (transactions: Record<string, unknown>[]) => validatePackage(transactions, stakeholders, [{ id: "common" }], [PLAN]);
 
+  it.each(["not a quantity", "-1"])("rejects a plan stock draw of %s before updating the pool", (quantity) => {
+    const context = runStock([{ ...stock, quantity }]);
+    expect(context.report.at(-1)).toMatchObject({ transaction_id: stock.id, plan_quantity_validity: false });
+    expect(context.nodes.plan.get(PLAN.id)?.drawn.value).toBe("0");
+  });
+
+  it.each([
+    { type: "TX_EQUITY_COMPENSATION_EXERCISE", issued: "2022-02-01" },
+    { type: "TX_PLAN_SECURITY_RELEASE", issued: "2022-02-15" },
+  ])("carries the original grant's charge to the stock resulting from $type", ({ type, issued }) => {
+    const context = runStock([
+      grant("g-1", "option", "100"),
+      { ...stock, date: issued },
+      { id: "deliver", object_type: type, security_id: "option", quantity: "50", date: "2022-02-01",
+        settlement_date: issued, resulting_security_ids: ["stock-1"] },
+    ]);
     expect(context.result).toMatch(/appears valid\.$/);
-    expect(context.snapshots[0].stockPlans).toEqual([{ id: "plan-1", reserved: "1000", drawn: "0" }]);
+    expect(context.snapshots.map((s) => s.stockPlans[0].drawn)).toEqual(context.snapshots.map(() => "100"));
+  });
+
+  it("withholds a return from stock that is outstanding, planless, or unreliably removed", () => {
+    const remove = { id: "cancel", object_type: "TX_STOCK_CANCELLATION", security_id: stock.security_id, date: "2022-02-02" };
+    const bad = subject(remove.object_type, remove.id);
+    const data = returnToPool("return", stock.security_id, "50");
+    const validate = (nodes: NodeMap) => runValidator(data.object_type, baseContext({ nodes }), data);
+    const outstanding = reduce(withPlan(), [stock]);
+    const planless = reduce(withPlan(), [{ ...stock, stock_plan_id: undefined }], [remove]);
+    const uncertain = reduce(outstanding, [remove, [bad]]);
+    for (const nodes of [outstanding, planless]) {
+      expect(validate(nodes)).toMatchObject([{ check: "security-removed", outcome: "failed" }]);
+    }
+    expect(validate(uncertain)).toMatchObject([{ check: "security-removed", outcome: "blocked", roots: [bad] }]);
   });
 });
 
