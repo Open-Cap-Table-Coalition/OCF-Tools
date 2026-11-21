@@ -164,6 +164,7 @@ export function defineValidator<const S extends Spec>(
   return {
     ...rest,
     lifecycle: LIFECYCLE_OF_EFFECT[spec.effect],
+    rules: checks,
     validate: toValidate(checks),
     checks: toMetadata(checks),
   } as Defined<S>;
@@ -171,6 +172,7 @@ export function defineValidator<const S extends Spec>(
 
 /** Preserve the transaction and family types when adding validation and check metadata. */
 type Defined<S extends Spec> = Omit<S, "checks"> & {
+  rules: S["checks"];
   lifecycle: (typeof LIFECYCLE_OF_EFFECT)[S["effect"]];
   validate: GradedValidator<TransactionFor<S["transaction"]>>;
   checks: readonly Check[];
