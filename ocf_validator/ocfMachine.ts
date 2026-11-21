@@ -248,8 +248,8 @@ export const TX_DESCRIPTORS = {
   TX_VESTING_ACCELERATION: { effect: "passthrough", lifecycle: "stays", families: VESTING_FAMILIES },
   // A consolidation replaces several stock securities with one.
   TX_STOCK_CONSOLIDATION: { effect: "passthrough", lifecycle: "removes", families: ["stockIssuances"] },
-  // Shares can return to a plan after the grant is removed.
-  TX_STOCK_PLAN_RETURN_TO_POOL: { effect: "passthrough", lifecycle: "after removal", families: ["equityCompensation"] },
+  // Plan-issued stock (including RSAs) and equity compensation can return shares to a pool.
+  TX_STOCK_PLAN_RETURN_TO_POOL: { effect: "passthrough", lifecycle: "after removal", families: ["stockIssuances", "equityCompensation"] },
   // These transactions act on a class, plan or issuer. They leave individual securities outstanding
   // and belong to no security chart.
   TX_STOCK_CLASS_SPLIT: { effect: "passthrough", lifecycle: "stays", families: [] },

@@ -49,8 +49,8 @@ const EXPECTED: Record<TxKey, [LifecycleWord, readonly CollectionKey[]]> = {
   TX_EQUITY_COMPENSATION_RETRACTION: ["removes", [EQUITY_COMPENSATION]],
   TX_EQUITY_COMPENSATION_CANCELLATION: ["removes", [EQUITY_COMPENSATION]],
   TX_EQUITY_COMPENSATION_TRANSFER: ["removes", [EQUITY_COMPENSATION]],
-  // Shares can return to a pool only after removal.
-  TX_STOCK_PLAN_RETURN_TO_POOL: ["after removal", [EQUITY_COMPENSATION]],
+  // Stock and equity compensation can both be issued from a stock plan.
+  TX_STOCK_PLAN_RETURN_TO_POOL: ["after removal", [STOCK, EQUITY_COMPENSATION]],
   // Older names for equity compensation transactions
   TX_PLAN_SECURITY_ISSUANCE: ["issue", [EQUITY_COMPENSATION]],
   TX_PLAN_SECURITY_ACCEPTANCE: ["stays", [EQUITY_COMPENSATION]],
