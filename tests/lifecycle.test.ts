@@ -39,7 +39,7 @@ const EXPECTED: Record<CollectionKey, { issue: string[]; stays: string[]; remove
       "TX_STOCK_REISSUANCE",
       "TX_STOCK_CONSOLIDATION",
     ],
-    afterRemoval: [],
+    afterRemoval: ["TX_STOCK_PLAN_RETURN_TO_POOL"],
   },
   convertibleIssuances: {
     issue: ["TX_CONVERTIBLE_ISSUANCE"],
@@ -181,6 +181,12 @@ describe("the lookup on short real histories", () => {
         "TX_STOCK_PLAN_RETURN_TO_POOL",
       ]),
     ).toEqual(["not allowed", "outstanding", "not allowed", "removed", "removed", "removed"]);
+  });
+
+  it("allows a plan-issued stock return only after cancellation", () => {
+    expect(walk("stockIssuances", [
+      "TX_STOCK_ISSUANCE", "TX_STOCK_PLAN_RETURN_TO_POOL", "TX_STOCK_CANCELLATION", "TX_STOCK_PLAN_RETURN_TO_POOL",
+    ])).toEqual(["outstanding", "not allowed", "removed", "removed"]);
   });
 
   it("follows a grant under the plan security names the same way", () => {
