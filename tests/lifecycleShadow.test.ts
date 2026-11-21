@@ -1,6 +1,7 @@
 import * as path from "path";
 import { afterEach, describe, it, expect, vi } from "vitest";
 import { TX_DESCRIPTORS } from "../ocf_validator/ocfMachine";
+import { noEarlierRemoval } from "../ocf_validator/validators/checks";
 import { defineValidator } from "../ocf_validator/validators/checkKit";
 import { validatePackage, validateWithShadow } from "./helpers";
 import { disagreements, explain, expectShadowExplained, shadowRows, EXPLANATIONS, type ShadowRow } from "./lifecycleShadow";
@@ -107,6 +108,22 @@ describe("where the chart and the checks disagree", () => {
     ]);
   });
 
+  const invalid = { ...grant, id: "bad", security_id: "other", stakeholder_id: "missing" };
+  const accept = { ...grant, id: "accept", object_type: "TX_EQUITY_COMPENSATION_ACCEPTANCE", date: "2020-02-01" };
+  const retract = { ...grantCancellation, object_type: "TX_EQUITY_COMPENSATION_RETRACTION" };
+
+  it.each([false, true])("keeps the grant when retraction fails (earlier error: %s)", (earlierError) => {
+    const history = [grant, accept, retract, reprice];
+    if (earlierError) history.unshift({ ...invalid, date: "2019-01-01" });
+    expect(() => validatePackage(history, [{ id: "sh-1" }])).toThrow(/REPRICING "rep-1"/);
+  });
+
+  it("removes a retained grant when a later cancellation passes during replay", () => {
+    const context = validatePackage([grant, { ...invalid, date: "2020-02-01" }, grantCancellation, reprice], [{ id: "sh-1" }]);
+    expect(context.equityCompensation.map((item) => item.id)).toEqual([grant.id]);
+    expect(rowsOf(context.shadow, reprice.id)[0].issuanceCheck).toBe("replayed");
+  });
+
   it.each([reprice, exercise])("the chart refuses a $object_type on a cancelled grant, which neither check runs on", (transaction) => {
     const context = validatePackage([grant, grantCancellation, transaction], [{ id: "sh-1" }]);
     const rows = context.shadow;
@@ -178,6 +195,36 @@ describe("where the chart and the checks disagree", () => {
 
 describe("a disagreement nothing explains", () => {
   afterEach(() => vi.restoreAllMocks());
+
+  it("replays the checks when the validator throws on a second cancellation", () => {
+    const descriptor = TX_DESCRIPTORS.TX_CONVERTIBLE_CANCELLATION;
+    const validate = descriptor.validate;
+    vi.spyOn(descriptor, "validate").mockImplementation((context, data) => {
+      if (data.id === "second") throw new Error("unfinished cancellation");
+      return validate(context, data);
+    });
+
+    const context = validatePackage([issuance, cancellation, { ...cancellation, id: "second", date: "2021-07-01" }], [{ id: "sh-1" }]);
+    expect(context.result).toContain("unfinished cancellation");
+    expect(rowsOf(context.shadow, "second")[0].reported).toEqual(["no-other-transactions"]);
+  });
+
+  it.each([
+    ["2021-06-01", "2021-07-01", "2021-08-01"],
+    ["2021-08-01", "2020-01-01", "2021-08-01"],
+  ])("checks the indexed removal date even when the chart removed the grant on %s", (planDate, indexedDate, vestDate) => {
+    vi.spyOn(noEarlierRemoval, "run").mockReturnValue([]);
+    const history = [
+      { ...issuance, object_type: "TX_EQUITY_COMPENSATION_ISSUANCE" },
+      { ...cancellation, object_type: "TX_PLAN_SECURITY_CANCELLATION", date: planDate },
+      { ...cancellation, object_type: "TX_EQUITY_COMPENSATION_CANCELLATION", date: indexedDate },
+      { ...cancellation, id: "vest", object_type: "TX_VESTING_EVENT", date: vestDate },
+    ].sort((a, b) => a.date.localeCompare(b.date));
+
+    const [vest] = rowsOf(shadowRows(history), "vest");
+    expect(vest.removedBy?.date).toBe(planDate);
+    expect(explain(vest)).toBeUndefined();
+  });
 
   it("catches a change in what the validator reports under the same check ID", () => {
     vi.spyOn(TX_DESCRIPTORS.TX_CONVERTIBLE_CANCELLATION, "validate").mockReturnValue([{

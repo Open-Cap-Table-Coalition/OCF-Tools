@@ -6,7 +6,7 @@ import { errorResult, malformedResult, ocfMachine, type OcfMachineContext, type 
 
 export const ocfValidator = (packagePath: string): OcfMachineContext => validateOcfPackage(readOcfPackage(packagePath));
 
-/** Send back one list of findings for each transaction the validator reaches. */
+/** Send back one list of findings for each transaction the validator finishes checking. */
 export const validateOcfPackage = (
   ocfPackage: OcfPackageContent,
   onTransaction?: (findings: Finding[]) => void,
@@ -58,7 +58,7 @@ export const validateOcfPackage = (
     ocfXstateActor.send(event);
     const snapshot = ocfXstateActor.getSnapshot();
     if (snapshot.status === "error") thrown = errorResult(ocfPackage, event, snapshot.error);
-    onFindings?.(snapshot.context.findings.slice(before.context.findings.length));
+    else onFindings?.(snapshot.context.findings.slice(before.context.findings.length));
   };
 
   let currentDate: any = null;

@@ -53,7 +53,7 @@ export const baseContext = (overrides: Partial<OcfMachineContext> = {}): OcfMach
 export const validateWithShadow = (dir: string) => {
   const visits: Finding[][] = [];
   const context = validateOcfPackage(readOcfPackage(dir), (findings) => visits.push(findings));
-  return { ...context, shadow: expectShadowExplained(context.ocfPackageContent.transactions, visits) };
+  return { ...context, shadow: expectShadowExplained(context.ocfPackageContent.transactions, { context, visits }) };
 };
 
 /**
