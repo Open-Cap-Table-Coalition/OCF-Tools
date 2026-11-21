@@ -81,4 +81,4 @@ export type LifecycleWord = "issue" | "stays" | "removes" | "after removal";
  * The pool operation tells the reducer whether to charge a grant, carry shares already charged,
  * credit a return or replace the reserve.
  */
-export type PoolEffect = "draws" | "carries" | "returns" | "reserves";
+export type PoolEffect = "draws" | "carries" | "carriesStock" | "returns" | "reserves";

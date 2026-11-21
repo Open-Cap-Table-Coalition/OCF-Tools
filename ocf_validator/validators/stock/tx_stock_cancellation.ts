@@ -9,9 +9,10 @@
     6. Check that the quantity of the balance security_id if it exists is greater than 0
     7. Check that the sum of the quantities of the cancellation (and the balance issuance if it exists) is equal to the quantity of the incoming security.
     8. Check cancellation amount is greater than 0 and less than or equal to the incoming security quantity
-    9. The security_id of the stock issuance referred to in the security_id variable must not be the security_id related to any other transactions with the exception of a stock acceptance transaction.
+    9. Only issuance, acceptance, this cancellation, and a subsequent return of plan-issued shares may reference the security.
 */
 
+import { isStockPlanId } from '../../nodes';
 import {LegacyContext} from '../../ocfMachine';
 
 const valid_tx_stock_cancellation = (
@@ -24,11 +25,13 @@ const valid_tx_stock_cancellation = (
 
   const {transactions} = context.ocfPackageContent;
   let incoming_stockClass = '';
+  let issuedFromPlan = false;
   // 1. Check that stock issuance in incoming security_id reference by transaction exists in current state.
   let incoming_stockIssuance_validity = false;
-  context.stockIssuances.forEach((ele: any) => {
+  context.stockIssuances.forEach((ele) => {
     if (ele.security_id === event.data.security_id) {
       incoming_stockClass = ele.stock_class_id;
+      issuedFromPlan = isStockPlanId(ele.stock_plan_id);
       incoming_stockIssuance_validity = true;
       report.incoming_stockIssuance_validity = true;
     }
@@ -150,13 +153,14 @@ const valid_tx_stock_cancellation = (
     report.cancel_quantity_validity = false;
   }
 
-  //
+  // A return on or after cancellation may name a successor plan.
   let only_transaction_validity = true;
   transactions.map((ele: any) => {
     if (
       ele.security_id === event.data.security_id &&
       ele.object_type !== 'TX_STOCK_ISSUANCE' &&
       ele.object_type !== 'TX_STOCK_ACCEPTANCE' &&
+      !(issuedFromPlan && ele.object_type === 'TX_STOCK_PLAN_RETURN_TO_POOL' && ele.date >= event.data.date) &&
       !(ele.object_type === 'TX_STOCK_CANCELLATION' && ele.id === event.data.id)
     ) {
       only_transaction_validity = false;

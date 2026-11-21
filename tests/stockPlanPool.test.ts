@@ -229,6 +229,20 @@ describe("the pool check", () => {
     expect(context.snapshots.at(-1)?.stockPlans).toEqual([{ id: "plan-1", reserved: "100", drawn: "80" }]);
   });
 
+  it("reports an excess caused by an RSA and credits its shares on the day of return", () => {
+    const context = validatePackage([
+      grant("g-1", "80", "2022-01-01"),
+      { id: "stock", object_type: "TX_STOCK_ISSUANCE", issuance_type: "RSA", security_id: "rsa", quantity: "40",
+        date: "2022-02-01", stock_plan_id: PLAN.id, stakeholder_id: "sh-1", stock_class_id: "common", stock_legend_ids: [] },
+      { id: "cancel", object_type: "TX_STOCK_CANCELLATION", security_id: "rsa", quantity: "40", date: "2022-03-01" },
+      { id: "return", object_type: "TX_STOCK_PLAN_RETURN_TO_POOL", security_id: "rsa", stock_plan_id: PLAN.id,
+        quantity: "40", date: "2022-04-01", reason_text: "Forfeited" },
+    ], stakeholders, [{ id: "common" }], [PLAN]);
+
+    expect(context.snapshots.map((day) => day.stockPlans[0].drawn)).toEqual(["80", "120", "120", "80"]);
+    expect(context.findings).toMatchObject([{ check: "pool-not-exceeded", outcome: "failed", date: "2022-02-01", subject: plan(PLAN.id) }]);
+  });
+
   it("reports an over-granted plan on the day it goes over, and again only when something writes to its pool", () => {
     const context = run([
       grant("g-1", "150", "2022-01-01"),
@@ -280,6 +294,7 @@ describe("defects on the pool", () => {
     expect(POOL_WRITES).toEqual({
       draws: { field: "drawn", write: "adjusts" },
       carries: { field: "drawn", write: "adjusts" },
+      carriesStock: { field: "drawn", write: "adjusts" },
       returns: { field: "drawn", write: "adjusts" },
       reserves: { field: "reserved", write: "sets" },
     });
