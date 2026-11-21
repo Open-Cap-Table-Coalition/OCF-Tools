@@ -42,9 +42,37 @@ describe("a check that throws", () => {
     const data = { ...subject, security_id: "safe-1", stakeholder_id: "nobody", date: "2021-01-01" } as any;
 
     expect(validate(baseContext(), data)).toEqual([
-      { severity: "error", check: "throws", message: "The check threw TypeError: Cannot convert object to primitive value", subject },
-      { severity: "error", check: "stakeholder-exists", message: "The stakeholder nobody referenced by the transaction was not found in the stakeholder file.", subject },
+      { severity: "error", outcome: "failed", check: "throws", message: "The check threw TypeError: Cannot convert object to primitive value", subject },
+      { severity: "error", outcome: "failed", check: "stakeholder-exists", message: "The stakeholder nobody referenced by the transaction was not found in the stakeholder file.", subject },
     ]);
+  });
+});
+
+describe("a finding's outcome", () => {
+  it("is failed for every finding a check that ran produces, at either severity", () => {
+    // The runner currently emits failed findings. Only blocked findings carry the failures that
+    // caused them.
+    const warns = {
+      id: "warns",
+      severity: "warning",
+      description: "Warns on every transaction.",
+      run: () => ["A warning."],
+    } satisfies CheckObject;
+    const { validate } = defineValidator({
+      transaction: "TX_CONVERTIBLE_ISSUANCE",
+      effect: "append",
+      collection: "convertibleIssuances",
+      checks: [warns, stakeholderExists],
+    });
+    const data = { id: "ci-1", object_type: "TX_CONVERTIBLE_ISSUANCE", security_id: "safe-1", stakeholder_id: "nobody", date: "2021-01-01" } as any;
+
+    const findings = validate(baseContext(), data);
+
+    expect(findings.map((finding) => [finding.severity, finding.outcome])).toEqual([
+      ["warning", "failed"],
+      ["error", "failed"],
+    ]);
+    for (const finding of findings) expect(finding).not.toHaveProperty("roots");
   });
 });
 

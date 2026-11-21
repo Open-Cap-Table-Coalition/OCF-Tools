@@ -85,6 +85,7 @@ describe("a transaction on a security an earlier transaction removed", () => {
     validatePackage([issuance, cancellation, ...transactions], [{ id: "sh-1" }]);
   const removed = (transaction: Record<string, unknown>) => ({
     severity: "error",
+    outcome: "failed",
     check: "no-earlier-removal",
     message: "The security safe-1 was removed from the cap table by cc-1 on 2021-06-01.",
     subject: { object_type: transaction.object_type, id: transaction.id },
@@ -116,6 +117,7 @@ describe("a transaction on a security an earlier transaction removed", () => {
     expect(context.findings).toEqual([
       {
         severity: "error",
+        outcome: "failed",
         check: "issuance-exists",
         message: "No equity compensation issuance with security_id safe-1 appears in the package.",
         subject: { object_type: "TX_PLAN_SECURITY_RELEASE", id: "psr-1" },
@@ -200,6 +202,7 @@ describe("malformed package values", () => {
 
     const finding = {
       severity: "error",
+      outcome: "failed",
       check: "resulting-stock-exists",
       message: 'No stock issuance with security_id {"toString":null} appears in the package.',
       subject: { object_type: "TX_CONVERTIBLE_CONVERSION", id: "cv-1" },
@@ -240,7 +243,7 @@ describe("malformed package values", () => {
 
   it("gives each run its own arrays, so changing one run's result can't change the next's", () => {
     const malformed = [{ id: "ci-1", object_type: "TX_CONVERTIBLE_ISSUANCE", security_id: "safe-1", stakeholder_id: "sh-1", date: 20210101 }];
-    validatePackage(malformed).findings.push({ severity: "error", check: "leaked", message: "", subject: { object_type: "TX_CONVERTIBLE_ISSUANCE", id: "ci-1" } });
+    validatePackage(malformed).findings.push({ severity: "error", outcome: "failed", check: "leaked", message: "", subject: { object_type: "TX_CONVERTIBLE_ISSUANCE", id: "ci-1" } });
 
     expect(validatePackage(malformed).findings).toEqual([]);
   });

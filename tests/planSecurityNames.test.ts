@@ -41,6 +41,7 @@ describe("each plan security type is its equity compensation type under an older
     expect(context.findings).toEqual([
       {
         severity: "error",
+        outcome: "failed",
         check: "stakeholder-exists",
         message: "The stakeholder nobody referenced by the transaction was not found in the stakeholder file.",
         subject: { object_type: "TX_PLAN_SECURITY_ISSUANCE", id: "psi-1" },

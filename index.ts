@@ -7,3 +7,4 @@ export { ocfSnapshot } from "./ocf_snapshot";
 export type { OcfPackageContent } from "./read_ocf_package";
 export type { OcfMachineContext } from "./types/validator";
 export type { Snapshot } from "./types/snapshot";
+export type { BlockedFinding, FailedFinding, Finding, Outcome, Severity, Subject } from "./types/finding";
