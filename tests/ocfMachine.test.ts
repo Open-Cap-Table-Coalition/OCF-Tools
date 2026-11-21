@@ -76,6 +76,7 @@ describe("results render an issuer name that isn't a string", () => {
 // ---------------------------------------------------------------------------
 
 describe("passthrough transaction types are no-ops unless their security was removed earlier", () => {
+  // For a passthrough transaction, record any earlier-removal finding and keep processing.
   it("leaves capTable and every channel deep-equal after TX_VESTING_START + TX_STOCK_CLASS_SPLIT", () => {
     const seeded = baseContext({
       stockIssuances: [{ id: "si", security_id: "s" }] as any,
@@ -110,14 +111,14 @@ describe("passthrough transaction types are no-ops unless their security was rem
     expect(actor.getSnapshot().value).toBe("capTable");
   });
 
-  it("fails one on a security an earlier transaction removed, as a real run does", () => {
+  it("records a finding for one on a security an earlier transaction removed, as a real run does", () => {
     // The seeded context indexes its history's removals, as START would.
     const actor = startSeeded(
       contextWith({ transactions: [{ id: "cc-1", object_type: "TX_CONVERTIBLE_CANCELLATION", security_id: "s", date: "2021-06-01" }] }),
     );
     actor.send(ev("TX_VESTING_START", { id: "vs", object_type: "TX_VESTING_START", security_id: "s", date: "2021-07-01" }));
 
-    expect(actor.getSnapshot().value).toBe("validationError");
+    expect(actor.getSnapshot().value).toBe("capTable");
     expect(actor.getSnapshot().context.findings.map((f) => f.check)).toEqual(["no-earlier-removal"]);
   });
 });

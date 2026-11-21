@@ -26,9 +26,8 @@ export type OcfMachineContext = {
   report: any[];
   findings: Finding[];
   /**
-   * Machine bookkeeping, not validator input: the error findings of the most
-   * recently recorded transaction. Written at record time, read only by the
-   * failure branch to build the failure message.
+   * Store the findings that stopped a legacy issuance after an earlier removal so the failure
+   * message can identify the cause.
    */
   lastErrorFindings: Finding[];
   snapshots: Snapshot[];
@@ -49,14 +48,8 @@ export type DeepReadonly<T> = T extends readonly (infer E)[]
       : T;
 
 /**
- * A graded validator for a transaction whose payload is `T`: receives the
- * payload directly — no guard flag — and returns findings. The machine derives
- * everything else from that one return value: the transaction is valid iff no
- * finding carries severity "error" (warnings alone do not block), and the
- * findings are recorded on `context.findings`, never on `context.report`.
- * The machine invokes a validator up to twice per transaction (guard and
- * record), always with identical inputs, so a validator must be pure; its
- * inputs are typed `DeepReadonly` so mutating them is a compile error.
+ * A validator returns findings for one transaction. The machine records them and applies writes only
+ * when no error-level finding prevents it. Warnings allow writes, and later transactions still run.
  */
 export type GradedValidator<T> = (
   context: DeepReadonly<OcfMachineContext>,
@@ -64,26 +57,9 @@ export type GradedValidator<T> = (
 ) => Finding[];
 
 /**
- * One check a validator performs (or should perform), written as data. This
- * replaces the old free-text `CURRENT CHECKS` / `MISSING CHECKS` comment blocks.
- *
- * The machine doesn't read these while validating; the coverage report does.
- * But for validators built with `defineValidator` (see
- * `ocf_validator/validators/checkKit.ts`), the same definitions also produce the
- * findings, so `severity` affects behavior, not just the report.
- *
- *  - `id`:          the check's name, e.g. "issuance-exists". It must be unique
- *                   within one transaction type's list; the same id can appear
- *                   under different transaction types. Copied onto each finding.
- *  - `severity`:    "error" or "warning". Copied onto every finding the check
- *                   produces. Only errors block a transaction, so changing a
- *                   check to "warning" lets transactions that fail it through.
- *  - `description`: the sentence the report shows for this check. Required.
- *  - `implemented`: left out for a check the validator performs; `false` for a
- *                   known gap, a check that's needed but not written yet. It
- *                   can only be `false`, never `true`, so it only ever marks a
- *                   gap. `defineValidator` sets it for you: a check with no
- *                   `run` is a gap.
+ * Describe what the coverage report should show for each check. The ID is unique within a validator.
+ * The same definition supplies the message severity used during validation. A check without run
+ * appears with implemented set to false.
  */
 export type Check = {
   id: string;

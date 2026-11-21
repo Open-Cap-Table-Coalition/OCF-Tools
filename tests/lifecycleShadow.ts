@@ -65,7 +65,15 @@ const checksRunOn = (type: string, descriptor: Descriptor): string[] => {
 };
 
 /** Run a check on a transaction read from the test package. */
-type ShadowedCheck = { run: (context: any, data: any) => string[] };
+type ShadowedCheck = { run: (context: any, data: any, read: any) => string[] };
+
+/**
+ * Compare the rules on the recorded transactions before checking whether earlier failures make their
+ * inputs unreliable.
+ */
+const noReads = () => {
+  throw new Error("A shadowed check read the node map.");
+};
 
 /** Look up the transaction history check for each family that implements it. */
 const NO_OTHER_TRANSACTIONS_OF: Partial<Record<CollectionKey, ShadowedCheck>> = {
@@ -74,13 +82,16 @@ const NO_OTHER_TRANSACTIONS_OF: Partial<Record<CollectionKey, ShadowedCheck>> = 
   equityCompensation: equityCompensationNoOtherTransactions,
 };
 
-/** Run the two checks separately so a failure in another check cannot affect the comparison. */
+/**
+ * Run each rule directly to compare lifecycle decisions. This comparison includes transactions that
+ * failed in the validator.
+ */
 const checksReportedOn = (context: OcfMachineContext, transaction: Transaction, descriptor: Descriptor, runs: string[]): string[] =>
   runs.filter((id) => {
     const check: ShadowedCheck | undefined =
       id === NO_EARLIER_REMOVAL ? noEarlierRemoval : NO_OTHER_TRANSACTIONS_OF[lifecycleFamilies(descriptor)[0]];
     if (check === undefined) throw new Error(`No ${id} to run for ${transaction.object_type}.`);
-    return check.run(context, transaction).length > 0;
+    return check.run(context, transaction, noReads).length > 0;
   });
 
 /**

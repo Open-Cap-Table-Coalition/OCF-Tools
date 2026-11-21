@@ -39,3 +39,15 @@ type FieldWrite<N, P extends keyof N> =
 /** Return a copy with one updated field and the same identity. */
 export const withNodeField = <N, P extends FieldKey<N>>(node: N, field: P, value: NoInfer<FieldWrite<N, P>>): N =>
   ({ ...node, [field]: value });
+
+/** Use the record's kind, family and field name to identify a value. */
+export type FieldAddress<N extends { kind: string; id: unknown }> = N extends unknown ? {
+  [P in FieldKey<N>]: Pick<N, "kind" | "id"> &
+    (N extends { family: unknown } ? Pick<N, "family"> : {}) & { readonly field: P };
+}[FieldKey<N>] : never;
+
+/** Determine the value type from the requested field. */
+export type ReferenceValue<Nodes extends { kind: string; id: unknown }, Ref> =
+  Nodes extends unknown ? Ref extends FieldAddress<Nodes>
+    ? Ref["field"] extends FieldKey<Nodes> ? FieldValue<Nodes, Ref["field"]> : never
+    : never : never;

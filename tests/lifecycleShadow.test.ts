@@ -19,19 +19,20 @@ const fixture = (...segments: string[]) => path.resolve(__dirname, "..", ...segm
 // Package fixtures
 
 describe("the packages on disk", () => {
-  // testPackage covers a grant and vesting. Acme covers 39 transactions including stock removals.
-  // Its class split has no individual security to compare.
+  // testPackage and Acme exercise valid security histories. Acme's class split names no security. In
+  // markedSecurities, a missing stakeholder and missing resulting stock cause validation errors even
+  // though the transactions follow allowed lifecycle transitions.
   it.each([
     { name: "testing_scripts/testPackage", dir: fixture("testing_scripts", "testPackage"), transactions: 2, rows: 2 },
     { name: "sample_ocf_folders/acme_holdings_limited", dir: fixture("sample_ocf_folders", "acme_holdings_limited"), transactions: 39, rows: 38 },
+    { name: "testing_scripts/markedSecurities", dir: fixture("testing_scripts", "markedSecurities"), transactions: 6, rows: 6 },
   ])("$name: the chart and the checks agree on every transaction", ({ dir, transactions, rows: expected }) => {
     const context = ocfValidator(dir);
     const rows = shadowRows(context.ocfPackageContent.transactions as any);
 
     expect(context.ocfPackageContent.transactions).toHaveLength(transactions);
     expect(rows).toHaveLength(expected);
-    // Both checks pass and the chart accepts each transaction.
-    expect(context.result).toMatch(/appears valid\.$/);
+    // The chart and both checks accept these transactions.
     expect(rows.every((row) => row.allowed && row.reported.length === 0)).toBe(true);
     expect(disagreements(rows)).toEqual([]);
   });

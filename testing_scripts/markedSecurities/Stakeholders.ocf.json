@@ -1,0 +1,17 @@
+{
+  "file_type": "OCF_STAKEHOLDERS_FILE",
+  "items": [
+    {
+      "id": "ada",
+      "object_type": "STAKEHOLDER",
+      "name": { "legal_name": "Ada Investor" },
+      "stakeholder_type": "INDIVIDUAL"
+    },
+    {
+      "id": "grace",
+      "object_type": "STAKEHOLDER",
+      "name": { "legal_name": "Grace Lender" },
+      "stakeholder_type": "INDIVIDUAL"
+    }
+  ]
+}
