@@ -2,10 +2,9 @@ import { getNextSnapshot, setup } from "xstate";
 import type { LifecycleWord } from "../types/validator";
 import { lifecycleFamilies, TX_DESCRIPTORS, type CollectionKey, type Descriptor } from "./ocfMachine";
 
-// Build one chart per security family from the transaction table (#233). For example, exercise
-// removes a warrant but leaves an equity grant outstanding. The caller stores each security's state
-// so it can update several securities together. Tests compare chart decisions with the existing
-// removal and transaction checks.
+// Build one chart per family from the descriptors. Exercise removes a warrant but leaves an equity
+// grant outstanding. The caller keeps each security's state. Tests compare transitions with the
+// existing checks. Snapshots use the chart's tag to decide which securities to show.
 
 /** The security's state between transactions. */
 export type LifecycleState = "notIssued" | "outstanding" | "removed";

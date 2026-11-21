@@ -4,10 +4,8 @@
  */
 import type {
   OCFWarrantIssuance,
-  OCFConvertibleIssuance,
 } from "@opencaptablecoalition/ocf-types";
 import {
-  appendToCollection,
   TX_DESCRIPTORS,
   type VESTING_FAMILIES,
   type TxKey,
@@ -90,14 +88,6 @@ type _Exhaustive = Expect<Equal<keyof typeof TX_DESCRIPTORS, TxKey>>;
 const _keyOmitted: Record<TxKey, Descriptor> = {
   TX_VESTING_START: { effect: "passthrough", lifecycle: "stays", families: [] },
 };
-
-// --- Wrong-family payload is a compile error -------------------------------
-
-// The matching family compiles…
-appendToCollection("warrantIssuances", [] as OCFWarrantIssuance[], {} as OCFWarrantIssuance);
-// …but a warrant payload cannot be appended onto the convertible collection.
-// @ts-expect-error — OCFWarrantIssuance is not assignable to the convertible family.
-appendToCollection("convertibleIssuances", [] as OCFConvertibleIssuance[], {} as OCFWarrantIssuance);
 
 // --- Wrong-family legacy append descriptor is a compile error ---------------
 // (Deleted with the legacy convention when the last family migrates.)

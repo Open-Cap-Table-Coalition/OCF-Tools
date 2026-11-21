@@ -1,7 +1,8 @@
 import type { OCFStockIssuance } from "@opencaptablecoalition/ocf-types";
 import type { OcfTransaction, TransactionFor } from "../../types/ocf-input";
 import type { DeepReadonly, OcfMachineContext } from "../../types/validator";
-import type { CollectionKey, TxKey } from "../ocfMachine";
+import { outstandingSecurity } from "../nodes";
+import type { CollectionElement, CollectionKey, TxKey } from "../ocfMachine";
 import { text, type CheckObject } from "./checkKit";
 
 /**
@@ -95,10 +96,10 @@ type Family = {
   [C in CollectionKey]: {
     name: string;
     collection: C;
-    issuance: OcfMachineContext[C][number]["object_type"];
+    issuance: CollectionElement[C]["object_type"];
     acceptance: Extract<TxKey, `TX_${string}_ACCEPTANCE`>;
-    vests: HasKey<OcfMachineContext[C][number], "vesting_terms_id" | "vesting_template_id">;
-    returnsToPool: HasKey<OcfMachineContext[C][number], "stock_plan_id">;
+    vests: HasKey<CollectionElement[C], "vesting_terms_id" | "vesting_template_id">;
+    returnsToPool: HasKey<CollectionElement[C], "stock_plan_id">;
     leavesOutstanding?: readonly TxKey[];
   };
 }[CollectionKey];
@@ -148,9 +149,8 @@ export function familyChecksFor({
   leavesOutstanding = [],
 }: Family) {
   /**
-   * Look for an outstanding issuance in this family. If it is missing, use the package history to
-   * distinguish a missing issuance, one dated later and one already removed. Prefer an issuance on
-   * or before the transaction date when reporting the reason.
+   * Look up an outstanding security by family and ID. If it is missing, use the package history to
+   * explain whether it was never issued, issued later or already removed.
    */
   const issuanceExists = {
     id: "issuance-exists",
@@ -169,13 +169,7 @@ export function familyChecksFor({
         return messages;
       }
 
-      let issuanceExists = false;
-      context[collection].forEach((ele) => {
-        if (ele.security_id === data.security_id) {
-          issuanceExists = true;
-        }
-      });
-      if (issuanceExists) return messages;
+      if (outstandingSecurity(context.nodes, collection, data.security_id) !== undefined) return messages;
 
       // Check the transaction type before accessing fields specific to an issuance.
       const { transactions } = context.ocfPackageContent;
@@ -405,13 +399,9 @@ export function resultingChecksFor({
     run: (context, data) => {
       const messages: string[] = [];
 
-      // The reference stakeholder comes from the live issuance this transaction
-      // acts on — the same record issuance-exists matches. With no live record,
-      // issuance-exists already carries the failure and there is no reference
-      // to compare against, so this check stays silent.
-      const reference = context[collection].find(
-        (ele) => ele.security_id === data.security_id,
-      );
+      // Compare the stakeholder with the outstanding issuance. If the issuance is missing,
+      // issuance-exists already explains the problem.
+      const reference = outstandingSecurity(context.nodes, collection, data.security_id)?.issuance.value;
       if (reference === undefined) return messages;
 
       // As with the date check, only resulting ids backed by exactly one stock

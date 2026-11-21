@@ -12,10 +12,10 @@
     9. Only issuance, acceptance, this cancellation, and a subsequent return of plan-issued shares may reference the security.
 */
 
-import {OcfMachineContext} from '../../ocfMachine';
+import {LegacyContext} from '../../ocfMachine';
 
 const valid_tx_stock_cancellation = (
-  context: OcfMachineContext,
+  context: LegacyContext,
   event: any,
   isGuard: Boolean = false
 ) => {

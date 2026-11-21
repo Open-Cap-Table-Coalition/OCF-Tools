@@ -10,19 +10,40 @@ import * as path from "path";
 import { expect } from "vitest";
 import { createActor } from "xstate";
 import { ocfValidator } from "../ocf_validator";
-import { earliestRemovals, ocfMachine, TX_DESCRIPTORS, type OcfMachineEvent } from "../ocf_validator/ocfMachine";
+import { applyTransaction, emptyNodes, outstanding, type NodeMap } from "../ocf_validator/nodes";
+import { earliestRemovals, ocfMachine, TX_DESCRIPTORS, type CollectionKey, type Descriptor, type OcfMachineEvent } from "../ocf_validator/ocfMachine";
 import type { Finding } from "../types/finding";
 import { expectShadowExplained } from "./lifecycleShadow";
 import type { Check, GradedValidator, OcfMachineContext } from "../types/validator";
 
+/** Security families use the original collection names. */
+const FAMILIES = ["stockIssuances", "convertibleIssuances", "warrantIssuances", "equityCompensation"] as const satisfies readonly CollectionKey[];
+
 /**
- * A full, mostly-empty machine context; `overrides` replace top-level fields.
- * Unless overridden, `removals` indexes the package's transactions, as START
- * builds it, so a seeded actor sees the same removals a real run would.
+ * Tests can supply starting issuances by family. baseContext stores them in the same form as the
+ * validator.
  */
-export const baseContext = (overrides: Partial<OcfMachineContext> = {}): OcfMachineContext => {
+export type ContextSeed = Partial<OcfMachineContext> & { [C in CollectionKey]?: readonly unknown[] };
+
+/** The reducer needs only a collection and an issuance effect to seed this family. */
+const issues = (collection: CollectionKey) => ({ effect: "append", collection }) as unknown as Descriptor;
+
+/** Add the starting issuances using the production reducer. */
+const seededNodes = (seed: ContextSeed): NodeMap =>
+  FAMILIES.reduce(
+    (nodes, family) =>
+      (seed[family] ?? []).reduce<NodeMap>((map, issuance) => applyTransaction(map, issues(family), issuance as any), nodes),
+    seed.nodes ?? emptyNodes(),
+  );
+
+/**
+ * Start with an empty context, apply test overrides and index removals from the package as the START
+ * event does.
+ */
+export const baseContext = (overrides: ContextSeed = {}): OcfMachineContext => {
+  const { stockIssuances, convertibleIssuances, warrantIssuances, equityCompensation, ...fields } = overrides;
   const ocfPackageContent =
-    overrides.ocfPackageContent ??
+    fields.ocfPackageContent ??
     ({
       manifest: { issuer: { legal_name: "Test Co" } },
       stakeholders: [],
@@ -34,10 +55,6 @@ export const baseContext = (overrides: Partial<OcfMachineContext> = {}): OcfMach
       valuations: [],
     } as OcfMachineContext["ocfPackageContent"]);
   return {
-    stockIssuances: [],
-    convertibleIssuances: [],
-    warrantIssuances: [],
-    equityCompensation: [],
     ocfPackageContent,
     removals: earliestRemovals(ocfPackageContent.transactions),
     report: [],
@@ -45,9 +62,14 @@ export const baseContext = (overrides: Partial<OcfMachineContext> = {}): OcfMach
     lastErrorFindings: [],
     snapshots: [],
     result: "Incomplete",
-    ...overrides,
+    ...fields,
+    nodes: seededNodes(overrides),
   };
 };
+
+/** Read the family's outstanding issuances in issuance order. */
+export const collection = <C extends CollectionKey>(context: OcfMachineContext, family: C) =>
+  outstanding(context.nodes, family);
 
 /**
  * Write a temporary OCF package and call the public validator so tests use the real reader and
@@ -88,10 +110,10 @@ export const validatePackage = (
   }
 };
 
-/** Start an actor seeded into `capTable` with the given context. */
-export const startSeeded = (context: OcfMachineContext) =>
+/** Start the machine in capTable with the supplied records and issuances. */
+export const startSeeded = (context: OcfMachineContext & ContextSeed) =>
   createActor(ocfMachine, {
-    snapshot: ocfMachine.resolveState({ value: "capTable", context }),
+    snapshot: ocfMachine.resolveState({ value: "capTable", context: baseContext(context) }),
   }).start();
 
 /** Cast a hand-built event to the typed event union (test-only boundary). */
@@ -100,7 +122,7 @@ export const ev = (type: string, data: Record<string, unknown> = {}): OcfMachine
 
 /** A context whose package `transactions` and `stakeholders` lists are the ones given. */
 export const contextWith = (
-  overrides: Partial<OcfMachineContext> & { transactions?: any[]; stakeholders?: { id: string }[] } = {},
+  overrides: ContextSeed & { transactions?: any[]; stakeholders?: { id: string }[] } = {},
 ): OcfMachineContext => {
   const { transactions = [], stakeholders = [], ...rest } = overrides;
   return baseContext({

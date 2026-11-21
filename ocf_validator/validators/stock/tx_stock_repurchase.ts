@@ -11,7 +11,7 @@
     8. Check repurchase amount is greater than 0 and less than or equal to the incoming security quantity.
     9. Check that the security_id of the stock issuance referred to in the security_id variable must not be the security_id related to any other transactions with the exception of a stock acceptance transaction.
 */
-import {OcfMachineContext} from '../../ocfMachine';
+import {LegacyContext} from '../../ocfMachine';
 
 /*
 CURRENT CHECKS:
@@ -26,7 +26,7 @@ The security_id of the stock issuance referred to in the security_id variable mu
 The stock_class_id of the stock issuance in the balance_security_id variable must be the same as the stock_class_id of the stock issuance reffered to in the security_id variable
 */
 
-const valid_tx_stock_repurchase = (context: OcfMachineContext, event: any, isGuard: Boolean) => {
+const valid_tx_stock_repurchase = (context: LegacyContext, event: any, isGuard: Boolean) => {
   let validity = false;
   let report: any = {transaction_type: "TX_STOCK_REPURCHASE", transaction_id: event.data.id, transaction_date: event.data.date};
 

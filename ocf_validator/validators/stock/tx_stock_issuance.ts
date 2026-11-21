@@ -1,4 +1,4 @@
-import { OcfMachineContext } from "../../ocfMachine";
+import { LegacyContext } from "../../ocfMachine";
 import valid_tx_stock_reissuance from "./tx_stock_reissuance";
 
 /*
@@ -14,7 +14,7 @@ The quantity of the Stock issuance is equal to or less than the current number o
 
 // Refrence for tx_stock_issuance transaction: https://open-cap-table-coalition.github.io/Open-Cap-Format-OCF/schema_markdown/schema/objects/transactions/issuance/StockIssuance/
 
-const valid_tx_stock_issuance = (context: OcfMachineContext, event: any, isGuard: Boolean = false) => {
+const valid_tx_stock_issuance = (context: LegacyContext, event: any, isGuard: Boolean = false) => {
   let validity = false;
   const { stakeholders, stockClasses, stockLegends } = context.ocfPackageContent;
   let report: any = {transaction_type: "TX_STOCK_ISSUANCE", transaction_id: event.data.id, transaction_date: event.data.date};

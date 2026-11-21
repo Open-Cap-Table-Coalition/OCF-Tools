@@ -16,6 +16,7 @@ import {
   emittedCheckIds,
   expectFindingShape,
   type FailingScenarios,
+  collection,
 } from "./helpers";
 
 const MIGRATED_KEYS = [
@@ -76,8 +77,8 @@ describe("equity compensation issuance validity", () => {
 
     const snapshot = actor.getSnapshot();
     expect(snapshot.value).toBe("capTable");
-    expect(snapshot.context.equityCompensation).toHaveLength(1);
-    expect(snapshot.context.equityCompensation[0]).toMatchObject({ id: "eci1", security_id: "sec1" });
+    expect(collection(snapshot.context, "equityCompensation")).toHaveLength(1);
+    expect(collection(snapshot.context, "equityCompensation")[0]).toMatchObject({ id: "eci1", security_id: "sec1" });
     expect(snapshot.context.findings).toEqual([]);
   });
 
@@ -89,7 +90,7 @@ describe("equity compensation issuance validity", () => {
     expect(snapshot.value).toBe("validationError");
     expect(snapshot.context.findings).toHaveLength(1);
     expect(snapshot.context.findings[0].check).toBe("stakeholder-exists");
-    expect(snapshot.context.equityCompensation).toEqual([]);
+    expect(collection(snapshot.context, "equityCompensation")).toEqual([]);
     expect(snapshot.context.result).toContain("stakeholder-exists");
   });
 });
@@ -121,14 +122,14 @@ describe("equity compensation acceptance validity", () => {
       equityCompensation: [issuanceRecord("sec1")] as any,
       transactions: [issuanceRecord("sec1")],
     });
-    const before = structuredClone(seeded.equityCompensation);
+    const before = structuredClone(collection(seeded, "equityCompensation"));
 
     const actor = startSeeded(seeded);
     actor.send(ev("TX_EQUITY_COMPENSATION_ACCEPTANCE", acceptance()));
 
     const snapshot = actor.getSnapshot();
     expect(snapshot.value).toBe("capTable");
-    expect(snapshot.context.equityCompensation).toEqual(before);
+    expect(collection(snapshot.context, "equityCompensation")).toEqual(before);
     expect(snapshot.context.findings).toEqual([]);
   });
 
@@ -190,8 +191,8 @@ describe("equity compensation retraction validity", () => {
 
     const snapshot = actor.getSnapshot();
     expect(snapshot.value).toBe("capTable");
-    expect(snapshot.context.equityCompensation.some((e: any) => e.security_id === "sec1")).toBe(false);
-    expect(snapshot.context.equityCompensation.some((e: any) => e.security_id === "sec2")).toBe(true);
+    expect(collection(snapshot.context, "equityCompensation").some((e: any) => e.security_id === "sec1")).toBe(false);
+    expect(collection(snapshot.context, "equityCompensation").some((e: any) => e.security_id === "sec2")).toBe(true);
     expect(snapshot.context.findings).toEqual([]);
   });
 
@@ -264,8 +265,8 @@ describe("equity compensation cancellation validity", () => {
 
     const snapshot = actor.getSnapshot();
     expect(snapshot.value).toBe("capTable");
-    expect(snapshot.context.equityCompensation.some((e: any) => e.security_id === "sec1")).toBe(false);
-    expect(snapshot.context.equityCompensation.some((e: any) => e.security_id === "sec2")).toBe(true);
+    expect(collection(snapshot.context, "equityCompensation").some((e: any) => e.security_id === "sec1")).toBe(false);
+    expect(collection(snapshot.context, "equityCompensation").some((e: any) => e.security_id === "sec2")).toBe(true);
   });
 
   it("emits one no-other-transactions finding per past offender, exempting acceptances and itself", () => {
@@ -361,7 +362,7 @@ describe("equity compensation cancellation validity", () => {
     const snapshot = actor.getSnapshot();
     expect(snapshot.value).toBe("capTable");
     expect(snapshot.context.findings).toEqual([]);
-    expect(snapshot.context.equityCompensation).toEqual([]);
+    expect(collection(snapshot.context, "equityCompensation")).toEqual([]);
   });
 
   it("clears a cancellation of a v2 grant after a v2 vesting event, removing it and recording no findings", () => {
@@ -378,7 +379,7 @@ describe("equity compensation cancellation validity", () => {
     const snapshot = actor.getSnapshot();
     expect(snapshot.value).toBe("capTable");
     expect(snapshot.context.findings).toEqual([]);
-    expect(snapshot.context.equityCompensation).toEqual([]);
+    expect(collection(snapshot.context, "equityCompensation")).toEqual([]);
   });
 });
 
@@ -414,8 +415,8 @@ describe("equity compensation transfer validity", () => {
 
     const snapshot = actor.getSnapshot();
     expect(snapshot.value).toBe("capTable");
-    expect(snapshot.context.equityCompensation.some((e: any) => e.security_id === "sec1")).toBe(false);
-    expect(snapshot.context.equityCompensation.some((e: any) => e.security_id === "sec2")).toBe(true);
+    expect(collection(snapshot.context, "equityCompensation").some((e: any) => e.security_id === "sec1")).toBe(false);
+    expect(collection(snapshot.context, "equityCompensation").some((e: any) => e.security_id === "sec2")).toBe(true);
   });
 
   it("flags a not-outstanding issuance with an error naming the security_id", () => {
@@ -469,14 +470,14 @@ describe("equity compensation release validity", () => {
       equityCompensation: [issuanceRecord("sec1")] as any,
       transactions: [issuanceRecord("sec1")],
     });
-    const before = structuredClone(seeded.equityCompensation);
+    const before = structuredClone(collection(seeded, "equityCompensation"));
 
     const actor = startSeeded(seeded);
     actor.send(ev("TX_EQUITY_COMPENSATION_RELEASE", release()));
 
     const snapshot = actor.getSnapshot();
     expect(snapshot.value).toBe("capTable");
-    expect(snapshot.context.equityCompensation).toEqual(before);
+    expect(collection(snapshot.context, "equityCompensation")).toEqual(before);
     expect(snapshot.context.findings).toEqual([]);
   });
 
@@ -541,14 +542,14 @@ describe("equity compensation repricing validity", () => {
       equityCompensation: [issuanceRecord("sec1")] as any,
       transactions: [issuanceRecord("sec1")],
     });
-    const before = structuredClone(seeded.equityCompensation);
+    const before = structuredClone(collection(seeded, "equityCompensation"));
 
     const actor = startSeeded(seeded);
     actor.send(ev("TX_EQUITY_COMPENSATION_REPRICING", repricing()));
 
     const snapshot = actor.getSnapshot();
     expect(snapshot.value).toBe("capTable");
-    expect(snapshot.context.equityCompensation).toEqual(before);
+    expect(collection(snapshot.context, "equityCompensation")).toEqual(before);
     expect(snapshot.context.findings).toEqual([]);
   });
 
@@ -614,7 +615,7 @@ describe("equity compensation exercise validity", () => {
       equityCompensation: [issuanceRecord("sec1")] as any,
       transactions: [issuanceRecord("sec1")],
     });
-    const before = structuredClone(seeded.equityCompensation);
+    const before = structuredClone(collection(seeded, "equityCompensation"));
 
     const actor = startSeeded(seeded);
     actor.send(ev("TX_EQUITY_COMPENSATION_EXERCISE", exercise()));
@@ -623,7 +624,7 @@ describe("equity compensation exercise validity", () => {
     expect(snapshot.value).toBe("capTable");
     // Unlike warrant exercise, which removes the exercised security, equity
     // compensation exercise removes nothing — the issuance survives.
-    expect(snapshot.context.equityCompensation).toEqual(before);
+    expect(collection(snapshot.context, "equityCompensation")).toEqual(before);
     expect(snapshot.context.findings).toEqual([]);
   });
 
@@ -737,10 +738,10 @@ describe("issuance-exists reports why the referenced issuance is unavailable", (
     const olderNameIssuance = { id: "psi-1", object_type: "TX_PLAN_SECURITY_ISSUANCE", security_id: "rsu-1", stakeholder_id: "sh1", quantity: "1000", date: "2020-01-01" };
     const release = { id: "rel-1", object_type: "TX_EQUITY_COMPENSATION_RELEASE", security_id: "rsu-1", quantity: "400", resulting_security_ids: [], date: "2021-01-01" };
 
-    const { result, findings, equityCompensation } = validatePackage([olderNameIssuance, release], [{ id: "sh1" }]);
-    expect(result).toBe("The validation of the OCF package for Test Co is complete and the package appears valid.");
-    expect(findings).toEqual([]);
-    expect(equityCompensation).toEqual([olderNameIssuance]);
+    const context = validatePackage([olderNameIssuance, release], [{ id: "sh1" }]);
+    expect(context.result).toBe("The validation of the OCF package for Test Co is complete and the package appears valid.");
+    expect(context.findings).toEqual([]);
+    expect(collection(context, "equityCompensation")).toEqual([olderNameIssuance]);
   });
 });
 
@@ -829,7 +830,7 @@ describe("a conflicting transaction pair flags the later transaction, not the ea
     expect(afterRetraction.value).toBe("capTable");
     expect(afterRetraction.context.findings).toEqual([]);
     // The retraction removed the issuance from the live collection.
-    expect(afterRetraction.context.equityCompensation.some((e: any) => e.security_id === "sec1")).toBe(false);
+    expect(collection(afterRetraction.context, "equityCompensation").some((e: any) => e.security_id === "sec1")).toBe(false);
 
     actor.send(ev("TX_EQUITY_COMPENSATION_ACCEPTANCE", acceptance));
     const { context, value } = actor.getSnapshot();

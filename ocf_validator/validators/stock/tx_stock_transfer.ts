@@ -1,4 +1,4 @@
-import {OcfMachineContext} from '../../ocfMachine';
+import {LegacyContext} from '../../ocfMachine';
 // Reference for tx_stock_transfer transaction: https://open-cap-table-coalition.github.io/Open-Cap-Format-OCF/schema_markdown/schema/objects/transactions/transfer/StockTransfer/
 
 /*
@@ -16,7 +16,7 @@ import {OcfMachineContext} from '../../ocfMachine';
     1. The security_id of the stock issuance referred to in the security_id variable must not be the security_id related to any other transactions with the exception of a stock acceptance transaction.
 */
 
-const valid_tx_stock_transfer = (context: OcfMachineContext, event: any, isGuard: Boolean) => {
+const valid_tx_stock_transfer = (context: LegacyContext, event: any, isGuard: Boolean) => {
   let validity = false;
   const {transactions} = context.ocfPackageContent;
   let report: any = {transaction_type: "TX_STOCK_TRANSFER", transaction_id: event.data.id, transaction_date: event.data.date};
