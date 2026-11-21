@@ -507,6 +507,15 @@ describe("stock issued from a plan", () => {
     expect(context.snapshots.map((s) => s.stockPlans[0].drawn)).toEqual(context.snapshots.map(() => "100"));
   });
 
+  it("keeps an independent stock draw when cancellation names it outside the balance field", () => {
+    const another = { ...stock, id: "second", security_id: "other", date: "2022-03-01" };
+    const context = runStock([stock, another, {
+      id: "cancel", object_type: "TX_STOCK_CANCELLATION", security_id: stock.security_id, quantity: stock.quantity,
+      date: another.date, resulting_security_ids: [another.security_id],
+    }]);
+    expect(context.snapshots.at(-1)?.stockPlans[0].drawn).toBe("100");
+  });
+
   it("withholds a return from stock that is outstanding, planless, or unreliably removed", () => {
     const remove = { id: "cancel", object_type: "TX_STOCK_CANCELLATION", security_id: stock.security_id, date: "2022-02-02" };
     const bad = subject(remove.object_type, remove.id);

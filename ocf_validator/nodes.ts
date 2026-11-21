@@ -364,13 +364,31 @@ function carried(nodes: NodeMap, transaction: Applied, by: Stamp): NodeMap {
   }, nodes);
 }
 
+/** Only the output fields defined for this transaction identify replacement stock. */
+function replacementStockIds(transaction: Applied): unknown[] {
+  const results = Array.isArray(transaction.resulting_security_ids) ? transaction.resulting_security_ids : [];
+  switch (transaction.object_type) {
+    case "TX_STOCK_CONSOLIDATION":
+      return [transaction.resulting_security_id];
+    case "TX_STOCK_CANCELLATION":
+    case "TX_STOCK_REPURCHASE":
+      return [transaction.balance_security_id];
+    case "TX_STOCK_TRANSFER":
+    case "TX_STOCK_CONVERSION":
+      return [transaction.balance_security_id, ...results];
+    default:
+      return results;
+  }
+}
+
 /**
  * A balance or resulting stock issuance carries the charge of its source. Undo a separate draw
  * when the stock was issued first on the same date. Remember the source plans for stock issued
  * later, such as a release that settles on a later day.
  */
 function carriedStock(nodes: NodeMap, transaction: Applied, by: Stamp): NodeMap {
-  const sources = Array.isArray(transaction.security_ids) ? transaction.security_ids : [transaction.security_id];
+  const sources = transaction.object_type === "TX_STOCK_CONSOLIDATION" && Array.isArray(transaction.security_ids)
+    ? transaction.security_ids : [transaction.security_id];
   const plans = new Set<string>();
   for (const id of sources) {
     const issuance = nodes.security.get(id)?.issuance.value;
@@ -378,8 +396,7 @@ function carriedStock(nodes: NodeMap, transaction: Applied, by: Stamp): NodeMap 
   }
   if (plans.size === 0 && by.ok) return nodes;
 
-  const results = Array.isArray(transaction.resulting_security_ids) ? transaction.resulting_security_ids : [];
-  const ids = new Set([transaction.balance_security_id, transaction.resulting_security_id, ...results].filter(names));
+  const ids = new Set(replacementStockIds(transaction).filter(names));
   for (const id of ids) {
     if (sources.includes(id)) continue;
     const held = nodes.security.get(id);
