@@ -14,6 +14,8 @@
 
 import {OcfMachineContext} from '../../ocfMachine';
 
+export const hasStockPlan = (id: unknown): boolean => typeof id === "string" && id.length > 0;
+
 const valid_tx_stock_cancellation = (
   context: OcfMachineContext,
   event: any,
@@ -30,7 +32,7 @@ const valid_tx_stock_cancellation = (
   context.stockIssuances.forEach((ele) => {
     if (ele.security_id === event.data.security_id) {
       incoming_stockClass = ele.stock_class_id;
-      issuedFromPlan = typeof ele.stock_plan_id === 'string' && ele.stock_plan_id.length > 0;
+      issuedFromPlan = hasStockPlan(ele.stock_plan_id);
       incoming_stockIssuance_validity = true;
       report.incoming_stockIssuance_validity = true;
     }
