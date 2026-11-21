@@ -140,6 +140,19 @@ describe("where the chart and the checks disagree", () => {
     expect(disagreements(rows).map(explain)).toEqual(["removed earlier the same day"]);
   });
 
+  it("the chart refuses a cancellation of a grant that was never issued, which neither check is about", () => {
+    // The stock plan tests also cover cancellation of a missing grant.
+    const context = validatePackage(
+      [{ id: "can-1", object_type: "TX_EQUITY_COMPENSATION_CANCELLATION", security_id: "opt-missing", quantity: "40", date: "2021-01-01" }],
+      [{ id: "sh-1" }],
+    );
+    const rows = shadowRows(context.ocfPackageContent.transactions as any);
+
+    expect(disagreements(rows)).toMatchObject([{ id: "can-1", state: "notIssued", allowed: false, runs: ["no-other-transactions"], reported: [] }]);
+    expect(disagreements(rows).map(explain)).toEqual(["never issued"]);
+    expect(context.findings.map((finding) => [finding.subject.id, finding.check])).toEqual([["can-1", "issuance-exists"]]);
+  });
+
   // The index still misses consolidations.
   it("the chart refuses a vesting event on consolidated stock, which no-earlier-removal doesn't know was removed", () => {
     // Test the comparison directly. Stock classes and legends are required only by the full stock

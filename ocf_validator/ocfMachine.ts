@@ -9,7 +9,7 @@ import type {
 import type { OcfTransaction, TransactionFor } from "../types/ocf-input";
 import type { OcfPackageContent } from "../read_ocf_package";
 import type { Finding, Subject } from "../types/finding";
-import type { Check, GradedValidator, LifecycleWord, OcfMachineContext } from "../types/validator";
+import type { Check, GradedValidator, LifecycleWord, OcfMachineContext, PoolEffect } from "../types/validator";
 import validators from "./validators";
 import { TX_CONVERTIBLE_ISSUANCE } from "./validators/convertible/tx_convertible_issuance";
 import { TX_CONVERTIBLE_ACCEPTANCE } from "./validators/convertible/tx_convertible_acceptance";
@@ -25,7 +25,9 @@ import { TX_WARRANT_TRANSFER } from "./validators/warrant/tx_warrant_transfer";
 import { TX_WARRANT_EXERCISE } from "./validators/warrant/tx_warrant_exercise";
 import { text, toValidate } from "./validators/checkKit";
 import { noEarlierRemoval } from "./validators/checks";
-import { applyTransaction, emptyNodes, outstanding, type Verdict } from "./nodes";
+import { applyTransaction, emptyNodes, outstanding, withPlans, type Verdict } from "./nodes";
+import { TX_STOCK_PLAN_POOL_ADJUSTMENT } from "./validators/stock_plan/tx_stock_plan_pool_adjustment";
+import { TX_STOCK_PLAN_RETURN_TO_POOL } from "./validators/stock_plan/tx_stock_plan_return_to_pool";
 import { TX_EQUITY_COMPENSATION_ISSUANCE, TX_PLAN_SECURITY_ISSUANCE } from "./validators/equity_compensation/tx_equity_compensation_issuance";
 import { TX_EQUITY_COMPENSATION_ACCEPTANCE, TX_PLAN_SECURITY_ACCEPTANCE } from "./validators/equity_compensation/tx_equity_compensation_acceptance";
 import { TX_EQUITY_COMPENSATION_EXERCISE, TX_PLAN_SECURITY_EXERCISE } from "./validators/equity_compensation/tx_equity_compensation_exercise";
@@ -108,17 +110,24 @@ const legacyContext = (context: OcfMachineContext): LegacyContext => ({
 });
 
 /**
- * A descriptor specifies which validator runs, which families it handles and how a valid transaction
- * changes a security. The reducer uses its effect. Charts use its lifecycle field.
+ * A descriptor selects the validator, applicable security families, lifecycle change and optional
+ * pool operation. Issuances and removals name their collection. Other transactions list their
+ * families. A return to pool requires a removed security.
  *
- * Each validator that returns findings declares its checks. Error findings withhold writes and
- * warnings allow them. Legacy validators still use their guard and report. The types tie an issuance
- * payload to its family.
+ * The reducer applies the security and plan changes. Validators that return findings declare the
+ * checks used by both the runner and coverage report. Legacy stock validators still use their guard
+ * and report. The types require an issuance payload to match its collection.
  */
-type Descriptor =
+type Descriptor = (
   | { effect: "passthrough"; lifecycle: LifecycleWord; families: readonly CollectionKey[] }
   | { effect: "none"; lifecycle: "stays"; families: readonly CollectionKey[]; legacyValidate: Validator<unknown> }
-  | { effect: "none"; lifecycle: "stays"; families: readonly CollectionKey[]; validate: GradedValidator<any>; checks: readonly Check[] }
+  | {
+      effect: "none";
+      lifecycle: "stays" | "after removal";
+      families: readonly CollectionKey[];
+      validate: GradedValidator<any>;
+      checks: readonly Check[];
+    }
   | { effect: "remove"; lifecycle: "removes"; legacyValidate: Validator<unknown>; collection: CollectionKey }
   | { effect: "remove"; lifecycle: "removes"; validate: GradedValidator<any>; collection: CollectionKey; checks: readonly Check[] }
   | {
@@ -137,7 +146,8 @@ type Descriptor =
         validate: GradedValidator<CollectionElement[C]>;
         checks: readonly Check[];
       };
-    }[CollectionKey];
+    }[CollectionKey]
+) & { pool?: PoolEffect };
 
 /** A non-passthrough descriptor — the shape the dispatch helpers consume. */
 export type ActiveDescriptor = Exclude<Descriptor, { effect: "passthrough" }>;
@@ -178,7 +188,7 @@ export const TX_DESCRIPTORS = {
   // Reuse the current equity compensation descriptors for all seven older transaction names.
 
   // --- append: issuance appended to its family collection -----------------
-  TX_STOCK_ISSUANCE: { effect: "append", lifecycle: "issue", collection: "stockIssuances", legacyValidate: validators.valid_tx_stock_issuance },
+  TX_STOCK_ISSUANCE: { pool: "draws", effect: "append", lifecycle: "issue", collection: "stockIssuances", legacyValidate: validators.valid_tx_stock_issuance },
   TX_CONVERTIBLE_ISSUANCE,
   TX_WARRANT_ISSUANCE,
   TX_EQUITY_COMPENSATION_ISSUANCE,
@@ -200,14 +210,18 @@ export const TX_DESCRIPTORS = {
   TX_PLAN_SECURITY_ACCEPTANCE,
   TX_PLAN_SECURITY_EXERCISE,
   TX_PLAN_SECURITY_RELEASE,
+  // A return credits a plan after the security's removal. An adjustment sets the plan's reserve and
+  // needs no security.
+  TX_STOCK_PLAN_RETURN_TO_POOL,
+  TX_STOCK_PLAN_POOL_ADJUSTMENT,
 
   // --- remove: filter the family collection by security_id ---------------
   TX_STOCK_RETRACTION: { effect: "remove", lifecycle: "removes", collection: "stockIssuances", legacyValidate: validators.valid_tx_stock_retraction },
-  TX_STOCK_CANCELLATION: { effect: "remove", lifecycle: "removes", collection: "stockIssuances", legacyValidate: validators.valid_tx_stock_cancellation },
-  TX_STOCK_CONVERSION: { effect: "remove", lifecycle: "removes", collection: "stockIssuances", legacyValidate: validators.valid_tx_stock_conversion },
-  TX_STOCK_REISSUANCE: { effect: "remove", lifecycle: "removes", collection: "stockIssuances", legacyValidate: validators.valid_tx_stock_reissuance },
-  TX_STOCK_REPURCHASE: { effect: "remove", lifecycle: "removes", collection: "stockIssuances", legacyValidate: validators.valid_tx_stock_repurchase },
-  TX_STOCK_TRANSFER: { effect: "remove", lifecycle: "removes", collection: "stockIssuances", legacyValidate: validators.valid_tx_stock_transfer },
+  TX_STOCK_CANCELLATION: { pool: "carriesStock", effect: "remove", lifecycle: "removes", collection: "stockIssuances", legacyValidate: validators.valid_tx_stock_cancellation },
+  TX_STOCK_CONVERSION: { pool: "carriesStock", effect: "remove", lifecycle: "removes", collection: "stockIssuances", legacyValidate: validators.valid_tx_stock_conversion },
+  TX_STOCK_REISSUANCE: { pool: "carriesStock", effect: "remove", lifecycle: "removes", collection: "stockIssuances", legacyValidate: validators.valid_tx_stock_reissuance },
+  TX_STOCK_REPURCHASE: { pool: "carriesStock", effect: "remove", lifecycle: "removes", collection: "stockIssuances", legacyValidate: validators.valid_tx_stock_repurchase },
+  TX_STOCK_TRANSFER: { pool: "carriesStock", effect: "remove", lifecycle: "removes", collection: "stockIssuances", legacyValidate: validators.valid_tx_stock_transfer },
   TX_CONVERTIBLE_RETRACTION,
   TX_CONVERTIBLE_CANCELLATION,
   TX_CONVERTIBLE_TRANSFER,
@@ -223,22 +237,20 @@ export const TX_DESCRIPTORS = {
   TX_PLAN_SECURITY_CANCELLATION,
   TX_PLAN_SECURITY_TRANSFER,
 
-  // The machine checks these transactions for an earlier removal except when shares return to a
-  // pool. Vesting leaves stock, warrants and equity grants outstanding.
+  // The machine checks these transactions for earlier removal. Vesting leaves stock, warrants and
+  // equity grants outstanding. Successful passthrough transactions make no change to the outstanding
+  // securities.
   TX_VESTING_START: { effect: "passthrough", lifecycle: "stays", families: VESTING_FAMILIES },
   TX_VESTING_EVENT: { effect: "passthrough", lifecycle: "stays", families: VESTING_FAMILIES },
   TX_VESTING_ACCELERATION: { effect: "passthrough", lifecycle: "stays", families: VESTING_FAMILIES },
   // A consolidation replaces several stock securities with one.
-  TX_STOCK_CONSOLIDATION: { effect: "passthrough", lifecycle: "removes", families: ["stockIssuances"] },
-  // Plan-issued stock (including RSAs) and equity compensation can return shares to a pool.
-  TX_STOCK_PLAN_RETURN_TO_POOL: { effect: "passthrough", lifecycle: "after removal", families: ["stockIssuances", "equityCompensation"] },
-  // These transactions act on a class, plan or issuer. They leave individual securities outstanding
-  // and belong to no security chart.
+  TX_STOCK_CONSOLIDATION: { pool: "carriesStock", effect: "passthrough", lifecycle: "removes", families: ["stockIssuances"] },
+  // Class and issuer transactions name no individual security. They have no entry on a security
+  // family's chart.
   TX_STOCK_CLASS_SPLIT: { effect: "passthrough", lifecycle: "stays", families: [] },
   TX_STOCK_CLASS_AUTHORIZED_SHARES_ADJUSTMENT: { effect: "passthrough", lifecycle: "stays", families: [] },
   TX_STOCK_CLASS_CONVERSION_RATIO_ADJUSTMENT: { effect: "passthrough", lifecycle: "stays", families: [] },
   TX_ISSUER_AUTHORIZED_SHARES_ADJUSTMENT: { effect: "passthrough", lifecycle: "stays", families: [] },
-  TX_STOCK_PLAN_POOL_ADJUSTMENT: { effect: "passthrough", lifecycle: "stays", families: [] },
 } satisfies DescriptorTable;
 
 export type { Descriptor };
@@ -483,9 +495,9 @@ const notRemoved = {
 } satisfies ActiveDescriptor;
 
 /**
- * Use one transition for validators that return findings. Record failures and continue checking
- * later transactions. Passthrough transactions use the earlier-removal check, except returns to
- * pool. Legacy stock validation stops on failure, including an issuance after removal.
+ * Run validators that return findings once per transaction and continue after recording the result.
+ * Passthrough transactions use the earlier-removal check. Returns to pool have their own check for a
+ * removed security. Legacy stock validation still stops on failure.
  */
 function buildTransactionHandlers() {
   const legacyTransitions = [
@@ -508,10 +520,7 @@ function buildTransactionHandlers() {
 
   const handlerFor = (type: TxKey) => {
     const descriptor = TX_DESCRIPTORS[type];
-    if (descriptor.effect === "passthrough") {
-      return type === "TX_STOCK_PLAN_RETURN_TO_POOL" ? {} : byFindings;
-    }
-    if ("validate" in descriptor) return byFindings;
+    if (descriptor.effect === "passthrough" || "validate" in descriptor) return byFindings;
     if (descriptor.effect === "append") return [afterRemoval, ...legacyTransitions];
     return legacyTransitions;
   };
@@ -611,6 +620,8 @@ export const ocfMachine = setup({
           actions: assign({
             ocfPackageContent: ({ event }) => event.data,
             removals: ({ event }) => earliestRemovals(event.data.transactions),
+            // Start with the reserves in the stock plan files.
+            nodes: ({ context, event }) => withPlans(context.nodes, event.data.stockPlans),
           }),
         },
         RUN_EOD: {

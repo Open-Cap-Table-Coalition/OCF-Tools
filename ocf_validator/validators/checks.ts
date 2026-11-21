@@ -2,6 +2,7 @@ import type { OCFStockIssuance } from "@opencaptablecoalition/ocf-types";
 import type { OcfTransaction, TransactionFor } from "../../types/ocf-input";
 import type { DeepReadonly } from "../../types/validator";
 import { securityField } from "../nodes";
+import { isNegative, isNumeric } from "../numeric";
 import type { CollectionElement, CollectionKey, TxKey } from "../ocfMachine";
 import { text, type CheckContext, type CheckObject } from "./checkKit";
 
@@ -59,9 +60,26 @@ export const stakeholderExists = {
 } satisfies CheckObject<{ stakeholder_id: string }>;
 
 /**
- * Check for a removal attempt dated strictly before the transaction. Same-day vesting and removal
- * are allowed (#214). The index includes failed attempts, so check lifecycle reliability before
- * using it.
+ * Check for a nonnegative OCF quantity before changing a pool. The optional condition limits the
+ * check to transactions that affect a plan.
+ */
+export const countable = <F extends string>(field: F, applies: (data: any) => boolean = () => true) =>
+  ({
+    id: `${field.replace(/_/g, "-")}-countable`,
+    severity: "error",
+    description: `The transaction's ${field} is a number, and not negative, so it can be counted against the stock plan's pool.`,
+    run: (_context, data) => {
+      if (!applies(data)) return [];
+      const value = (data as Record<string, unknown>)[field];
+      if (!isNumeric(value)) return [text`The transaction's ${field} (${value}) is not a number written the way OCF writes one.`];
+      return isNegative(value) ? [text`The transaction's ${field} (${value}) is negative.`] : [];
+    },
+  }) satisfies CheckObject<Record<F, string>>;
+
+/**
+ * Check whether the removal index lists an earlier date. That index includes attempts, so an
+ * uncertain lifecycle blocks the check. Allow same-day removal and vesting (#214). A return to pool
+ * has its own check for prior removal.
  */
 export const noEarlierRemoval = {
   id: "no-earlier-removal",

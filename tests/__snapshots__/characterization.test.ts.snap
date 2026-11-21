@@ -51,6 +51,12 @@ exports[`ocfValidator over testPackage > produces a stable validation result and
         },
       ],
       "stockIssuances": [],
+      "stockPlans": [
+        {
+          "drawn": "360000",
+          "id": "stock_plan_01",
+        },
+      ],
       "warrants": [],
     },
   ],

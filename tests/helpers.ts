@@ -72,9 +72,9 @@ export const collection = <C extends CollectionKey>(context: OcfMachineContext, 
   outstanding(context.nodes, family);
 
 /**
- * Write a temporary OCF package and call the public validator so tests use the real reader and
- * same-day order. Compare the charts with the two existing checks on that order, then remove the
- * package.
+ * Write a temporary package with the supplied transactions and reference data. Call the public
+ * validator to exercise file loading and date ordering, compare the lifecycle charts, then remove
+ * the package.
  */
 export const validatePackage = (
   transactions: Record<string, unknown>[],
@@ -88,7 +88,7 @@ export const validatePackage = (
       fs.writeFileSync(path.join(dir, name), JSON.stringify(content));
     write("Stakeholders.ocf.json", { items: stakeholders });
     write("StockClasses.ocf.json", { items: stockClasses });
-    if (stockPlans.length) write("StockPlans.ocf.json", { items: stockPlans });
+    write("StockPlans.ocf.json", { items: stockPlans });
     write("Transactions.ocf.json", { items: transactions });
     write("Manifest.ocf.json", {
       issuer: { legal_name: "Test Co" },
@@ -96,7 +96,7 @@ export const validatePackage = (
       transactions_files: [{ filepath: "Transactions.ocf.json" }],
       stock_classes_files: [{ filepath: "StockClasses.ocf.json" }],
       vesting_terms_files: [],
-      stock_plans_files: stockPlans.length ? [{ filepath: "StockPlans.ocf.json" }] : [],
+      stock_plans_files: [{ filepath: "StockPlans.ocf.json" }],
       stock_legend_templates_files: [],
       valuations_files: [],
     });

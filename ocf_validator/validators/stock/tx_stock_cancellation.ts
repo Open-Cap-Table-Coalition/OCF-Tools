@@ -12,6 +12,7 @@
     9. Only issuance, acceptance, this cancellation, and a subsequent return of plan-issued shares may reference the security.
 */
 
+import { isStockPlanId } from '../../nodes';
 import {LegacyContext} from '../../ocfMachine';
 
 const valid_tx_stock_cancellation = (
@@ -30,7 +31,7 @@ const valid_tx_stock_cancellation = (
   context.stockIssuances.forEach((ele) => {
     if (ele.security_id === event.data.security_id) {
       incoming_stockClass = ele.stock_class_id;
-      issuedFromPlan = typeof ele.stock_plan_id === 'string' && ele.stock_plan_id.length > 0;
+      issuedFromPlan = isStockPlanId(ele.stock_plan_id);
       incoming_stockIssuance_validity = true;
       report.incoming_stockIssuance_validity = true;
     }

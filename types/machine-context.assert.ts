@@ -1,6 +1,6 @@
 /** The build checks the public context and its security records. */
 import type { LegacyContext, OcfMachineContext } from "../ocf_validator/ocfMachine";
-import type { Field, NodeMap, SecurityNode, outstanding } from "../ocf_validator/nodes";
+import type { Field, NodeMap, PlanNode, SecurityNode, outstanding } from "../ocf_validator/nodes";
 import type { LifecycleState } from "../ocf_validator/lifecycle";
 import type { Subject } from "./finding";
 import type { Snapshot } from "./snapshot";
@@ -42,6 +42,12 @@ type _NodeIsReadonly = Expect<Equal<Shape<SecurityNode>, Readonly<SecurityNode>>
 
 // Updating a record requires a new map.
 type _MapIsReadonly = Expect<Equal<NodeMap["security"], ReadonlyMap<unknown, SecurityNode>>>;
+
+// Store both plan totals as OCF decimal strings. Plans have their own lookup by ID.
+type _Plans = Expect<Equal<NodeMap["plan"], ReadonlyMap<unknown, PlanNode>>>;
+type _Reserved = Expect<Equal<PlanNode["reserved"], Field<string>>>;
+type _Drawn = Expect<Equal<PlanNode["drawn"], Field<string>>>;
+type _PlanIsReadonly = Expect<Equal<Shape<PlanNode>, Readonly<PlanNode>>>;
 declare const _nodes: NodeMap;
 // @ts-expect-error — a ReadonlyMap has no `set`.
 _nodes.security.set("sec-1", {} as SecurityNode);

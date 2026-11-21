@@ -44,6 +44,17 @@ export interface DefectMark {
   defects: { lifecycle?: Subject[]; issuance?: Subject[] };
 }
 
+/**
+ * Show the shares reserved and drawn as OCF decimal strings. Omit reserved while it is unknown.
+ * Identify failed transactions separately for each unreliable total.
+ */
+export interface SnapshotStockPlan {
+  id: string;
+  reserved?: string;
+  drawn: string;
+  defects?: { reserved?: Subject[]; drawn?: Subject[] };
+}
+
 /** A marked snapshot row may have missing values. */
 export type SnapshotEntry<Row> = Row | (Partial<Row> & DefectMark);
 
@@ -53,4 +64,6 @@ export interface Snapshot {
   convertibles: SnapshotEntry<SnapshotConvertibleIssuance>[];
   warrants: SnapshotEntry<SnapshotWarrantIssuance>[];
   equityCompensation: SnapshotEntry<SnapshotEquityCompensation>[];
+  /** List plans from the package followed by newly referenced plans in first-seen order. */
+  stockPlans: SnapshotStockPlan[];
 }

@@ -5,6 +5,9 @@ export const TX_EQUITY_COMPENSATION_CANCELLATION = defineValidator({
   transaction: "TX_EQUITY_COMPENSATION_CANCELLATION",
   effect: "remove",
   collection: "equityCompensation",
+  // The balance grant carries the source grant's remaining shares. Counting a new draw would charge
+  // the plan twice.
+  pool: "carries",
   checks: [issuanceExists, quantityOutstanding, noOtherTransactions],
 });
 

@@ -927,6 +927,11 @@ const failingScenarios: FailingScenarios<MigratedKey> = {
       }),
       data: { id: "i1", object_type: "TX_EQUITY_COMPENSATION_ISSUANCE", security_id: "sec1", stakeholder_id: "sh1", date: "2021-01-01" },
     },
+    {
+      // The grant needs a valid quantity because it draws on a plan.
+      context: withStakeholder("sh1"),
+      data: { id: "i1", object_type: "TX_EQUITY_COMPENSATION_ISSUANCE", security_id: "sec1", stakeholder_id: "sh1", stock_plan_id: "plan-1", quantity: "many", date: "2021-01-01" },
+    },
   ],
   TX_EQUITY_COMPENSATION_ACCEPTANCE: [
     { context: contextWith({ transactions: [issuanceRecord("sec1")] }), data: txRecord("TX_EQUITY_COMPENSATION_ACCEPTANCE", "a1", "sec1", "2021-01-01") },

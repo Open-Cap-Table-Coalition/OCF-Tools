@@ -1,7 +1,8 @@
 /** The build checks record identity and the value types of fields. */
 import { readNodeField, withNodeField, type Field, type FieldKey, type FieldValue, type NodeBase, type NodeMaps } from "../ocf_validator/node";
-import { fieldAt, securityField, isSecurityFamily, type NodeMap, type SecurityNode } from "../ocf_validator/nodes";
+import { fieldAt, planField, securityField, isSecurityFamily, type Draw, type NodeMap, type PlanNode, type SecurityNode } from "../ocf_validator/nodes";
 import type { CollectionElement } from "../ocf_validator/ocfMachine";
+import type { ReadField } from "../ocf_validator/validators/checkKit";
 import type { Equal, Expect } from "./type-assert";
 
 declare const warrant: SecurityNode<"warrantIssuances">;
@@ -51,3 +52,27 @@ type _LiteralIssuance = Expect<Equal<typeof literal, typeof issuance>>;
 securityField("warrantIssuances", "w", "id");
 // @ts-expect-error — a caller cannot choose a value type independent of the address.
 fieldAt<number>(nodes, securityField("warrantIssuances", "w", "issuance"));
+
+// Only equity compensation records carry grant pool fields.
+declare const grant: SecurityNode<"equityCompensation">;
+const provenance = readNodeField(grant, "provenance");
+const draw = fieldAt(nodes, securityField("equityCompensation", "g", "draw"));
+type _Draw = Expect<Equal<typeof draw, Field<Draw | undefined> | undefined>>;
+// @ts-expect-error — warrants do not have pool state.
+readNodeField(warrant, "draw");
+// @ts-expect-error — other families cannot address equity-compensation-only state.
+securityField("warrantIssuances", "w", "provenance");
+// @ts-expect-error — raw references have the same family restrictions.
+fieldAt(nodes, { kind: "security", family: "warrantIssuances", id: "w", field: "draw" });
+const reserve = fieldAt(nodes, planField("p", "reserved"));
+type _Reserve = Expect<Equal<typeof reserve, Field<string> | undefined>>;
+// @ts-expect-error — plans have no lifecycle.
+planField("p", "lifecycle");
+// @ts-expect-error — plan fields retain their value type.
+withNodeField({} as PlanNode, "drawn", { value: false, writer: undefined, defects: [] });
+
+declare const read: ReadField;
+const readWarrant = read(securityField("warrantIssuances", "w", "issuance"));
+type _ReadWarrant = Expect<Equal<typeof readWarrant, CollectionElement["warrantIssuances"] | undefined>>;
+const readDraw = read(securityField("equityCompensation", "g", "draw"));
+type _ReadDraw = Expect<Equal<typeof readDraw, Draw | undefined>>;

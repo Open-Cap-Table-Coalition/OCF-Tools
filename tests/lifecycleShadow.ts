@@ -51,17 +51,16 @@ const securitiesOf = (transaction: Transaction): unknown[] => {
 };
 
 /**
- * Include implemented checks from the descriptor. The machine adds the earlier-removal check for
- * legacy issuances and passthrough types except returns to pool.
+ * Compare the checks implemented for this transaction type. The machine adds the earlier-removal
+ * check for passthrough types and legacy issuances.
  */
-const checksRunOn = (type: string, descriptor: Descriptor): string[] => {
+const checksRunOn = (descriptor: Descriptor): string[] => {
   if ("validate" in descriptor) {
     return (descriptor.checks as readonly Check[])
       .filter((check) => check.implemented !== false && SHADOWED.includes(check.id))
       .map((check) => check.id);
   }
-  if (descriptor.effect === "passthrough") return type === "TX_STOCK_PLAN_RETURN_TO_POOL" ? [] : [NO_EARLIER_REMOVAL];
-  return descriptor.effect === "append" ? [NO_EARLIER_REMOVAL] : [];
+  return descriptor.effect === "passthrough" || descriptor.effect === "append" ? [NO_EARLIER_REMOVAL] : [];
 };
 
 /** Run a check on a transaction read from the test package. */
@@ -108,7 +107,7 @@ export function shadowRows(transactions: readonly Transaction[]): ShadowRow[] {
   for (const transaction of transactions) {
     const descriptor = (TX_DESCRIPTORS as Record<string, Descriptor>)[transaction.object_type];
     if (descriptor === undefined) continue;
-    const runs = checksRunOn(transaction.object_type, descriptor);
+    const runs = checksRunOn(descriptor);
     const reported = checksReportedOn(context, transaction, descriptor, runs);
 
     for (const security of securitiesOf(transaction)) {
@@ -153,6 +152,16 @@ export const disagreements = (rows: readonly ShadowRow[]): ShadowRow[] =>
 
 /** Use the transaction and its history to identify each known reason for a disagreement. */
 export const EXPLANATIONS = {
+  "return before removal":
+    "The run fails it through security-removed; neither of the two shadowed checks requires a removal before a return to pool.",
+  /**
+   * The chart rejects a transaction on a never-issued security. The full validator detects the
+   * missing security through issuance-exists.
+   */
+  "never issued":
+    "The run fails it through issuance-exists; neither of the two checks asks whether the security was ever issued.",
+
+
   /**
    * The two checks omit this transaction type. The full validator still rejects it because
    * issuance-exists requires an outstanding security.
@@ -186,7 +195,17 @@ const isIndexedRemoval = (transaction: Transaction): boolean =>
 /** Identify a known difference so tests can report any new one. */
 export function explain(row: ShadowRow): Explanation | undefined {
   const refusedInSilence = !row.allowed && row.reported.length === 0;
-  if (!refusedInSilence || row.state !== "removed" || row.removedBy === undefined) return undefined;
+  if (!refusedInSilence) return undefined;
+
+  const descriptor = (TX_DESCRIPTORS as Record<string, Descriptor>)[row.object_type];
+  if (descriptor?.lifecycle === "after removal" && row.state !== "removed") return "return before removal";
+  if (row.state === "notIssued") {
+    // The issuance-exists check requires an outstanding security.
+    return descriptor !== undefined && "validate" in descriptor && descriptor.lifecycle !== "issue" && row.family === undefined
+      ? "never issued"
+      : undefined;
+  }
+  if (row.state !== "removed" || row.removedBy === undefined) return undefined;
 
   if (row.runs.length === 0) return "removed, and neither check runs on it";
   if (row.runs.length === 1 && row.runs[0] === NO_EARLIER_REMOVAL) {
