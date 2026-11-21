@@ -263,7 +263,6 @@ describe("a disagreement nothing explains", () => {
 
   it.each([
     ["TX_WARRANT_ISSUANCE", "TX_WARRANT_CANCELLATION", "TX_STOCK_PLAN_RETURN_TO_POOL", "2021-07-01"],
-    ["TX_EQUITY_COMPENSATION_ISSUANCE", "TX_PLAN_SECURITY_CANCELLATION", "TX_EQUITY_COMPENSATION_REPRICING", "2021-07-01"],
     ["TX_CONVERTIBLE_ISSUANCE", "TX_CONVERTIBLE_TRANSFER", "TX_VESTING_EVENT", cancellation.date],
   ])("flags the last step in %s → %s → %s", (issue, remove, last, date) => {
     expect(() => validatePackage([
@@ -271,6 +270,17 @@ describe("a disagreement nothing explains", () => {
       { ...cancellation, object_type: remove },
       { ...cancellation, object_type: last, id: "last", date },
     ], [{ id: "sh-1" }])).toThrow(`${last} "last" on security "safe-1" (removed)`);
+  });
+
+  it("recognizes repricing after a plan-security cancellation as an issuance failure", () => {
+    const context = validatePackage([
+      { ...issuance, object_type: "TX_EQUITY_COMPENSATION_ISSUANCE" },
+      { ...cancellation, object_type: "TX_PLAN_SECURITY_CANCELLATION" },
+      { ...cancellation, object_type: "TX_EQUITY_COMPENSATION_REPRICING", id: "last", date: "2021-07-01" },
+    ], [{ id: "sh-1" }]);
+
+    expect(context.findings.map((finding) => [finding.subject.id, finding.check])).toEqual([["last", "issuance-exists"]]);
+    expect(context.equityCompensation).toEqual([]);
   });
 
   it("is left unexplained", () => {

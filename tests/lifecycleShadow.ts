@@ -149,6 +149,9 @@ export const EXPLANATIONS = {
   "the validator stopped before checking the issuance":
     "The validator stopped earlier. When we check the removed security, its issuance is missing.",
 
+  "wrong security family":
+    "The transaction's family does not match the security's issuance, so its issuance check rejects it.",
+
   /**
    * The date check allows vesting on the day of removal (#214). The chart follows processing order,
    * which puts cancellation first. Resolve this difference before using the chart to reject packages
@@ -172,7 +175,12 @@ export function explain(row: ShadowRow): Explanation | undefined {
   const refusedInSilence = !row.allowed && row.reported.length === 0;
   if (!refusedInSilence || row.state !== "removed" || row.removedBy === undefined) return undefined;
 
-  if (!row.family || !lifecycleStep(row.family, "outstanding", row.object_type).allowed) return undefined;
+  if (!row.family) return undefined;
+  const descriptor = TX_DESCRIPTORS[row.object_type as keyof typeof TX_DESCRIPTORS];
+  if (!lifecycleFamilies(descriptor).includes(row.family)) {
+    return row.issuanceCheck === undefined ? undefined : "wrong security family";
+  }
+  if (!lifecycleStep(row.family, "outstanding", row.object_type).allowed) return undefined;
   if (row.runs.length === 0 && row.indexedRemoval === row.removedBy) {
     if (row.issuanceCheck === "failed") return "removed, and neither check runs on it";
     if (row.issuanceCheck === "replayed") return "the validator stopped before checking the issuance";
