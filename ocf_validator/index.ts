@@ -1,10 +1,16 @@
 import { createActor, getInitialSnapshot } from "xstate";
 import { OcfPackageContent, readOcfPackage } from "../read_ocf_package";
+import type { Finding } from "../types/finding";
 import constants from "./constants/constants";
 import { errorResult, malformedResult, ocfMachine, type OcfMachineContext, type OcfMachineEvent } from "./ocfMachine";
 
-export const ocfValidator = (packagePath: string): OcfMachineContext => {
-  const ocfPackage: OcfPackageContent = readOcfPackage(packagePath);
+export const ocfValidator = (packagePath: string): OcfMachineContext => validateOcfPackage(readOcfPackage(packagePath));
+
+/** Send back one list of findings for each transaction the validator reaches. */
+export const validateOcfPackage = (
+  ocfPackage: OcfPackageContent,
+  onTransaction?: (findings: Finding[]) => void,
+): OcfMachineContext => {
   const { manifest, transactions } = ocfPackage;
 
   // The run sorts transactions by date and sends each to the machine as an
@@ -46,11 +52,13 @@ export const ocfValidator = (packagePath: string): OcfMachineContext => {
   // A throw stops the actor before it can record anything, so `send` records
   // it, naming the event being handled.
   let thrown: string | undefined;
-  const send = (event: OcfMachineEvent) => {
-    if (ocfXstateActor.getSnapshot().status !== "active") return;
+  const send = (event: OcfMachineEvent, onFindings?: (findings: Finding[]) => void) => {
+    const before = ocfXstateActor.getSnapshot();
+    if (before.status !== "active") return;
     ocfXstateActor.send(event);
     const snapshot = ocfXstateActor.getSnapshot();
     if (snapshot.status === "error") thrown = errorResult(ocfPackage, event, snapshot.error);
+    onFindings?.(snapshot.context.findings.slice(before.context.findings.length));
   };
 
   let currentDate: any = null;
@@ -71,7 +79,7 @@ export const ocfValidator = (packagePath: string): OcfMachineContext => {
     // cannot correlate the runtime `type` with its matching payload in the
     // per-key event union. This single declared cast bridges parsed input to
     // the typed event; the machine's `'*'` handler rejects any unknown type.
-    send({ type: ele.object_type, data: ele } as OcfMachineEvent);
+    send({ type: ele.object_type, data: ele } as OcfMachineEvent, onTransaction);
   }
 
   send({ type: "RUN_EOD", date: currentDate });
