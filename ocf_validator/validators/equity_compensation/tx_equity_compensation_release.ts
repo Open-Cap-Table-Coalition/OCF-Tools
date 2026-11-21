@@ -1,4 +1,4 @@
-import { defineValidator } from "../checkKit";
+import { defineValidator, underOlderName } from "../checkKit";
 import { issuanceExists, quantityOutstanding } from "./checks";
 
 export const TX_EQUITY_COMPENSATION_RELEASE = defineValidator({
@@ -7,3 +7,6 @@ export const TX_EQUITY_COMPENSATION_RELEASE = defineValidator({
   families: ["equityCompensation"],
   checks: [issuanceExists, quantityOutstanding],
 });
+
+/** The same validator under the transaction's older name. */
+export const TX_PLAN_SECURITY_RELEASE = underOlderName(TX_EQUITY_COMPENSATION_RELEASE, "TX_PLAN_SECURITY_RELEASE");

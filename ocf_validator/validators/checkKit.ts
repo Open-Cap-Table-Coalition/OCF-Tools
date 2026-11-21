@@ -175,3 +175,14 @@ type Defined<S extends Spec> = Omit<S, "checks"> & {
   validate: GradedValidator<TransactionFor<S["transaction"]>>;
   checks: readonly Check[];
 };
+
+/**
+ * Reuse the current validator, checks and effects under an older OCF name. TypeScript checks that
+ * the validator accepts the older payload.
+ */
+export function underOlderName<D extends { transaction: TxKey }, const K extends TxKey>(
+  descriptor: D,
+  olderName: TransactionFor<K> extends TransactionFor<D["transaction"]> ? K : never,
+): Omit<D, "transaction"> & { transaction: K } {
+  return { ...descriptor, transaction: olderName };
+}

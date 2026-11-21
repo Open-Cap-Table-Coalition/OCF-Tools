@@ -1,4 +1,4 @@
-import { defineValidator, asGap, type CheckObject } from "../checkKit";
+import { defineValidator, asGap, underOlderName, type CheckObject } from "../checkKit";
 import { issuanceExists, noOtherTransactions, quantityOutstanding } from "./checks";
 
 // The exercise documents these resulting-security checks but implements none of
@@ -54,3 +54,6 @@ export const TX_EQUITY_COMPENSATION_EXERCISE = defineValidator({
     quantityReconciles,
   ],
 });
+
+/** The same validator under the transaction's older name. */
+export const TX_PLAN_SECURITY_EXERCISE = underOlderName(TX_EQUITY_COMPENSATION_EXERCISE, "TX_PLAN_SECURITY_EXERCISE");

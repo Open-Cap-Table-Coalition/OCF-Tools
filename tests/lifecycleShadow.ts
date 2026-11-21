@@ -158,11 +158,11 @@ export const EXPLANATIONS = {
     "no-earlier-removal ignores a removal dated the same day; the chart follows run order, which puts the removal first.",
 
   /**
-   * The removal index requires a single security_id and a removal effect. It misses consolidations
-   * and, at this point, removals under the older plan security names.
+   * A consolidation lists several security IDs and has no removal effect in the validator. The chart
+   * sees each removal, while the index misses them (#224).
    */
   "removed by a transaction the removals index doesn't hold":
-    "The chart removed the security on a consolidation or a plan security removal, which no-earlier-removal's index leaves out.",
+    "The chart removed the security on a consolidation, which no-earlier-removal's index leaves out.",
 } as const;
 
 export type Explanation = keyof typeof EXPLANATIONS;

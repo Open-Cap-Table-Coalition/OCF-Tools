@@ -94,7 +94,6 @@ describe("a transaction on a security an earlier transaction removed", () => {
   // otherwise reuse the security_id unnoticed.
   it.each([
     { id: "ve-1", object_type: "TX_VESTING_EVENT", security_id: "safe-1", vesting_condition_id: "vc-1", date: "2021-07-01" },
-    { id: "psr-1", object_type: "TX_PLAN_SECURITY_RELEASE", security_id: "safe-1", date: "2021-07-01" },
     { id: "ci-2", object_type: "TX_CONVERTIBLE_ISSUANCE", security_id: "safe-1", stakeholder_id: "sh-1", date: "2021-07-01" },
     { id: "wi-1", object_type: "TX_WARRANT_ISSUANCE", security_id: "safe-1", stakeholder_id: "sh-1", date: "2021-07-01" },
     { id: "si-1", object_type: "TX_STOCK_ISSUANCE", security_id: "safe-1", stakeholder_id: "sh-1", date: "2021-07-01" },
@@ -106,6 +105,22 @@ describe("a transaction on a security an earlier transaction removed", () => {
     expect(context.result).toBe(
       `The validation of the OCF package for Test Co failed on ${transaction.id}: ${JSON.stringify([removed(transaction)], null, 2)}`,
     );
+  });
+
+  it("fails a later release under the older name TX_PLAN_SECURITY_RELEASE through the release's own checks", () => {
+    // The release uses the equity compensation validator. Its issuance check fails because safe-1 is
+    // a convertible.
+    const release = { id: "psr-1", object_type: "TX_PLAN_SECURITY_RELEASE", security_id: "safe-1", date: "2021-07-01" };
+    const context = validateAfter(release);
+
+    expect(context.findings).toEqual([
+      {
+        severity: "error",
+        check: "issuance-exists",
+        message: "No equity compensation issuance with security_id safe-1 appears in the package.",
+        subject: { object_type: "TX_PLAN_SECURITY_RELEASE", id: "psr-1" },
+      },
+    ]);
   });
 
   it("names the first removal of a security removed twice", () => {

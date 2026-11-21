@@ -14,7 +14,6 @@ export const { issuanceExists, noOtherTransactions } = familyChecksFor({
     "TX_EQUITY_COMPENSATION_RELEASE",
     "TX_EQUITY_COMPENSATION_REPRICING",
   ],
-  deprecatedIssuance: "TX_PLAN_SECURITY_ISSUANCE",
 });
 
 /**

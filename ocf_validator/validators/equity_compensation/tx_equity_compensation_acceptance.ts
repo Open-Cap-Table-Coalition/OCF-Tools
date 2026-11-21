@@ -1,4 +1,5 @@
-import { defineValidator, text, type CheckObject } from "../checkKit";
+import { defineValidator, text, underOlderName, type CheckObject } from "../checkKit";
+import { isOfType } from "../checks";
 import { issuanceExists } from "./checks";
 
 const noRetraction = {
@@ -15,7 +16,7 @@ const noRetraction = {
     // invalidate it.
     transactions.forEach((ele) => {
       if (
-        ele.object_type === "TX_EQUITY_COMPENSATION_RETRACTION" &&
+        isOfType(ele, "TX_EQUITY_COMPENSATION_RETRACTION") &&
         ele.security_id === data.security_id &&
         ele.date <= data.date
       ) {
@@ -35,3 +36,6 @@ export const TX_EQUITY_COMPENSATION_ACCEPTANCE = defineValidator({
   families: ["equityCompensation"],
   checks: [issuanceExists, noRetraction],
 });
+
+/** Reuse the validator for the older transaction name. */
+export const TX_PLAN_SECURITY_ACCEPTANCE = underOlderName(TX_EQUITY_COMPENSATION_ACCEPTANCE, "TX_PLAN_SECURITY_ACCEPTANCE");
