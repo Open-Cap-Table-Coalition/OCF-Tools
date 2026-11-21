@@ -30,5 +30,6 @@ const noRetraction = {
 export const TX_CONVERTIBLE_ACCEPTANCE = defineValidator({
   transaction: "TX_CONVERTIBLE_ACCEPTANCE",
   effect: "none",
+  families: ["convertibleIssuances"],
   checks: [issuanceExists, noRetraction],
 });

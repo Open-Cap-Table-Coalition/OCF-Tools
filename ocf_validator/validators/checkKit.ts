@@ -4,6 +4,7 @@ import type {
   Check,
   DeepReadonly,
   GradedValidator,
+  LifecycleWord,
   OcfMachineContext,
 } from "../../types/validator";
 import type { CollectionKey, TxKey } from "../ocfMachine";
@@ -77,21 +78,19 @@ export const asGap = ({ id, severity, description }: CheckObject<any>): CheckObj
 });
 
 /**
- * What a validator module declares: which transaction it validates, what that
- * transaction does to the cap table, and its list of checks.
- *
- * `effect` is one of:
- *  - "none":   validate only; no collection changes (e.g. acceptances).
- *  - "append": add the transaction to `collection` (issuances).
- *  - "remove": remove the security from `collection` (e.g. cancellations).
- * A "none" transaction changes no collection, so it can't name one.
- *
- * The checks are typed loosely here; `defineValidator` makes sure each one fits
- * the transaction.
+ * Declare the transaction, its checks and its effect. Issuances add to a collection, removals take a
+ * security out, and other checked transactions list the families they can affect.
  */
 type Spec =
-  | { transaction: TxKey; effect: "none"; collection?: never; checks: readonly CheckObject<any>[] }
+  | { transaction: TxKey; effect: "none"; collection?: never; families: readonly CollectionKey[]; checks: readonly CheckObject<any>[] }
   | { transaction: TxKey; effect: "append" | "remove"; collection: CollectionKey; checks: readonly CheckObject<any>[] };
+
+/** Derive the usual lifecycle change from the effect so authors only specify it once. */
+const LIFECYCLE_OF_EFFECT = {
+  append: "issue",
+  none: "stays",
+  remove: "removes",
+} as const satisfies Record<Spec["effect"], LifecycleWord>;
 
 /**
  * Builds the check list the coverage report reads: each check's id, severity,
@@ -154,35 +153,25 @@ export const toValidate =
   };
 
 /**
- * Builds a validator's entry in the descriptor table from its declaration.
- *
- * `transaction` decides what the validator's input looks like, and every check
- * must work on that input. Attaching a check that reads a field the transaction
- * doesn't have (e.g. the stakeholder check on an acceptance) won't compile.
- *
- * The result keeps `transaction`, `effect`, and `collection` from the
- * declaration and adds `validate` (the function that runs the checks) and
- * `checks` (the list the coverage report reads).
- *
- * Keeping `transaction` lets the table in `ocfMachine.ts` catch an entry filed
- * under the wrong key. The table also catches an "append" entry pointed at
- * another family's collection. The types don't catch a "remove" entry pointed
- * at the wrong collection; the hand-written `EXPECTED_COLLECTION` list in
- * `tests/ocfMachine.test.ts` does.
+ * Generate validation and the check list from the same declaration. TypeScript checks that the
+ * transaction supplies each field a check needs. The descriptor table checks issuance families, and
+ * the collection tests check removal families.
  */
 export function defineValidator<const S extends Spec>(
   spec: S & { checks: readonly CheckObject<TransactionFor<S["transaction"]>>[] },
-): Omit<S, "checks"> & {
-  validate: GradedValidator<TransactionFor<S["transaction"]>>;
-  checks: readonly Check[];
-} {
+): Defined<S> {
   const { checks, ...rest } = spec;
   return {
     ...rest,
+    lifecycle: LIFECYCLE_OF_EFFECT[spec.effect],
     validate: toValidate(checks),
     checks: toMetadata(checks),
-  } as Omit<S, "checks"> & {
-    validate: GradedValidator<TransactionFor<S["transaction"]>>;
-    checks: readonly Check[];
-  };
+  } as Defined<S>;
 }
+
+/** Preserve the transaction and family types when adding validation and check metadata. */
+type Defined<S extends Spec> = Omit<S, "checks"> & {
+  lifecycle: (typeof LIFECYCLE_OF_EFFECT)[S["effect"]];
+  validate: GradedValidator<TransactionFor<S["transaction"]>>;
+  checks: readonly Check[];
+};

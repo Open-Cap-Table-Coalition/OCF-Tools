@@ -98,3 +98,10 @@ export type Check = {
   description: string;
   implemented?: false;
 };
+
+/**
+ * A security starts unissued. Issuance makes it outstanding and removal ends that state. A "stays"
+ * transaction requires an outstanding security. An "after removal" transaction requires a removed
+ * security.
+ */
+export type LifecycleWord = "issue" | "stays" | "removes" | "after removal";
