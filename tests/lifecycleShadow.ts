@@ -189,8 +189,7 @@ export function explain(row: ShadowRow): Explanation | undefined {
     const indexedDate = row.indexedRemoval?.date;
     if (indexedDate !== undefined && indexedDate < row.date) return undefined;
     if (indexedDate === row.date && row.removedBy.date === row.date) return "removed earlier the same day";
-    const type = row.removedBy.object_type;
-    if (type === "TX_STOCK_CONSOLIDATION" || type.startsWith("TX_PLAN_SECURITY_")) {
+    if (row.removedBy.object_type === "TX_STOCK_CONSOLIDATION") {
       return "removed by a transaction the removals index doesn't hold";
     }
   }

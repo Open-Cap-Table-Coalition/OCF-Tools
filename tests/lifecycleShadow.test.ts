@@ -88,6 +88,9 @@ describe("where the chart and the checks agree", () => {
 
     expect(rowsOf(rows, "ve-1")).toMatchObject([{ state: "removed", allowed: false, reported: ["no-earlier-removal"], removedBy: { id: "psc-1" } }]);
     expect(disagreements(rows)).toEqual([]);
+    // A missing entry for this cancellation would be a regression.
+    const [vesting] = rowsOf(rows, "ve-1");
+    expect(explain({ ...vesting, indexedRemoval: undefined, reported: [] })).toBeUndefined();
   });
 
   it("both allow a return to pool on a retracted grant, which neither check runs on", () => {

@@ -56,12 +56,8 @@ export const validateWithShadow = (dir: string) => {
   return { ...context, shadow: expectShadowExplained(context.ocfPackageContent.transactions, { context, visits }) };
 };
 
-/**
- * Write a temporary OCF package and validate it so tests use the real reader and
- * same-day order. Compare the charts with the two existing checks on that order, then remove the
- * package.
- */
-export const validatePackage = (
+/** Run a validator on a temporary OCF package written to disk. */
+export const validatePackageWith = <T>(validate: (dir: string) => T) => (
   transactions: Record<string, unknown>[],
   stakeholders: { id: string }[] = [],
   stockClasses: { id: string }[] = [],
@@ -85,11 +81,13 @@ export const validatePackage = (
       stock_legend_templates_files: [],
       valuations_files: [],
     });
-    return validateWithShadow(dir);
+    return validate(dir);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
 };
+
+export const validatePackage = validatePackageWith(validateWithShadow);
 
 /** Start an actor seeded into `capTable` with the given context. */
 export const startSeeded = (context: OcfMachineContext) =>
