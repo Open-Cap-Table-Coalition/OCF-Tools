@@ -1,4 +1,5 @@
 import { defineValidator, text, type CheckObject } from "../checkKit";
+import { transactionsOn } from "../checks";
 import { issuanceExists } from "./checks";
 
 const noRetraction = {
@@ -7,11 +8,10 @@ const noRetraction = {
   description: "No warrant retraction dated on or before this transaction references its security_id.",
   run: (context, data) => {
     const messages: string[] = [];
-    const { transactions } = context.ocfPackageContent;
 
     // no-retraction emits one finding per warrant retraction on this security_id
     // dated on or before this transaction; a later retraction cannot invalidate it.
-    transactions.forEach((ele) => {
+    transactionsOn(context, data.security_id).forEach((ele) => {
       if (
         ele.object_type === "TX_WARRANT_RETRACTION" &&
         ele.security_id === data.security_id &&

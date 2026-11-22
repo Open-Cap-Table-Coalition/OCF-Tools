@@ -35,10 +35,11 @@ export type SecurityState<C extends CollectionKey> = {
   & (C extends "stockIssuances" ? { carry?: { plan?: string; date?: string }; consolidatedInto?: string } : {});
 
 /**
- * A failed source named this security before its issuance. Keep the plan and date the source
- * expected, so a later issuance or claim that cannot match them ignores the failure.
+ * A source named this security before its issuance. Keep the plan and date the source expected, so a
+ * later issuance or claim that cannot match them ignores it. A failed source lists its failures. A
+ * source that succeeded after another had named the security lists its writer.
  */
-export type PendingCarry = { readonly plan?: string; readonly date?: string; readonly roots: readonly Subject[] };
+export type PendingCarry = { readonly plan?: string; readonly date?: string; readonly roots: readonly Subject[]; readonly writer?: Subject };
 
 /** An issuance withheld in another family has no known values or writers. */
 type WithheldIssuance = { readonly lifecycle: Field<never>; readonly issuance: Field<never> };
@@ -348,6 +349,20 @@ function claimDefects(nodes: NodeMap, node: SecurityNode, defects: readonly Subj
   return otherPlan || otherDate ? [] : defects;
 }
 
+/**
+ * Stock records the plan and date each source expected of it. Only a reference that could reach the
+ * same issuance as this claim counts as an earlier claim on the stock.
+ */
+function claimedCarry(nodes: NodeMap, stock: SecurityNode<"stockIssuances">, claim: Claim): { plan?: string; date?: string } | undefined {
+  const issued = stock.issuance.value;
+  const plan = issued ? issued.stock_plan_id : securityAt(nodes, "equityCompensation", claim.source)?.issuance.value?.stock_plan_id;
+  const date = issued ? issued.date : claim.date;
+  const fits = (reference: { plan?: string; date?: string } | undefined) => reference?.plan === plan && reference?.date === date;
+  if (fits(stock.carry?.value)) return stock.carry?.value;
+  const later = stock.pendingCarries?.find((reference) => reference.writer && fits(reference));
+  return later && { plan: later.plan, date: later.date };
+}
+
 export function fieldAt<R extends FieldRef>(nodes: NodeMap, ref: R, removals?: OcfMachineContext["removals"]): Field<FieldRefValue<R>> | undefined {
   if (ref.kind === "plan") return planById(nodes, ref.id)?.[ref.field] as Field<FieldRefValue<R>> | undefined;
   const node = securityById(nodes, ref.id);
@@ -361,8 +376,12 @@ export function fieldAt<R extends FieldRef>(nodes: NodeMap, ref: R, removals?: O
   if (ref.family === undefined && shared && field && node.withheldByFamily) {
     for (const other of Object.values(node.withheldByFamily)) field = markDefects(field, other[shared].defects);
   }
-  if (ref.claim && field?.defects.length && (ref.field === "carry" || ref.field === "provenance")) {
-    field = { ...field, defects: claimDefects(nodes, node, field.defects, ref.claim) };
+  if (ref.claim && field && (ref.field === "carry" || ref.field === "provenance")) {
+    field = {
+      ...field,
+      ...(ref.field === "carry" && node.family === "stockIssuances" && { value: claimedCarry(nodes, node, ref.claim) }),
+      defects: field.defects.length ? claimDefects(nodes, node, field.defects, ref.claim) : field.defects,
+    };
   }
   // Older saved records identify the applied removal by its lifecycle writer.
   if (ref.field === "removal" && !field && node.lifecycle.value === "removed") {

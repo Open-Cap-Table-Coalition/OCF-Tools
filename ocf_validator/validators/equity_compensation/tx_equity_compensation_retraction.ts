@@ -1,5 +1,5 @@
 import { defineValidator, text, underOlderName, type CheckObject } from "../checkKit";
-import { isOfType } from "../checks";
+import { isOfType, transactionsOn } from "../checks";
 import { issuanceExists } from "./checks";
 
 const noAcceptance = {
@@ -9,12 +9,11 @@ const noAcceptance = {
     "No equity compensation acceptance dated on or before this transaction references its security_id.",
   run: (context, data) => {
     const messages: string[] = [];
-    const { transactions } = context.ocfPackageContent;
 
     // no-acceptance emits one finding per equity compensation acceptance on this
     // security_id dated on or before this transaction; a later acceptance cannot
     // invalidate it.
-    transactions.forEach((ele) => {
+    transactionsOn(context, data.security_id).forEach((ele) => {
       if (
         isOfType(ele, "TX_EQUITY_COMPENSATION_ACCEPTANCE") &&
         ele.security_id === data.security_id &&

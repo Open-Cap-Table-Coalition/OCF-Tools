@@ -67,6 +67,30 @@ export const destinationPlan = {
   run: (_context, data) => isStockPlanId(data.stock_plan_id) ? [] : ["The stock_plan_id must be a nonempty string."],
 } satisfies CheckObject<{ stock_plan_id: string }>;
 
+type PackageIndex = { transactions: object; size: number; bySecurity: Map<unknown, DeepReadonly<OcfTransaction>[]> };
+const packageIndexes = new WeakMap<object, PackageIndex>();
+
+/**
+ * List the package's transactions on one security, in package order. Index the package once per run
+ * so a check does not scan every transaction. Each run builds its own removals index, which
+ * identifies the run here.
+ */
+export function transactionsOn(context: DeepReadonly<CheckContext>, securityId: unknown): readonly DeepReadonly<OcfTransaction>[] {
+  const { transactions } = context.ocfPackageContent;
+  let index = packageIndexes.get(context.removals);
+  if (index?.transactions !== transactions || index.size !== transactions.length) {
+    index = { transactions, size: transactions.length, bySecurity: new Map() };
+    for (const ele of transactions) {
+      const id = (ele as { security_id?: unknown } | null)?.security_id;
+      const listed = index.bySecurity.get(id);
+      if (listed) listed.push(ele);
+      else index.bySecurity.set(id, [ele]);
+    }
+    packageIndexes.set(context.removals, index);
+  }
+  return index.bySecurity.get(securityId) ?? [];
+}
+
 type DatedSecurity = { security_id: string; date: string };
 
 const removalBefore = (data: DatedSecurity, read: ReadField) => {
@@ -192,10 +216,9 @@ export function familyChecksFor({
       if (read(securityField(collection, data.security_id, "lifecycle")) === "outstanding") return messages;
 
       // Check the transaction type before accessing fields specific to an issuance.
-      const { transactions } = context.ocfPackageContent;
       let firstIssuanceDate: string | undefined;
       let onOrBeforeDate: string | undefined;
-      transactions.forEach((ele) => {
+      transactionsOn(context, data.security_id).forEach((ele) => {
         if (isOfType(ele, issuance) && ele.security_id === data.security_id) {
           if (firstIssuanceDate === undefined) firstIssuanceDate = ele.date;
           if (onOrBeforeDate === undefined && ele.date <= data.date) {
@@ -263,12 +286,11 @@ export function familyChecksFor({
     description: `No other transaction dated on or before this transaction references its security_id, other than ${exempt}.`,
     run: (context, data) => {
       const messages: string[] = [];
-      const { transactions } = context.ocfPackageContent;
 
       // Report each earlier or same-day transaction that conflicts with this one. Use both object
       // type and ID to exclude the transaction itself. Apply family exemptions under current and
       // older names, including vesting where the family supports it.
-      transactions.forEach((ele) => {
+      transactionsOn(context, data.security_id).forEach((ele) => {
         const type = currentName(ele.object_type);
         if (
           "security_id" in ele &&
@@ -312,7 +334,7 @@ const resultingStockIssuances = (
   context: DeepReadonly<CheckContext>,
   resultingId: string,
 ): DeepReadonly<OCFStockIssuance>[] =>
-  context.ocfPackageContent.transactions.filter(
+  transactionsOn(context, resultingId).filter(
     (ele): ele is DeepReadonly<OCFStockIssuance> =>
       ele.object_type === "TX_STOCK_ISSUANCE" && ele.security_id === resultingId,
   );

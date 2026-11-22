@@ -1,4 +1,5 @@
 import { defineValidator, text, type CheckObject } from "../checkKit";
+import { transactionsOn } from "../checks";
 import { issuanceExists } from "./checks";
 
 const noAcceptance = {
@@ -7,11 +8,10 @@ const noAcceptance = {
   description: "No convertible acceptance dated on or before this transaction references its security_id.",
   run: (context, data) => {
     const messages: string[] = [];
-    const { transactions } = context.ocfPackageContent;
 
     // no-acceptance emits one finding per convertible acceptance on this security_id
     // dated on or before this transaction; a later acceptance cannot invalidate it.
-    transactions.forEach((ele) => {
+    transactionsOn(context, data.security_id).forEach((ele) => {
       if (
         ele.object_type === "TX_CONVERTIBLE_ACCEPTANCE" &&
         ele.security_id === data.security_id &&

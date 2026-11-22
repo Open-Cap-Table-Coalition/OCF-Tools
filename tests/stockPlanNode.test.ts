@@ -425,6 +425,20 @@ describe("a grant another transaction names as its balance or resulting security
     expect(nodes.security.get("opt-1-balance")).toMatchObject({ provenance: { defects: [OVERDRAWN] }, draw: { defects: [OVERDRAWN] } });
   });
 
+  it("keeps failures recorded without a plan or date when a second failed source names the grant", () => {
+    const named = reduce(withPlans(emptyNodes(), TWO_PLANS), [grant("g-1", "opt-1", "100")], [grant("g-2", "opt-2", "100", { stock_plan_id: "plan-2" })], [partial, [OVERDRAWN]]);
+    // A saved record can hold failures with no note of what their source expected.
+    const { pendingCarries: _dropped, ...unrecorded } = securityAt(named, "equityCompensation", "opt-1-balance")!;
+    const saved: NodeMap = { security: new Map(named.security).set(unrecorded.id, unrecorded), plan: named.plan };
+    const other = subject("TX_EQUITY_COMPENSATION_CANCELLATION", "c-2");
+    const nodes = reduce(saved,
+      [cancellation("c-2", "opt-2", "40", { balance_security_id: "opt-1-balance", date: "2022-03-01" }), [other]],
+      [balance],
+    );
+
+    expect(nodes.plan.get("plan-1")?.drawn).toMatchObject({ value: "100", defects: [OVERDRAWN] });
+  });
+
   it("leaves a later grant alone when the failed source is known to have no plan", () => {
     const nodes = reduce(withPlan(), [grant("g-1", "opt-1", "100", { stock_plan_id: undefined })], [partial, [OVERDRAWN]], [balance]);
 
@@ -800,6 +814,50 @@ describe("stock issued from a plan", () => {
       { check: "plan-replacement", outcome: "blocked", roots: [OVERDRAWN] },
     ]);
     expect(context.nodes.plan.get("plan-1")?.drawn).toMatchObject({ value: "200", defects: [OVERDRAWN] });
+  });
+
+  it.each([
+    { when: "before the stock is issued", date: "2022-02-02", settles: "2022-02-15" },
+    { when: "before the stock is issued, for another date", date: "2022-02-02", settles: "2022-02-16" },
+    { when: "on the day the stock is issued", date: "2022-02-15", settles: "2022-02-15" },
+  ])("carries to stock a valid release from another plan also named, $when", ({ date, settles }) => {
+    // The first release is valid here. Its grant's plan differs from the stock's, so it carries nothing.
+    const context = runTwoPlans([
+      grant("a", "option-a", "100"), grant("b", "option-b", "100", { stock_plan_id: "plan-2" }), blockedRelease,
+      releaseOf("release-b", "option-b", date, settles),
+      { ...stock, stock_plan_id: "plan-2", date: settles, quantity: "40" },
+    ]);
+
+    expect(context.findings).toEqual([]);
+    expect(context.nodes.plan.get("plan-2")?.drawn).toMatchObject({ value: "100", defects: [] });
+    const settled = securityAt(context.nodes, "stockIssuances", stock.security_id);
+    expect(settled?.carry).toEqual({ value: { plan: "plan-2", date: settles }, writer: subject("TX_PLAN_SECURITY_RELEASE", "release-b"), defects: [] });
+    expect(settled).not.toHaveProperty("pendingCarries");
+  });
+
+  it("still rejects a second release from the same plan and date for stock already named", () => {
+    const context = runTwoPlans([
+      grant("a", "option-a", "100"), grant("b", "option-b", "100"), blockedRelease,
+      releaseOf("release-b", "option-b", "2022-02-02", "2022-02-15"),
+      { ...stock, date: "2022-02-15", quantity: "40" },
+    ]);
+
+    expect(context.findings).toMatchObject([{ subject: { id: "release-b" }, check: "plan-replacement", outcome: "failed" }]);
+    expect(context.nodes.plan.get("plan-1")?.drawn.value).toBe("200");
+  });
+
+  it("puts a draw in doubt when a failed source expected it, though another source named the stock first", () => {
+    const failed = subject("TX_PLAN_SECURITY_RELEASE", "release-b");
+    const nodes = reduce(withPlans(emptyNodes(), [PLAN, { ...PLAN, id: "plan-2" }]),
+      [grant("a", "option-a", "100")],
+      [grant("b", "option-b", "100", { stock_plan_id: "plan-2" })],
+      [blockedRelease],
+      [releaseOf("release-b", "option-b", "2022-02-02", "2022-02-15"), [failed]],
+      [{ ...stock, stock_plan_id: "plan-2", date: "2022-02-15", quantity: "40" }],
+    );
+
+    expect(nodes.plan.get("plan-2")?.drawn).toMatchObject({ value: "100", defects: [failed] });
+    expect(securityAt(nodes, "stockIssuances", stock.security_id)?.carry?.defects).toEqual([failed]);
   });
 
   it("ignores a failed release from a grant known to have no plan", () => {

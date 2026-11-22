@@ -176,9 +176,26 @@ const removedThatDay = (node: Carrier, date: string | undefined): boolean =>
   node.issuance.value !== undefined && date !== undefined && node.removal?.value?.date === date &&
   !node.removal.defects.length && !node.lifecycle.defects.length && !node.issuance.defects.length;
 
-/** Remember what a failed source expected of a security that is not issued yet. */
-const pendingAfter = (node: Carrier, plan: string | undefined, date: string | undefined, by: Stamp): { pendingCarries?: readonly PendingCarry[] } =>
-  by.ok ? {} : { pendingCarries: [...(node.pendingCarries ?? []), { plan, date, roots: by.roots }] };
+/**
+ * Remember what a failed source expected of a security that is not issued yet. Failures already on
+ * the field with no recorded expectation could match any issuance, so keep them as such.
+ */
+function pendingAfter(node: Carrier, field: Field<unknown> | undefined, plan: string | undefined, date: string | undefined, by: Stamp): { pendingCarries?: readonly PendingCarry[] } {
+  return by.ok ? {} : pendingWith(node, field, { plan, date, roots: by.roots });
+}
+
+const pendingWith = (node: Carrier, field: Field<unknown> | undefined, reference: PendingCarry): { pendingCarries: readonly PendingCarry[] } =>
+  ({ pendingCarries: [...(node.pendingCarries ?? (field?.defects.length ? [{ roots: field.defects }] : [])), reference] });
+
+type Carry = { plan?: string; date?: string };
+
+/** Find the source whose expected plan and date this stock issuance meets. The first to name it wins. */
+function matchedCarry(stock: SecurityNode<"stockIssuances">, planId: string, date?: string): SecurityNode<"stockIssuances">["carry"] {
+  const fits = (reference: Carry | undefined) => reference?.plan === planId && reference?.date === date;
+  if (fits(stock.carry?.value)) return stock.carry;
+  const later = stock.pendingCarries?.find((reference) => reference.writer && fits(reference));
+  return later?.writer && written<Carry>({ plan: later.plan, date: later.date }, later.writer);
+}
 
 /** Before issuance, keep only the failed references this plan and date cannot rule out. */
 const unsettled = (node: Carrier, field: Field<unknown>, planId: string, date?: string): readonly Subject[] =>
@@ -190,19 +207,18 @@ function carriedCharge(node: SecurityNode | undefined, planId: string, date?: st
     return { ...node.provenance, defects: unsettled(node, node.provenance, planId, date) };
   }
   if (node?.family === "stockIssuances" && node.carry) {
-    const source = node.carry;
-    const defects = unsettled(node, source, planId, date);
-    const matches = source.value?.date === date && source.value?.plan === planId;
-    if (defects.length || matches) return { ...source, value: matches ? source.value : undefined, defects };
+    const defects = unsettled(node, node.carry, planId, date);
+    const matched = matchedCarry(node, planId, date);
+    if (defects.length || matched) return { ...node.carry, value: matched?.value, defects };
   }
   return undefined;
 }
 
-/** The first issuance settles which failed references still apply to the security. */
-function settled(node: Carrier, defects: readonly Subject[]): Carrier {
+/** The first issuance settles which source carries to the security and which failures still apply. */
+function settled(node: Carrier, defects: readonly Subject[], matched?: SecurityNode<"stockIssuances">["carry"]): Carrier {
   if (node.family === "stockIssuances") {
     const { pendingCarries: _settled, ...stock } = node;
-    return stock.carry ? { ...stock, carry: { ...stock.carry, defects } } : stock;
+    return stock.carry ? { ...stock, carry: { ...(matched ?? stock.carry), defects } } : stock;
   }
   const { pendingCarries: _settled, ...grant } = node;
   return grant.provenance ? { ...grant, provenance: { ...grant.provenance, defects } } : grant;
@@ -221,7 +237,8 @@ function drawn(before: NodeMap, nodes: NodeMap, transaction: PoolTransaction, by
   const provenance = isStockPlanId(planId) && held?.family === family ? carriedCharge(held, planId, transaction.date) : undefined;
   // No plan charge can reach an issuance without a plan, so no failed reference applies to it.
   if (by.ok && node && "pendingCarries" in node && node.pendingCarries) {
-    node = settled(node, provenance?.defects ?? []);
+    const matched = node.family === "stockIssuances" && isStockPlanId(planId) ? matchedCarry(node, planId, transaction.date) : undefined;
+    node = settled(node, provenance?.defects ?? [], matched);
     nodes = withSecurity(nodes, node);
   }
   if (!isStockPlanId(planId)) return nodes;
@@ -280,7 +297,7 @@ function carried(nodes: NodeMap, transaction: PoolTransaction, by: Stamp): NodeM
       ...node,
       provenance: stamped(node.provenance, source, by),
       ...(gaveBack ? { draw: stamped(node.draw, { plan: drew.plan, quantity: ZERO }, by) } : {}),
-      ...(!target && pendingAfter(node, plan, transaction.date, by)),
+      ...(!target && pendingAfter(node, node.provenance, plan, transaction.date, by)),
     });
     return gaveBack ? adjusted(next, drew.plan, drew.quantity, subtract, by) : next;
   }, nodes);
@@ -307,11 +324,20 @@ function carryStock(nodes: NodeMap, id: string, plan: string | undefined, date: 
   if (held && held.family !== "stockIssuances") return nodes;
   const stock = held ?? blankSecurity(id, "stockIssuances");
   const issuance = stock.issuance.value;
-  if (stock.carry?.value || (issuance && issuance.date !== date)) return nodes;
+  const claim = stock.carry?.value;
+  // An earlier source keeps the stock if it expected this issuance, or the same plan and date.
+  const kept = claim && (issuance ? claim.plan === issuance.stock_plan_id && claim.date === issuance.date : claim.plan === plan && claim.date === date);
+  if (kept || (issuance && issuance.date !== date)) return nodes;
   // Stock can be issued and removed before its settlement or consolidation runs that day.
   if (stock.lifecycle.value === "removed" && !removedThatDay(stock, date)) return nodes;
+  // Another source expected a different plan or date. The issuance decides between them.
+  if (!issuance && claim) return withSecurity(nodes, {
+    ...stock,
+    ...(!by.ok && { carry: markDefects(stock.carry, by.roots) }),
+    ...pendingWith(stock, stock.carry, by.ok ? { plan, date, roots: [], writer: by.writer } : { plan, date, roots: by.roots }),
+  });
   const carry = stamped(stock.carry, { plan, date }, by);
-  if (!issuance) return withSecurity(nodes, { ...stock, carry, ...pendingAfter(stock, plan, date, by) });
+  if (!issuance) return withSecurity(nodes, { ...stock, carry, ...pendingAfter(stock, stock.carry, plan, date, by) });
   const draw = stock.draw?.value;
   if (!draw || draw.quantity === ZERO || (plan && plan !== draw.plan)) return nodes;
   const marked = withSecurity(nodes, { ...stock, carry, draw: stamped(stock.draw, { ...draw, quantity: ZERO }, by) });

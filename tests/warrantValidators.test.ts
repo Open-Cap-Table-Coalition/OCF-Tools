@@ -247,6 +247,20 @@ describe("warrant cancellation validity", () => {
     expect(collection(snapshot.context, "warrantIssuances").some((w: any) => w.security_id === "sec2")).toBe(true);
   });
 
+  it("reads the package as it stands when transactions are added or the package is replaced", () => {
+    const transactions: any[] = [issuanceRecord("sec1"), cancellationRecord];
+    const context = contextWith({ warrantIssuances: [issuanceRecord("sec1")] as any, transactions });
+    expect(runValidator("TX_WARRANT_CANCELLATION", context, cancellation())).toEqual([]);
+
+    // The same context sees a transaction added to its package.
+    transactions.push({ id: "xfer-a", object_type: "TX_WARRANT_TRANSFER", security_id: "sec1", date: "2020-06-01" });
+    expect(runValidator("TX_WARRANT_CANCELLATION", context, cancellation())).toHaveLength(1);
+
+    // So does a context that keeps the run's other fields and swaps the package.
+    const swapped = { ...context, ocfPackageContent: { ...context.ocfPackageContent, transactions: transactions.slice(0, 2) } };
+    expect(runValidator("TX_WARRANT_CANCELLATION", swapped, cancellation())).toEqual([]);
+  });
+
   it("emits one no-other-transactions finding per past offender, exempting acceptances and itself", () => {
     const context = contextWith({
       warrantIssuances: [issuanceRecord("sec1")] as any,
