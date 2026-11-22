@@ -199,6 +199,7 @@ describe.each([
 
     expect(context.findings).toEqual([{
       severity: "error",
+      outcome: "failed",
       check: "no-acceptance",
       message: "An equity compensation acceptance (accept) references the transaction's security_id.",
       subject: { object_type: retraction.object_type, id: "retract" },
