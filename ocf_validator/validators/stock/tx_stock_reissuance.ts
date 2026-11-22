@@ -71,6 +71,8 @@ const valid_tx_stock_reissuance = (context: LegacyContext, event: any, isGuard: 
     });
     if (!resulting_stockIssuances_validity) {
       report.resulting_stockIssuances_validity = false;
+      // Every resulting security must pass, not only the last one named.
+      break;
     }
   }
 
@@ -89,6 +91,8 @@ const valid_tx_stock_reissuance = (context: LegacyContext, event: any, isGuard: 
     });
     if (!resulting_dates_validity) {
       report.resulting_dates_validity = false;
+      // Every resulting security must pass, not only the last one named.
+      break;
     }
   }
 
@@ -152,6 +156,8 @@ const valid_tx_stock_reissuance = (context: LegacyContext, event: any, isGuard: 
     });
     if (!resulting_stock_class_validity) {
       report.resulting_stock_class_validity = false;
+      // Every resulting security must pass, not only the last one named.
+      break;
     }
   }
   // 8. The stakeholder_id of the stock issuance referred to in the security_id variable must equal the stakeholder_id of any stock issuances referred to in the resulting_security_ids variable
@@ -169,6 +175,8 @@ const valid_tx_stock_reissuance = (context: LegacyContext, event: any, isGuard: 
     });
     if (!resulting_stakeholder_validity) {
       report.resulting_stakeholder_validity = false;
+      // Every resulting security must pass, not only the last one named.
+      break;
     }
   }
 

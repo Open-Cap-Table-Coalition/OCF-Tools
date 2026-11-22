@@ -133,6 +133,24 @@ describe("stock removed the same day another transaction names it", () => {
     expect(context.result).toMatch(/failed on source/);
   });
 
+  it.each([
+    { type: "TX_STOCK_TRANSFER", fields: { quantity: "40" }, stock_class_id: "common" },
+    { type: "TX_STOCK_CONVERSION", fields: { quantity_converted: "40" }, stock_class_id: "preferred" },
+    { type: "TX_STOCK_REISSUANCE", fields: {}, stock_class_id: "common" },
+  ])("checks the date of every resulting security of a $type, not only the last", ({ type, fields, stock_class_id }) => {
+    const results = (firstDate: string) => [
+      stock("first", "15", firstDate, { stock_class_id }), stock("last", "25", "2021-06-01", { stock_class_id }),
+    ];
+    const tx = { ...source, object_type: type, resulting_security_ids: ["first", "last"], ...fields };
+    const check = (firstDate: string) =>
+      validatePackage([stock("held", "40", "2021-01-01"), ...results(firstDate), tx], [{ id: "holder" }], [{ id: "common" }, { id: "preferred" }]);
+
+    expect(check("2021-06-01").result).toBe(VALID);
+    const early = check("2021-05-01");
+    expect(early.report.at(-1)).toMatchObject({ transaction_id: "source", resulting_dates_validity: false });
+    expect(early.result).toMatch(/failed on source/);
+  });
+
   it("counts plan shares once when the balance of a partial cancellation is cancelled that day", () => {
     const plan = { id: "plan", object_type: "STOCK_PLAN", plan_name: "plan", stock_class_ids: ["common"], initial_shares_reserved: "1000" };
     const context = run([

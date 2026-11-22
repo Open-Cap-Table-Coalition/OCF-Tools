@@ -70,6 +70,8 @@ const valid_tx_stock_conversion = (context: LegacyContext, event: any, isGuard: 
     });
     if (!resulting_stockIssuances_validity) {
       report.resulting_stockIssuances_validity = false;
+      // Every resulting security must pass, not only the last one named.
+      break;
     }
   }
 
@@ -153,6 +155,8 @@ const valid_tx_stock_conversion = (context: LegacyContext, event: any, isGuard: 
     });
     if (!resulting_dates_validity) {
       report.resulting_dates_validity = false;
+      // Every resulting security must pass, not only the last one named.
+      break;
     }
   }
 
@@ -179,6 +183,8 @@ const valid_tx_stock_conversion = (context: LegacyContext, event: any, isGuard: 
     });
     if (!resulting_stock_class_validity) {
       report.resulting_stock_class_validity = false;
+      // Every resulting security must pass, not only the last one named.
+      break;
     }
   }
 
@@ -197,6 +203,8 @@ const valid_tx_stock_conversion = (context: LegacyContext, event: any, isGuard: 
     });
     if (!resulting_stakeholder_validity) {
       report.resulting_stakeholder_validity = false;
+      // Every resulting security must pass, not only the last one named.
+      break;
     }
   }
 

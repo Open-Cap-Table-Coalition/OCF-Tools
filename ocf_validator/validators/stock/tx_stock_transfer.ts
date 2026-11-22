@@ -84,6 +84,8 @@ const valid_tx_stock_transfer = (context: LegacyContext, event: any, isGuard: Bo
     });
     if (!resulting_stockIssuances_validity) {
       report.resulting_stockIssuances_validity = false;
+      // Every resulting security must pass, not only the last one named.
+      break;
     }
   }
 
@@ -102,6 +104,8 @@ const valid_tx_stock_transfer = (context: LegacyContext, event: any, isGuard: Bo
     });
     if (!resulting_dates_validity) {
       report.resulting_dates_validity = false;
+      // Every resulting security must pass, not only the last one named.
+      break;
     }
   }
 
