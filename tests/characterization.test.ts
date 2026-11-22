@@ -17,10 +17,9 @@ describe("ocfValidator over testPackage", () => {
   it("produces a stable validation result and report", () => {
     const context = ocfValidator(testPackagePath);
 
-    // `ocfPackageContent` is just the input package echoed back onto the machine
-    // context, and `removals` indexes it; exclude both so the snapshot captures
-    // derived behavior, not the fixture.
-    const { ocfPackageContent, removals, nodes, ...output } = context;
+    // Record the validator's results. Omit the input package, its removal index and the two internal
+    // maps from the comparison.
+    const { ocfPackageContent, removals, nodes, nodesAtStartOfDay, ...output } = context;
 
     // Read the outstanding issuances under the original collection names so the recorded snapshot
     // still tests the same behavior.

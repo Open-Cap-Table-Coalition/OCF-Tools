@@ -21,13 +21,14 @@ const fixture = (...segments: string[]) => path.resolve(__dirname, "..", ...segm
 // Package fixtures
 
 describe("the packages on disk", () => {
-  // testPackage and Acme exercise valid security histories. Acme's class split names no security. In
-  // markedSecurities, a missing stakeholder and missing resulting stock cause validation errors even
-  // though the transactions follow allowed lifecycle transitions.
+  // testPackage and Acme cover valid security histories. Acme's class split has no security to
+  // compare. markedSecurities and stockPlanPool contain stakeholder, resulting-stock or pool errors
+  // that the lifecycle charts alone cannot detect.
   it.each([
     { name: "testing_scripts/testPackage", dir: fixture("testing_scripts", "testPackage"), transactions: 2, rows: 2 },
     { name: "sample_ocf_folders/acme_holdings_limited", dir: fixture("sample_ocf_folders", "acme_holdings_limited"), transactions: 39, rows: 38 },
     { name: "testing_scripts/markedSecurities", dir: fixture("testing_scripts", "markedSecurities"), transactions: 6, rows: 6 },
+    { name: "testing_scripts/stockPlanPool", dir: fixture("testing_scripts", "stockPlanPool"), transactions: 8, rows: 8 },
   ])("$name: the chart and the checks agree on every transaction", ({ dir, transactions, rows: expected }) => {
     const context = validateWithShadow(dir);
     const rows = context.shadow;

@@ -27,7 +27,7 @@ export type CheckObject<P = unknown> = Pick<Check, "id" | "severity" | "descript
   run?: (context: DeepReadonly<CheckContext>, data: DeepReadonly<P>, read: ReadField) => string[];
 };
 
-/** Checks use the supplied reader for current security records. */
+/** Checks use declared reads for derived state. */
 export type CheckContext = Pick<OcfMachineContext, "ocfPackageContent" | "removals">;
 
 /** Read a declared field. A missing or unknown value produces undefined. An undeclared read throws. */
@@ -110,7 +110,12 @@ const toMetadata = (checks: readonly CheckObject<any>[]): readonly Check[] =>
     return metadata;
   });
 
-const describeField = (ref: FieldRef) => text`the ${ref.field} of ${ref.kind === "plan" ? "stock plan" : "security"} ${ref.id}`;
+const describeField = (ref: FieldRef): string => {
+  if (ref.kind === "security") return text`the ${ref.field} of security ${ref.id}`;
+  return ref.field === "drawn"
+    ? text`the shares drawn from stock plan ${ref.id}`
+    : text`the shares reserved for stock plan ${ref.id}`;
+};
 
 const sameField = (a: FieldRef, b: FieldRef): boolean =>
   a.kind === b.kind && a.id === b.id && a.field === b.field &&

@@ -6,8 +6,8 @@ import { toValidate, type CheckObject } from "../ocf_validator/validators/checkK
 import { validateOcfPackage } from "../ocf_validator";
 import { baseContext, runValidator, validatePackage } from "./helpers";
 
-// Check how transactions change reserved and drawn shares. The plan stores each total separately so
-// a failure affecting one can leave the other reliable.
+// Check how transactions change reserved and drawn shares, including failures that affect either
+// total.
 
 const subject = (object_type: string, id: string) => ({ object_type, id }) as Subject;
 
@@ -55,6 +55,12 @@ const adjustment = (id: string, shares_reserved: unknown, fields: Record<string,
 /** Validate this plan with the supplied transactions. */
 const run = (transactions: Record<string, unknown>[], plans: Record<string, unknown>[] = [PLAN]) =>
   validatePackage(transactions, stakeholders, [], plans);
+
+/**
+ * Check the findings on individual transactions here. stockPlanPool.test.ts checks findings on a
+ * plan at the end of a day.
+ */
+const ofTransactions = (context: ReturnType<typeof run>) => context.findings.filter((finding) => finding.subject.object_type !== "STOCK_PLAN");
 
 /** Compare each snapshot date with the plan's drawn shares. */
 const drawnByDay = (context: ReturnType<typeof run>, plan = "plan-1") =>
@@ -228,7 +234,7 @@ describe("accounting for returns and replacements", () => {
 
   it("rejects a return larger than the partial cancellation and keeps the full allowance", () => {
     const context = run([source, cancel, returnToPool("excess", "option", "200"), returnToPool("valid", "option", "40", { date: "2022-03-02" })]);
-    expect(context.findings).toMatchObject([{ check: "quantity-returnable", subject: { id: "excess" }, outcome: "failed" }]);
+    expect(ofTransactions(context)).toMatchObject([{ check: "quantity-returnable", subject: { id: "excess" }, outcome: "failed" }]);
     expect(drawnByDay(context).map(([, drawn]) => drawn)).toEqual(["100", "100", "100", "60"]);
   });
 
@@ -238,7 +244,7 @@ describe("accounting for returns and replacements", () => {
       returnToPool("excess", "option", "0.0000000002", { date: "2022-03-02" }),
       returnToPool("last", "option", "0.0000000001", { date: "2022-03-03" }),
     ], [PLAN, successor]);
-    expect(context.findings).toMatchObject([{ check: "quantity-returnable", subject: { id: "excess" } }]);
+    expect(ofTransactions(context)).toMatchObject([{ check: "quantity-returnable", subject: { id: "excess" } }]);
     expect(context.snapshots.at(-1)?.stockPlans.map((plan) => plan.drawn)).toEqual(["99.9999999999", "-39.9999999999"]);
     expect(securityAt(context.nodes, "equityCompensation", "option")?.returnable?.value).toBe("0");
   });
@@ -286,7 +292,7 @@ describe("accounting for returns and replacements", () => {
   it("does not return shares that were transferred into a new grant", () => {
     const transfer = { ...cancel, object_type: "TX_EQUITY_COMPENSATION_TRANSFER", quantity: "100", resulting_security_ids: ["replacement"] };
     const context = run([source, transfer, grant("new", "replacement", "100", { date: cancel.date }), returnToPool("return", "option", "1")]);
-    expect(context.findings).toMatchObject([{ check: "quantity-returnable", outcome: "failed" }]);
+    expect(ofTransactions(context)).toMatchObject([{ check: "quantity-returnable", outcome: "failed" }]);
     expect(context.snapshots.at(-1)?.stockPlans[0].drawn).toBe("100");
   });
 
@@ -563,7 +569,7 @@ describe("a failed transaction's writes to the pool", () => {
     const context = run([bad, grant("g-good", "opt-2", "300", { date: "2022-01-02" })]);
     const BAD = subject("TX_EQUITY_COMPENSATION_ISSUANCE", "g-bad");
 
-    expect(context.findings.map((finding) => [finding.subject.id, finding.check, finding.outcome])).toEqual([["g-bad", "stakeholder-exists", "failed"]]);
+    expect(ofTransactions(context).map((finding) => [finding.subject.id, finding.check, finding.outcome])).toEqual([["g-bad", "stakeholder-exists", "failed"]]);
     expect(context.snapshots.map((snapshot) => snapshot.stockPlans)).toEqual([
       [{ id: "plan-1", reserved: "1000", drawn: "0", defects: { drawn: [BAD] } }],
       [{ id: "plan-1", reserved: "1000", drawn: "300", defects: { drawn: [BAD] } }],
@@ -582,7 +588,7 @@ describe("a failed transaction's writes to the pool", () => {
   it("are withheld for a grant from a plan whose quantity can't be counted", () => {
     const context = run([grant("g-1", "opt-1", "one hundred")]);
 
-    expect(context.findings).toEqual([
+    expect(ofTransactions(context)).toEqual([
       {
         severity: "error",
         outcome: "failed",
@@ -610,7 +616,7 @@ describe("a failed transaction's writes to the pool", () => {
     const context = run([grant("g-1", "opt-1", "100"), cancellation("c-1", "opt-1", "100"), returnToPool("rtp-1", "opt-1", quantity as any)]);
     const RETURN = subject("TX_STOCK_PLAN_RETURN_TO_POOL", "rtp-1");
 
-    expect(context.findings.map((finding) => [finding.check, finding.message])).toEqual([["quantity-countable", message]]);
+    expect(ofTransactions(context).map((finding) => [finding.check, finding.message])).toEqual([["quantity-countable", message]]);
     expect(context.snapshots.at(-1)?.stockPlans).toEqual([{ id: "plan-1", reserved: "1000", drawn: "100", defects: { drawn: [RETURN] } }]);
     expect(context.nodes.security.get("opt-1")?.lifecycle.defects).toEqual([]);
   });
@@ -619,7 +625,7 @@ describe("a failed transaction's writes to the pool", () => {
     const context = run([grant("g-1", "opt-1", "100"), adjustment("adj-1", "plenty")]);
     const ADJUSTMENT = subject("TX_STOCK_PLAN_POOL_ADJUSTMENT", "adj-1");
 
-    expect(context.findings.map((finding) => [finding.check, finding.message])).toEqual([
+    expect(ofTransactions(context).map((finding) => [finding.check, finding.message])).toEqual([
       ["shares-reserved-countable", "The transaction's shares_reserved (plenty) is not a number written the way OCF writes one."],
     ]);
     // Retain the initial reserve and mark it unreliable. Drawn shares stay reliable.
@@ -634,7 +640,7 @@ describe("a failed transaction's writes to the pool", () => {
     const context = run([grant("g-balance", "opt-balance", "60", { date: "2022-02-01" }), partial]);
     const CANCELLATION = subject("TX_EQUITY_COMPENSATION_CANCELLATION", "c-1");
 
-    expect(context.findings.map((finding) => [finding.subject.id, finding.check])).toEqual([["c-1", "issuance-exists"]]);
+    expect(ofTransactions(context).map((finding) => [finding.subject.id, finding.check])).toEqual([["c-1", "issuance-exists"]]);
     expect(context.snapshots[0].stockPlans).toEqual([{ id: "plan-1", reserved: "1000", drawn: "60", defects: { drawn: [CANCELLATION] } }]);
     expect(context.nodes.security.get("opt-balance")).toMatchObject({
       provenance: { value: undefined, defects: [CANCELLATION] },

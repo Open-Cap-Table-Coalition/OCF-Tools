@@ -1,0 +1,26 @@
+{
+  "file_type": "OCF_STOCK_PLANS_FILE",
+  "items": [
+    {
+      "id": "plan-a",
+      "object_type": "STOCK_PLAN",
+      "plan_name": "Plan A",
+      "initial_shares_reserved": "1000",
+      "stock_class_ids": ["common"]
+    },
+    {
+      "id": "plan-b",
+      "object_type": "STOCK_PLAN",
+      "plan_name": "Plan B",
+      "initial_shares_reserved": "100",
+      "stock_class_ids": ["common"]
+    },
+    {
+      "id": "plan-c",
+      "object_type": "STOCK_PLAN",
+      "plan_name": "Plan C",
+      "initial_shares_reserved": "500",
+      "stock_class_ids": ["common"]
+    }
+  ]
+}

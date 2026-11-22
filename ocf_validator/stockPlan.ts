@@ -1,6 +1,7 @@
 import type { Subject } from "../types/finding";
+import type { PoolEffect } from "../types/validator";
 import type { Descriptor, CollectionKey } from "./ocfMachine";
-import { withNodeField, type Field } from "./node";
+import { withNodeField, type Field, type FieldKey } from "./node";
 import { currentName } from "./constants/constants";
 import type { LifecycleState } from "./lifecycle";
 import { isSecurityFamily, markDefects, pendingRoots, planById, securityById, withPlanNodes, withSecurity, written, type NodeMap, type PendingCarry, type PlanNode, type SecurityNode } from "./nodes";
@@ -59,6 +60,21 @@ type Stamp = { readonly ok: true; readonly writer: Subject } | { readonly ok: fa
 /** Store the new value on success. On failure, keep the previous value and record the cause. */
 const stamped = <T>(field: Field<T> | undefined, value: T | undefined, by: Stamp): Field<T> =>
   by.ok ? written(value, by.writer, field) : markDefects(field ?? unknown<T>(), by.roots);
+
+/** Replacing a total clears its defects. Adjusting it carries them forward. */
+export const POOL_WRITES = {
+  draws: { field: "drawn", write: "adjusts" },
+  carries: { field: "drawn", write: "adjusts" },
+  carriesStock: { field: "drawn", write: "adjusts" },
+  returns: { field: "drawn", write: "adjusts" },
+  reserves: { field: "reserved", write: "sets" },
+} as const satisfies Record<PoolEffect, { field: FieldKey<PlanNode>; write: "sets" | "adjusts" }>;
+
+function writePoolField(nodes: NodeMap, plan: PlanNode, effect: PoolEffect, by: Stamp, value?: string): NodeMap {
+  const { field, write } = POOL_WRITES[effect];
+  const next = by.ok ? written(value, by.writer, write === "adjusts" ? plan[field] : undefined) : markDefects(plan[field], by.roots);
+  return withPlan(nodes, withNodeField(plan, field, next));
+}
 
 const ZERO = "0";
 
@@ -126,7 +142,7 @@ function creditReturn(nodes: NodeMap, tx: PoolTransaction, by: Stamp): NodeMap {
     if (source.lifecycle.value !== "removed" || left === undefined || !isQuantity(tx.quantity) || exceeds(tx.quantity, left)) return nodes;
     nodes = withSecurity(nodes, { ...source, returnable: written(subtract(left, tx.quantity), by.writer) });
   }
-  return adjusted(nodes, tx.stock_plan_id, tx.quantity, subtract, by);
+  return adjusted(nodes, tx.stock_plan_id, tx.quantity, subtract, by, "returns");
 }
 
 /** A transfer or conversion moves shares into another security. Only a retirement frees them for return. */
@@ -158,14 +174,14 @@ function trackSourceQuantity(before: NodeMap, nodes: NodeMap, descriptor: Descri
 }
 
 /** Add to or subtract from the plan's drawn shares. */
-function adjusted(nodes: NodeMap, planId: unknown, quantity: unknown, move: typeof add, by: Stamp): NodeMap {
+function adjusted(nodes: NodeMap, planId: unknown, quantity: unknown, move: typeof add, by: Stamp, effect: Exclude<PoolEffect, "reserves">): NodeMap {
   if (!isStockPlanId(planId)) return nodes;
   const plan = planAt(nodes, planId);
-  if (!by.ok) return withPlan(nodes, withNodeField(plan, "drawn", markDefects(plan.drawn, by.roots)));
+  if (!by.ok) return writePoolField(nodes, plan, effect, by);
 
   // The quantity check should have rejected a value the arithmetic cannot use.
   if (!isNumeric(quantity)) throw new Error(`${by.writer.object_type} ${by.writer.id} reached the pool with a quantity that isn't a Numeric.`);
-  return withPlan(nodes, withNodeField(plan, "drawn", written(move(plan.drawn.value ?? ZERO, quantity), by.writer, plan.drawn)));
+  return writePoolField(nodes, plan, effect, by, move(plan.drawn.value ?? ZERO, quantity));
 }
 
 /** Securities that can draw on a plan or carry a charge already drawn. */
@@ -244,7 +260,7 @@ function drawn(before: NodeMap, nodes: NodeMap, transaction: PoolTransaction, by
           ...node,
           draw: stamped(node.draw, { plan: planId, quantity: transaction.quantity as string }, how),
         });
-  return adjusted(marked, planId, transaction.quantity, add, how);
+  return adjusted(marked, planId, transaction.quantity, add, how, "draws");
 }
 
 /**
@@ -282,7 +298,7 @@ function carried(nodes: NodeMap, transaction: PoolTransaction, by: Stamp): NodeM
       ...(gaveBack ? { draw: stamped(node.draw, { plan: drew.plan, quantity: ZERO }, by) } : {}),
       ...(!target && pendingAfter(node, plan, transaction.date, by)),
     });
-    return gaveBack ? adjusted(next, drew.plan, drew.quantity, subtract, by) : next;
+    return gaveBack ? adjusted(next, drew.plan, drew.quantity, subtract, by, "carries") : next;
   }, nodes);
 }
 
@@ -315,7 +331,7 @@ function carryStock(nodes: NodeMap, id: string, plan: string | undefined, date: 
   const draw = stock.draw?.value;
   if (!draw || draw.quantity === ZERO || (plan && plan !== draw.plan)) return nodes;
   const marked = withSecurity(nodes, { ...stock, carry, draw: stamped(stock.draw, { ...draw, quantity: ZERO }, by) });
-  return adjusted(marked, draw.plan, draw.quantity, subtract, by);
+  return adjusted(marked, draw.plan, draw.quantity, subtract, by, "carriesStock");
 }
 
 /** Only an exact, same-plan consolidation identifies the whole draw carried to the output. */
@@ -371,5 +387,5 @@ function carriedStock(nodes: NodeMap, transaction: PoolTransaction, by: Stamp): 
 function reserved(nodes: NodeMap, transaction: PoolTransaction, by: Stamp): NodeMap {
   if (!isStockPlanId(transaction.stock_plan_id)) return nodes;
   const plan = planAt(nodes, transaction.stock_plan_id);
-  return withPlan(nodes, withNodeField(plan, "reserved", by.ok ? written(transaction.shares_reserved as string, by.writer) : markDefects(plan.reserved, by.roots)));
+  return writePoolField(nodes, plan, "reserves", by, transaction.shares_reserved as string);
 }
