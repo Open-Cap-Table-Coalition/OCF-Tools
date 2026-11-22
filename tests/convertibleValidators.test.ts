@@ -6,6 +6,7 @@ import {
   startSeeded,
   ev,
   contextWith,
+  contextAfterCancellation,
   validatePackage,
   withStakeholder,
   txRecord,
@@ -963,18 +964,16 @@ describe("a conflicting transaction pair flags the later transaction, not the ea
 const failingScenarios: FailingScenarios<MigratedKey> = {
   TX_CONVERTIBLE_ISSUANCE: [
     {
+      context: contextWith({ stakeholders: [{ id: "sh1" }], convertibleIssuances: [issuanceRecord("sec1")] }),
+      data: { ...txRecord("TX_CONVERTIBLE_ISSUANCE", "duplicate"), stakeholder_id: "sh1" },
+    },
+    {
       context: baseContext(),
       data: { id: "i1", object_type: "TX_CONVERTIBLE_ISSUANCE", security_id: "sec1", stakeholder_id: "nobody", date: "2021-01-01" },
     },
     // Reuses the security_id of a security cancelled before it.
     {
-      context: baseContext({
-        ocfPackageContent: {
-          ...baseContext().ocfPackageContent,
-          stakeholders: [{ id: "sh1" }],
-          transactions: [txRecord("TX_CONVERTIBLE_CANCELLATION", "c0", "sec1", "2020-06-01")],
-        } as OcfMachineContext["ocfPackageContent"],
-      }),
+      context: contextAfterCancellation("CONVERTIBLE"),
       data: { id: "i1", object_type: "TX_CONVERTIBLE_ISSUANCE", security_id: "sec1", stakeholder_id: "sh1", date: "2021-01-01" },
     },
   ],

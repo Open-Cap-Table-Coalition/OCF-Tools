@@ -1,11 +1,11 @@
 import { defineValidator, underOlderName } from "../checkKit";
-import { noEarlierRemoval, stakeholderExists } from "../checks";
+import { issuanceIdChecks, stakeholderExists } from "../checks";
 
 export const TX_EQUITY_COMPENSATION_ISSUANCE = defineValidator({
   transaction: "TX_EQUITY_COMPENSATION_ISSUANCE",
   effect: "append",
   collection: "equityCompensation",
-  checks: [stakeholderExists, noEarlierRemoval],
+  checks: [stakeholderExists, ...issuanceIdChecks],
 });
 
 /** Reuse the validator for the older transaction name. */

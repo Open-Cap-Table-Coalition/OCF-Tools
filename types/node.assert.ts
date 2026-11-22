@@ -2,6 +2,7 @@
 import { readNodeField, withNodeField, type Field, type FieldKey, type FieldValue, type NodeBase, type NodeMaps } from "../ocf_validator/node";
 import { fieldAt, securityField, isSecurityFamily, type NodeMap, type SecurityNode } from "../ocf_validator/nodes";
 import type { CollectionElement } from "../ocf_validator/ocfMachine";
+import type { ReadField } from "../ocf_validator/validators/checkKit";
 import type { Equal, Expect } from "./type-assert";
 
 declare const warrant: SecurityNode<"warrantIssuances">;
@@ -51,3 +52,10 @@ type _LiteralIssuance = Expect<Equal<typeof literal, typeof issuance>>;
 securityField("warrantIssuances", "w", "id");
 // @ts-expect-error — a caller cannot choose a value type independent of the address.
 fieldAt<number>(nodes, securityField("warrantIssuances", "w", "issuance"));
+
+declare const read: ReadField;
+const payload = read(securityField("warrantIssuances", "w", "issuance"));
+if (payload) {
+  // @ts-expect-error — a check cannot change the issuance it reads.
+  payload.id = "changed";
+}

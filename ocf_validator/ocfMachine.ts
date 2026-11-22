@@ -23,9 +23,9 @@ import { TX_WARRANT_RETRACTION } from "./validators/warrant/tx_warrant_retractio
 import { TX_WARRANT_CANCELLATION } from "./validators/warrant/tx_warrant_cancellation";
 import { TX_WARRANT_TRANSFER } from "./validators/warrant/tx_warrant_transfer";
 import { TX_WARRANT_EXERCISE } from "./validators/warrant/tx_warrant_exercise";
-import { text, toValidate } from "./validators/checkKit";
-import { noEarlierRemoval } from "./validators/checks";
-import { applyTransaction, emptyNodes, outstanding, type Verdict } from "./nodes";
+import { text, toValidate, type CheckObject } from "./validators/checkKit";
+import { issuanceIdChecks, noEarlierRemoval } from "./validators/checks";
+import { addRoot, applyTransaction, emptyNodes, outstanding, type Verdict } from "./nodes";
 import { TX_EQUITY_COMPENSATION_ISSUANCE, TX_PLAN_SECURITY_ISSUANCE } from "./validators/equity_compensation/tx_equity_compensation_issuance";
 import { TX_EQUITY_COMPENSATION_ACCEPTANCE, TX_PLAN_SECURITY_ACCEPTANCE } from "./validators/equity_compensation/tx_equity_compensation_acceptance";
 import { TX_EQUITY_COMPENSATION_EXERCISE, TX_PLAN_SECURITY_EXERCISE } from "./validators/equity_compensation/tx_equity_compensation_exercise";
@@ -96,16 +96,18 @@ type Validator<T> = (
   isGuard: boolean,
 ) => any;
 
-/**
- * Legacy stock validators still read an array of outstanding stock. Build that array from the
- * current records for each call.
- */
+/** Some legacy validators read outstanding stock as an array. */
 export type LegacyContext = OcfMachineContext & { stockIssuances: OCFStockIssuance[] };
 
-const legacyContext = (context: OcfMachineContext): LegacyContext => ({
-  ...context,
-  stockIssuances: outstanding(context.nodes, "stockIssuances"),
-});
+const legacyContext = (context: OcfMachineContext): LegacyContext => {
+  let stockIssuances: OCFStockIssuance[] | undefined;
+  return {
+    ...context,
+    get stockIssuances() {
+      return stockIssuances ??= outstanding(context.nodes, "stockIssuances");
+    },
+  };
+};
 
 /**
  * A descriptor specifies which validator runs, which families it handles and how a valid transaction
@@ -405,34 +407,13 @@ export function verdictOf(subject: Subject, findings: readonly Finding[]): Verdi
   const errors = findings.filter(isErrorFinding);
   if (errors.length === 0) return { ok: true };
 
-  const roots: Subject[] = [];
-  const add = (root: Subject) => {
-    if (!roots.some((held) => held.object_type === root.object_type && held.id === root.id)) roots.push(root);
-  };
-  if (errors.some((finding) => finding.outcome === "failed")) add(subject);
+  const roots: Subject[] = errors.some((finding) => finding.outcome === "failed") ? [subject] : [];
   for (const finding of errors) {
-    if (finding.outcome === "blocked") finding.roots.forEach(add);
+    if (finding.outcome === "blocked") {
+      for (const root of finding.roots) addRoot(roots, root);
+    }
   }
   return { ok: false, roots };
-}
-
-/**
- * Run the validator once. Record its findings, apply or withhold the writes, then continue to the
- * next transaction.
- */
-export function findingsUpdate(
-  descriptor: Descriptor,
-  validate: GradedValidator<any>,
-  context: OcfMachineContext,
-  event: ValidatorEvent,
-): Partial<OcfMachineContext> {
-  const found = validate(context, event.data);
-  const subject = { object_type: event.data?.object_type, id: event.data?.id };
-  const nodes = applyTransaction(context.nodes, descriptor, event.data, verdictOf(subject, found));
-  return {
-    ...(found.length === 0 ? {} : { findings: [...context.findings, ...found] }),
-    ...(nodes === context.nodes ? {} : { nodes }),
-  };
 }
 
 /**
@@ -440,10 +421,14 @@ export function findingsUpdate(
  * to fix from checks to retry. Runs that stop early report the event that stopped them.
  */
 export function completedResult(context: OcfMachineContext): string {
-  const count = (matches: (finding: Finding) => boolean) => context.findings.filter(matches).length;
-  const errors = count((finding) => finding.outcome === "failed" && finding.severity === "error");
-  const blocked = count((finding) => finding.outcome === "blocked");
-  const warnings = count((finding) => finding.outcome === "failed" && finding.severity === "warning");
+  let errors = 0;
+  let warnings = 0;
+  let blocked = 0;
+  for (const finding of context.findings) {
+    if (finding.outcome === "blocked") blocked++;
+    else if (finding.severity === "error") errors++;
+    else warnings++;
+  }
 
   const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
   const counted = warnings === 0 ? "" : `, with ${plural(warnings, "warning")}`;
@@ -473,46 +458,44 @@ export const earliestRemovals = (transactions: readonly OcfTransaction[]): OcfMa
   return removals;
 };
 
-/** Wrap the shared removal check so the machine can call it like a transaction validator. */
-const notRemoved = {
+/** Stock issuance and passthrough transactions run shared checks before their own handlers. */
+const sharedChecks = (checks: readonly CheckObject<any>[]) => ({
   effect: "none",
   lifecycle: "stays",
   families: [],
-  validate: toValidate([noEarlierRemoval]),
-  checks: [noEarlierRemoval],
-} satisfies ActiveDescriptor;
+  checks,
+  validate: toValidate(checks),
+} as const satisfies ActiveDescriptor);
 
-/**
- * Use one transition for validators that return findings. Record failures and continue checking
- * later transactions. Passthrough transactions use the earlier-removal check, except returns to
- * pool. Legacy stock validation stops on failure, including an issuance after removal.
- */
-function buildTransactionHandlers() {
-  const legacyTransitions = [
-    {
-      guard: "isValidTx",
-      target: "capTable",
-      actions: ["recordOutcome", "applyToNodes"],
-    },
-    {
-      target: "validationError",
-      actions: ["recordOutcome", "setValidationError"],
-    },
-  ] as const;
-  const afterRemoval = {
-    guard: "followsRemoval",
+const stockIssuanceChecks = sharedChecks(issuanceIdChecks);
+const passthroughChecks = sharedChecks([noEarlierRemoval]);
+
+export function checksBeforeValidation(type: string, descriptor: Descriptor) {
+  if (descriptor.effect === "append" && "legacyValidate" in descriptor) return stockIssuanceChecks;
+  if (descriptor.effect === "passthrough" && type !== "TX_STOCK_PLAN_RETURN_TO_POOL") return passthroughChecks;
+}
+
+const legacyTransitions = [
+  {
+    guard: "isValidTx",
+    target: "capTable",
+    actions: ["recordOutcome", "applyToNodes"],
+  },
+  {
     target: "validationError",
-    actions: ["recordRemoval", "setRemovalError"],
-  } as const;
-  const byFindings = { target: "capTable", actions: ["applyByFindings"] } as const;
+    actions: ["recordOutcome", "setValidationError"],
+  },
+] as const;
 
+function buildTransactionHandlers() {
   const handlerFor = (type: TxKey) => {
     const descriptor = TX_DESCRIPTORS[type];
-    if (descriptor.effect === "passthrough") {
-      return type === "TX_STOCK_PLAN_RETURN_TO_POOL" ? {} : byFindings;
+    const checks = checksBeforeValidation(type, descriptor);
+    if ("validate" in descriptor || (descriptor.effect === "passthrough" && checks)) {
+      return { target: "capTable", actions: ["applyByFindings"] } as const;
     }
-    if ("validate" in descriptor) return byFindings;
-    if (descriptor.effect === "append") return [afterRemoval, ...legacyTransitions];
+    if (descriptor.effect === "passthrough") return {};
+    if (checks) return { target: "stockIssuance", actions: "recordStockIdChecks" } as const;
     return legacyTransitions;
   };
 
@@ -538,17 +521,19 @@ export const ocfMachine = setup({
       const descriptor = activeDescriptorFor(event.type);
       return descriptor ? isValidOutcome(descriptor, context, event) : false;
     },
-    // Check a legacy issuance for an earlier removal.
-    followsRemoval: ({ context, event }) =>
-      !isControlEvent(event) && !isValidOutcome(notRemoved, context, event),
   },
   actions: {
     // Record the findings and apply the transaction only if its checks allow it.
     applyByFindings: assign(({ context, event }) => {
       if (isControlEvent(event)) return {};
       const descriptor = TX_DESCRIPTORS[event.type];
-      if ("validate" in descriptor) return findingsUpdate(descriptor, descriptor.validate, context, event);
-      return descriptor.effect === "passthrough" ? findingsUpdate(descriptor, notRemoved.validate, context, event) : {};
+      const validate: GradedValidator<any> = "validate" in descriptor ? descriptor.validate : passthroughChecks.validate;
+      const found = validate(context, event.data);
+      const nodes = applyTransaction(context.nodes, descriptor, event.data, verdictOf({ object_type: event.type, id: event.data.id }, found));
+      return {
+        ...(found.length > 0 && { findings: [...context.findings, ...found] }),
+        ...(nodes !== context.nodes && { nodes }),
+      };
     }),
 
     // Use the same legacy validator for the report and the pass/fail decision.
@@ -568,12 +553,7 @@ export const ocfMachine = setup({
     // Apply a successful legacy transaction's effect.
     applyToNodes: assign(({ context, event }) => nodesUpdate(context, event)),
 
-    // The followsRemoval branch's record and failure message, as for a
-    // graded validator's invalid branch.
-    recordRemoval: assign(({ context, event }) => outcomeUpdate(notRemoved, context, event)),
-    setRemovalError: assign({
-      result: ({ context, event }) => failureResult(notRemoved, context, event),
-    }),
+    recordStockIdChecks: assign(({ context, event }) => outcomeUpdate(stockIssuanceChecks, context, event)),
   },
 }).createMachine({
   id: "OCF-xstate",
@@ -633,6 +613,16 @@ export const ocfMachine = setup({
           }),
         },
       },
+    },
+    stockIssuance: {
+      always: [
+        {
+          guard: ({ context }) => context.lastErrorFindings.length > 0,
+          target: "validationError",
+          actions: assign({ result: ({ context, event }) => failureResult(stockIssuanceChecks, context, event) }),
+        },
+        ...legacyTransitions,
+      ],
     },
     validationError: {
       type: "final",

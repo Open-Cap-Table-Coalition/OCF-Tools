@@ -1,5 +1,7 @@
+import { OrderedMap } from "immutable";
+import type { OcfMachineContext } from "../types/validator";
 import type { Subject } from "../types/finding";
-import { readNodeField, withNodeField, type Field, type FieldAddress, type FieldKey, type NodeBase, type NodeMaps, type ReferenceValue } from "./node";
+import { readNodeField, withNodeField, type Field, type NodeBase, type NodeMaps } from "./node";
 export type { Field, NodeBase } from "./node";
 import type { LifecycleState } from "./lifecycle";
 import type { CollectionElement, CollectionKey, Descriptor } from "./ocfMachine";
@@ -7,9 +9,8 @@ import type { CollectionElement, CollectionKey, Descriptor } from "./ocfMachine"
 // Import only types from the chart and machine here. Both load validators that already import this
 // module.
 
-// Keep a record for each security, including removed ones. Each field stores its last known value
-// and writer. When a transaction fails, preserve those values and record which failures make each
-// affected field unreliable. Later checks can still use independent fields.
+// Look up securities by ID and keep removed records so later checks can explain what happened. Each
+// field records its own value and writer. Index updates share unchanged records with earlier states.
 
 /** Issuance transaction for any of the four security families. */
 export type Issuance = CollectionElement[CollectionKey];
@@ -21,6 +22,8 @@ export type Issuance = CollectionElement[CollectionKey];
 export type SecurityState<C extends CollectionKey> = {
   lifecycle: LifecycleState;
   issuance: CollectionElement[C];
+  /** Set once, when a removal succeeds. */
+  removal?: { id: string; date: string };
 };
 
 /** The family determines the type of the stored issuance. */
@@ -32,14 +35,54 @@ export type SecurityNode<C extends CollectionKey = CollectionKey> = SecuritiesBy
 /** Securities keyed by security_id, including removed securities, in issuance order. */
 export type NodeMap = NodeMaps<SecurityNode>;
 
-/** Initial state before reading any transactions. */
-export const emptyNodes = (): NodeMap => ({ security: new Map() });
+type SecurityMap = OrderedMap<unknown, SecurityNode>;
+type SecurityIndex = { history: SecurityMap; current: SecurityMap };
+const indexes = new WeakMap<NodeMap, SecurityIndex>();
+
+/** Keep the public native map available for callers and structuredClone. */
+function fromIndex(index: SecurityIndex): NodeMap {
+  let history: ReadonlyMap<unknown, SecurityNode> | undefined;
+  const nodes = {
+    get security() {
+      return history ??= new Map(index.history);
+    },
+  };
+  indexes.set(nodes, index);
+  return nodes;
+}
+
+/** A caller can also supply a plain NodeMap or resume from a structured clone. */
+function indexOf(nodes: NodeMap): SecurityIndex {
+  const indexed = indexes.get(nodes);
+  if (indexed) return indexed;
+  const history = OrderedMap(nodes.security);
+  const index = { history, current: history.filter(isCurrent) };
+  indexes.set(nodes, index);
+  return index;
+}
+
+export const emptyNodes = (): NodeMap => {
+  const history = OrderedMap<unknown, SecurityNode>();
+  return fromIndex({ history, current: history });
+};
+
+/** Look up any security, including one that has been removed. */
+export const securityById = (nodes: NodeMap, id: unknown): SecurityNode | undefined => {
+  const index = indexes.get(nodes);
+  return index ? index.history.get(id) : nodes.security.get(id);
+};
+
+/** Iterate in issuance order. Use the smaller index when only outstanding records are needed. */
+export const securityRecords = (nodes: NodeMap, scope: keyof SecurityIndex | "outstanding"): Iterable<SecurityNode> => {
+  const index = indexOf(nodes);
+  return scope === "outstanding" ? index.current.valueSeq().filter(isOutstanding) : index[scope].values();
+};
 
 /** Record the value and its writer. Preserve earlier failures on this field. */
 const written = <T>(value: T, writer: Subject, was?: Field<T>): Field<T> => ({ value, writer, defects: was?.defects ?? [] });
 
 /** Fields the reducer needs to decide what to update. It retains the complete issuance. */
-type Applied = { object_type: string; id: string; security_id?: unknown };
+type Applied = { object_type: string; id: string; security_id?: unknown; date?: string };
 
 /** Identify the transaction by type and ID. */
 const subjectOf = (transaction: Applied): Subject => ({
@@ -55,16 +98,16 @@ export type Verdict = { readonly ok: true } | { readonly ok: false; readonly roo
 
 const APPLY: Verdict = { ok: true };
 
-/** Add failures identified by transaction type and ID. */
-const withRoots = (defects: readonly Subject[], roots: readonly Subject[]): readonly Subject[] => {
-  const added = roots.filter(
-    (root) => !defects.some((held) => held.object_type === root.object_type && held.id === root.id),
-  );
-  return added.length === 0 ? defects : [...defects, ...added];
-};
+/** Keep each failed transaction once, in the order it was encountered. */
+export function addRoot(roots: Subject[], root: Subject): void {
+  if (!roots.some((held) => held.object_type === root.object_type && held.id === root.id)) roots.push(root);
+}
 
-/** Keep the value and writer and record why this field is unreliable. */
-const markDefects = <F extends Field<unknown>>(field: F, roots: readonly Subject[]): F => ({ ...field, defects: withRoots(field.defects, roots) });
+function markDefects<F extends Field<unknown>>(field: F, roots: readonly Subject[]): F {
+  const defects = [...field.defects];
+  for (const root of roots) addRoot(defects, root);
+  return defects.length === field.defects.length ? field : { ...field, defects };
+}
 
 /** A failed issuance makes both its details and lifecycle uncertain. */
 const markIssuanceDefects = <N extends SecurityNode>(node: N, roots: readonly Subject[]): N => ({
@@ -76,16 +119,11 @@ const markIssuanceDefects = <N extends SecurityNode>(node: N, roots: readonly Su
 /** Start with an unknown value and no recorded failure. */
 const unknown = <T>(): Field<T> => ({ value: undefined, writer: undefined, defects: [] });
 
-/**
- * Copy the index and reuse other records. Move a reissued ID to the end so snapshots reflect
- * issuance order.
- */
-const withSecurity = (nodes: NodeMap, node: SecurityNode, { last = false } = {}): NodeMap => {
-  const security = new Map(nodes.security);
-  if (last) security.delete(node.id);
-  security.set(node.id, node);
-  return { ...nodes, security };
-};
+/** Each write shares the unchanged branches of both ordered indexes. */
+const withSecurity = (index: SecurityIndex, node: SecurityNode): NodeMap => fromIndex({
+  history: index.history.set(node.id, node),
+  current: isCurrent(node) ? index.current.set(node.id, node) : index.current.remove(node.id),
+});
 
 /** Find the families this transaction can act on. */
 const familiesOf = (descriptor: Descriptor): readonly CollectionKey[] =>
@@ -107,9 +145,11 @@ export function applyTransaction(
   const writer = subjectOf(transaction);
 
   if (descriptor.effect === "append") {
+    const index = indexOf(nodes);
+    const held = index.history.get(transaction.security_id);
+    if (held?.issuance.value !== undefined) return nodes;
     // The descriptor selects the family for the parsed issuance. TypeScript needs that relationship
     // stated here.
-    const held = nodes.security.get(transaction.security_id);
     const node = {
       kind: "security",
       id: transaction.security_id,
@@ -117,13 +157,16 @@ export function applyTransaction(
       lifecycle: written<LifecycleState>("outstanding", writer, held?.lifecycle),
       issuance: written(transaction as unknown as Issuance, writer, held?.issuance),
     } as SecurityNode;
-    return withSecurity(nodes, node, { last: true });
+    return withSecurity(index, node);
   }
 
   if (descriptor.effect === "remove") {
     const node = outstandingSecurity(nodes, descriptor.collection, transaction.security_id);
     if (node === undefined) return nodes;
-    return withSecurity(nodes, withNodeField(node, "lifecycle", written<LifecycleState>("removed", writer, node.lifecycle)));
+    const removed = withNodeField(node, "lifecycle", written<LifecycleState>("removed", writer, node.lifecycle));
+    return withSecurity(indexOf(nodes), transaction.date === undefined ? removed : {
+      ...removed, removal: written({ id: transaction.id, date: transaction.date }, writer),
+    });
   }
 
   return nodes;
@@ -132,10 +175,11 @@ export function applyTransaction(
 /** Mark the fields affected by a transaction that could not be applied. */
 function withheld(nodes: NodeMap, descriptor: Descriptor, transaction: Applied, roots: readonly Subject[]): NodeMap {
   if (!("security_id" in transaction)) return nodes;
-  const held = nodes.security.get(transaction.security_id);
+  const held = securityById(nodes, transaction.security_id);
 
   if (descriptor.effect === "append") {
-    // An issuance would replace the existing record under this ID.
+    // A duplicate cannot change an already issued security.
+    if (held?.issuance.value !== undefined) return nodes;
     const node: SecurityNode = held ?? {
       kind: "security",
       id: transaction.security_id,
@@ -143,11 +187,13 @@ function withheld(nodes: NodeMap, descriptor: Descriptor, transaction: Applied, 
       lifecycle: unknown<LifecycleState>(),
       issuance: unknown<never>(),
     };
-    return withSecurity(nodes, markIssuanceDefects(node, roots));
+    return withSecurity(indexOf(nodes), markIssuanceDefects(node, roots));
   }
 
-  if (held === undefined || !familiesOf(descriptor).includes(held.family)) return nodes;
-  return withSecurity(nodes, { ...held, lifecycle: markDefects(held.lifecycle, roots) });
+  // Subsequent transactions cannot undo an applied removal.
+  if (!held || held.lifecycle.value === "removed" || !familiesOf(descriptor).includes(held.family)) return nodes;
+  const lifecycle = markDefects(held.lifecycle, roots);
+  return lifecycle === held.lifecycle ? nodes : withSecurity(indexOf(nodes), { ...held, lifecycle });
 }
 
 // Reading tracked fields
@@ -156,38 +202,39 @@ function withheld(nodes: NodeMap, descriptor: Descriptor, transaction: Applied, 
  * Identify the security family, ID and field a check needs. The field definition determines the
  * returned value's type.
  */
-export type FieldRef = FieldAddress<SecurityNode>;
-export type FieldRefValue<R extends FieldRef> = ReferenceValue<SecurityNode, R>;
+export type FieldRef = {
+  readonly kind: "security";
+  readonly family?: CollectionKey;
+  readonly id: unknown;
+  readonly field: keyof SecurityState<CollectionKey>;
+};
+export type FieldRefValue<R extends FieldRef> =
+  SecurityState<R extends { family: infer C extends CollectionKey } ? C : CollectionKey>[R["field"]];
 
-/** Identify one field of a security within its family. */
-export function securityField<C extends CollectionKey, P extends FieldKey<SecurityNode<C>>>(
-  family: C, id: unknown, field: P,
-): Extract<FieldRef, { kind: "security"; family: C; field: P }> {
-  return { kind: "security", family, id, field } as Extract<FieldRef, { kind: "security"; family: C; field: P }>;
+/** Omit the family restriction for checks that apply to every security ID. */
+export function securityField<C extends CollectionKey | undefined, P extends FieldRef["field"]>(family: C, id: unknown, field: P) {
+  return { kind: "security", family, id, field } as const;
 }
 
-/** Look up the requested field. A missing record or optional field yields undefined. */
-export const fieldAt = <R extends FieldRef>(nodes: NodeMap, ref: R): Field<FieldRefValue<R>> | undefined => {
-  const node = nodes.security.get(ref.id);
-  if (node === undefined || node.family !== ref.family) return undefined;
-  // The family check selects the matching record. TypeScript needs the link between that record and
-  // the field's value type stated here.
-  return readNodeField(node, ref.field) as Field<FieldRefValue<R>>;
-};
-
-/** Name the security and field in a finding. */
-export const describeField = (ref: FieldRef): string => `the ${ref.field} of security ${show(ref.id)}`;
-
-const show = (value: unknown): string => {
-  try {
-    return typeof value === "string" ? value : JSON.stringify(value) ?? String(value);
-  } catch {
-    return "[Unserializable value]";
+export function fieldAt<R extends FieldRef>(nodes: NodeMap, ref: R, removals?: OcfMachineContext["removals"]): Field<FieldRefValue<R>> | undefined {
+  const node = securityById(nodes, ref.id);
+  if (!node || (ref.family !== undefined && node.family !== ref.family)) return;
+  // Older saved records identify the applied removal by its lifecycle writer.
+  if (ref.field === "removal" && !node.removal && node.lifecycle.value === "removed") {
+    const tx = removals?.get(ref.id);
+    const writer = node.lifecycle.writer;
+    if (tx && writer && tx.id === writer.id && tx.object_type === writer.object_type) {
+      return written({ id: tx.id, date: tx.date }, writer) as Field<FieldRefValue<R>>;
+    }
   }
-};
+  return readNodeField(node, ref.field) as Field<FieldRefValue<R>> | undefined;
+}
 
 /** Check whether the security is currently outstanding. */
 const isOutstanding = (node: SecurityNode): boolean => node.lifecycle.value === "outstanding";
+
+// Include failed first issuances in snapshots, in their original position.
+const isCurrent = (node: SecurityNode): boolean => isOutstanding(node) || (node.lifecycle.value === undefined && node.lifecycle.defects.length > 0);
 
 /** Match the family so callers can use its issuance type. */
 export const isSecurityFamily = <C extends CollectionKey>(node: SecurityNode, family: C): node is SecurityNode<C> =>
@@ -195,19 +242,19 @@ export const isSecurityFamily = <C extends CollectionKey>(node: SecurityNode, fa
 
 /** Find an outstanding security in this family by ID. */
 export const outstandingSecurity = <C extends CollectionKey>(nodes: NodeMap, family: C, securityId: unknown): SecurityNode<C> | undefined => {
-  const node = nodes.security.get(securityId);
+  const node = securityById(nodes, securityId);
   return node !== undefined && isSecurityFamily(node, family) && isOutstanding(node) ? node : undefined;
 };
 
 /** Include all securities in this family in issuance order, including removed ones. */
 export const securitiesIn = <C extends CollectionKey>(nodes: NodeMap, family: C): SecurityNode<C>[] =>
-  [...nodes.security.values()].filter((node): node is SecurityNode<C> => isSecurityFamily(node, family));
+  [...securityRecords(nodes, "history")].filter((node): node is SecurityNode<C> => isSecurityFamily(node, family));
 
 /** List a family's outstanding issuances in the order used by the original collection. */
 export const outstanding = <C extends CollectionKey>(nodes: NodeMap, family: C): CollectionElement[C][] => {
   const issuances: CollectionElement[C][] = [];
-  for (const node of securitiesIn(nodes, family)) {
-    if (isOutstanding(node) && node.issuance.value !== undefined) {
+  for (const node of securityRecords(nodes, "outstanding")) {
+    if (isSecurityFamily(node, family) && node.issuance.value !== undefined) {
       issuances.push(node.issuance.value);
     }
   }

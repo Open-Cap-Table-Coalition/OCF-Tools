@@ -7,6 +7,7 @@ import {
   startSeeded,
   ev,
   contextWith,
+  contextAfterCancellation,
   validatePackage,
   withStakeholder,
   txRecord,
@@ -914,17 +915,15 @@ describe("the validator accepts cancelling what's left of a grant after part of 
 const failingScenarios: FailingScenarios<MigratedKey> = {
   TX_EQUITY_COMPENSATION_ISSUANCE: [
     {
+      context: contextWith({ stakeholders: [{ id: "sh1" }], equityCompensation: [issuanceRecord("sec1")] }),
+      data: { ...txRecord("TX_EQUITY_COMPENSATION_ISSUANCE", "duplicate"), stakeholder_id: "sh1" },
+    },
+    {
       context: baseContext(),
       data: { id: "i1", object_type: "TX_EQUITY_COMPENSATION_ISSUANCE", security_id: "sec1", stakeholder_id: "nobody", date: "2021-01-01" },
     },
     {
-      context: contextWith({
-        stakeholders: [{ id: "sh1" }],
-        transactions: [
-          issuanceRecord("sec1"),
-          txRecord("TX_EQUITY_COMPENSATION_RETRACTION", "r1", "sec1", "2020-06-01"),
-        ],
-      }),
+      context: contextAfterCancellation("EQUITY_COMPENSATION"),
       data: { id: "i1", object_type: "TX_EQUITY_COMPENSATION_ISSUANCE", security_id: "sec1", stakeholder_id: "sh1", date: "2021-01-01" },
     },
   ],

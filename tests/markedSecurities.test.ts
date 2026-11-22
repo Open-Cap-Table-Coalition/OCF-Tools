@@ -13,51 +13,22 @@ const WARRANT_ISSUANCE = { object_type: "TX_WARRANT_ISSUANCE", id: "wi-1" };
 const CONVERSION = { object_type: "TX_CONVERTIBLE_CONVERSION", id: "cv-1" };
 
 describe("a package with two unrelated mistakes", () => {
-  it("reports both root errors", () => {
-    const roots = context.findings.filter((finding) => finding.outcome === "failed");
-
-    expect(roots).toEqual([
+  it("reports the two root errors and the acceptance that depends on the failed warrant", () => {
+    expect(context.findings).toEqual([
       {
-        severity: "error",
-        outcome: "failed",
-        check: "stakeholder-exists",
+        severity: "error", outcome: "failed", check: "stakeholder-exists", subject: WARRANT_ISSUANCE,
         message: "The stakeholder nobody referenced by the transaction was not found in the stakeholder file.",
-        subject: WARRANT_ISSUANCE,
       },
       {
-        severity: "error",
-        outcome: "failed",
-        check: "resulting-stock-exists",
+        severity: "error", outcome: "blocked", check: "issuance-exists",
+        subject: { object_type: "TX_WARRANT_ACCEPTANCE", id: "wa-1" }, roots: [WARRANT_ISSUANCE],
+        message: "Not checked: it reads the lifecycle of security war-1, which can't be relied on because TX_WARRANT_ISSUANCE wi-1 failed.",
+      },
+      {
+        severity: "error", outcome: "failed", check: "resulting-stock-exists", subject: CONVERSION,
         message: "No stock issuance with security_id stock-that-was-never-issued appears in the package.",
-        subject: CONVERSION,
       },
     ]);
-  });
-
-  it("blocks the acceptance of the failed warrant, pointing at its issuance", () => {
-    const blocked = context.findings.filter((finding) => finding.outcome === "blocked");
-
-    // The acceptance should identify the failed issuance that blocked its check.
-    expect(blocked).toEqual([
-      {
-        severity: "error",
-        outcome: "blocked",
-        check: "issuance-exists",
-        message:
-          "Not checked: it reads the lifecycle of security war-1, which can't be relied on because TX_WARRANT_ISSUANCE wi-1 failed.",
-        subject: { object_type: "TX_WARRANT_ACCEPTANCE", id: "wa-1" },
-        roots: [WARRANT_ISSUANCE],
-      },
-    ]);
-    // The acceptance's package-only check can still pass.
-    expect(context.findings.filter((finding) => finding.subject.id === "wa-1")).toHaveLength(1);
-  });
-
-  it("finds nothing wrong with the transactions that have nothing wrong with them", () => {
-    const subjects = new Set(context.findings.map((finding) => finding.subject.id));
-
-    expect(subjects).toEqual(new Set(["wi-1", "wa-1", "cv-1"]));
-    expect(context.findings).toHaveLength(3);
     expect(context.report).toEqual([]);
   });
 

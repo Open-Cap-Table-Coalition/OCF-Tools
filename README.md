@@ -24,15 +24,24 @@ This tool tests the logical and structural validity of an OCF package. We are co
 const ocfValidation = ocfValidator(ocfPackageFolderDir);
 ```
 
-Validation goes through the transactions in date order. A transaction that fails doesn't stop it, as long as its checks report findings: the convertible, warrant, and equity compensation transactions, and the ones nothing validates. The failure is recorded, what the transaction would have changed is withheld and marked as unreliable, and the run goes on. A later check that depends on something marked isn't run. It is reported as blocked, pointing at the failure it traces back to, so one mistake reads as one error and not as a string of them. A stock transaction that fails still stops the run there, as do a transaction of a type the tool doesn't know and an error in the tool itself.
+Validation processes transactions in date order. Convertible, warrant, and equity compensation validators record errors and continue. A failed check withholds the transaction’s writes and marks affected fields as unreliable. Later checks that need those fields report a blocked finding. Independent checks still run. Legacy stock validation failures, unknown transaction types, and internal errors can stop validation early.
 
-The tool outputs an object whose fields include:
+The output includes these fields.
 
-- `result: string` says whether the package appears valid. It's the one field that says so. A valid package can still have warnings, and the result counts them: "…appears valid, with 1 warning." For a package that isn't valid it counts what was found, keeping the errors apart from their consequences: "…is complete and found 2 errors and 1 check blocked by them." Fix the errors; a blocked check either clears or runs once they are. If the run was stopped, the result says what stopped it instead: usually the transaction that failed and why.
-- `findings` lists the problems found by the checks that report findings. Today those are the convertible, warrant, and equity compensation validators' checks, plus one run on every issuance and on the transactions nothing else validates, except a return to pool: that no earlier transaction removed the security. Each finding has a `severity` (`"error"` or `"warning"`), an `outcome`, the id of the `check` that produced it, a `message`, and a `subject`: the `object_type` and `id` of the transaction it's about. An error fails its transaction; a warning doesn't. The `outcome` is separate from the severity. It is `"failed"` for a check that ran and found its problem. It is `"blocked"` for a check that couldn't run because something it depends on was left unreliable by an earlier failure; such a finding also has `roots`, the `object_type` and `id` of every transaction whose failure it traces back to. A blocked finding says nothing against the transaction it's on. A finding is identified by its `check` and `subject`.
-- `report` lists, for each stock transaction the tool validates, the checks it did and whether each passed. The stock validators haven't moved to findings yet; a stock issuance that reuses a removed security fails with a finding instead.
-- `snapshots` holds the cap table at the end of each day with transactions, through the last day unless the run was stopped. An entry the run can't vouch for carries a `defects` mark naming the transactions whose failure put it in doubt: under `lifecycle` if a transaction on the security failed, so it's shown as it stood before and may not be outstanding any more, and under `issuance` if its issuance failed, in which case the entry has no other fields. An entry without the mark can be trusted.
-- `nodes` holds the state the run built the snapshots from: every security it issued, including the ones since removed. Each security records where it is in its life and its issuance, and for each of those the transaction that last wrote it and any defects affecting it. It replaces the four arrays of outstanding issuances (`stockIssuances`, `convertibleIssuances`, `warrantIssuances`, `equityCompensation`) the output used to carry.
+- `result` states whether the package appears valid. A completed run counts failed errors, blocked checks, and warnings separately. If validation stops early, the result identifies the failure.
+- `findings` lists each check’s `severity` (error or warning), `outcome`, `check` ID, `message`, and `subject` (the transaction’s `object_type` and `id`). A `failed` finding reports a problem the check found. A `blocked` finding lists the earlier failures in `roots`. Warnings allow the transaction’s writes. Use `check` and `subject` to group findings, keeping every message in each group.
+- `report` contains the legacy stock validators’ checks. A stock issuance that reuses a security ID produces a finding naming the original issuance or the earlier removal.
+- `snapshots` contains the cap table at the end of each transaction day the run completed. A row’s optional `defects` lists the causes of uncertainty under `lifecycle` or `issuance`. A failed first issuance appears as a row containing only its defects.
+- `nodes` holds each security’s issuance and lifecycle, including removed securities. Each field records its last writer and any defects. A security ID can be issued only once across all four families.
+
+To read one of the former issuance lists, use `outstanding` from the package entry point. It returns the family's outstanding issuances in their original order.
+
+```js
+const { ocfValidator, outstanding } = require("ocf-tools");
+
+const { nodes } = ocfValidator(ocfPackageFolderDir);
+const stock = outstanding(nodes, "stockIssuances");
+```
 
 ## OCF Snapshot
 
@@ -48,7 +57,14 @@ const snapshot = ocfSnapshot(ocfPackageFolderDir, ocfSnapshotDate);
 
 ### (before publication to NPM)
 
-Download this repository and run `npm i; npm run build; npm link;`
+For a local JavaScript project, run these commands in the toolset checkout. The build type-checks the source, and the next command emits the JavaScript used by the linked package.
+
+```sh
+npm ci
+npm run build
+npm exec -- tsc --noEmit false --allowImportingTsExtensions false --noCheck
+npm link
+```
 
 In the project that you want to use ocf-tools, run `npm link ocf-tools` and add
 `const { readOcfPackage, ocfValidator, ocfSnapshot } = require("ocf-tools");`

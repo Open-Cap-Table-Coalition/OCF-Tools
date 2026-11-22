@@ -14,7 +14,8 @@ import {
   type VestingFamily,
 } from "../ocf_validator/ocfMachine";
 import { defineValidator, underOlderName, type CheckObject } from "../ocf_validator/validators/checkKit";
-import { familyChecksFor, type OLDER_NAMES } from "../ocf_validator/validators/checks";
+import type { OLDER_NAMES } from "../ocf_validator/constants/constants";
+import { familyChecksFor } from "../ocf_validator/validators/checks";
 import type { TransactionFor } from "./ocf-input";
 import type { Check, GradedValidator, LifecycleWord, OcfMachineContext } from "./validator";
 import type { Expect, Equal } from "./type-assert";

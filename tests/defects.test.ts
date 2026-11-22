@@ -1,6 +1,7 @@
 import { afterEach, describe, it, expect, vi } from "vitest";
 import { applyTransaction, emptyNodes, outstandingSecurity, securityField, type NodeMap } from "../ocf_validator/nodes";
 import { completedResult, TX_DESCRIPTORS, verdictOf, type TxKey } from "../ocf_validator/ocfMachine";
+import { uniqueSecurityId } from "../ocf_validator/validators/checks";
 import { defineValidator, toValidate, type CheckObject } from "../ocf_validator/validators/checkKit";
 import type { Finding, Subject } from "../types/finding";
 import { baseContext, collection, contextWith, validatePackage } from "./helpers";
@@ -84,17 +85,6 @@ describe("a transaction whose writes are withheld", () => {
     // Neither transaction targets an existing security of the required family.
     expect(applyTransaction(issued, TX_DESCRIPTORS.TX_CONVERTIBLE_ACCEPTANCE, on("TX_CONVERTIBLE_ACCEPTANCE", "ca-1", "2021-02-01") as any, { ok: false, roots })).toBe(issued);
     expect(applyTransaction(issued, TX_DESCRIPTORS.TX_WARRANT_CANCELLATION, { ...on("TX_WARRANT_CANCELLATION", "wc-1", "2021-02-01"), security_id: "nothing" } as any, { ok: false, roots })).toBe(issued);
-  });
-
-  it("keeps the values of a security a failed second issuance would have replaced", () => {
-    const again = warrant({ id: "wi-2", stakeholder_id: "sh-2" });
-    const nodes = reduce([warrant()], [again, [subject("TX_WARRANT_ISSUANCE", "wi-2")]]);
-
-    const node = nodes.security.get("war-1");
-    expect(node?.issuance.value).toMatchObject({ id: "wi-1" });
-    expect(node?.lifecycle.value).toBe("outstanding");
-    expect(node?.lifecycle.defects).toEqual([subject("TX_WARRANT_ISSUANCE", "wi-2")]);
-    expect(node?.issuance.defects).toEqual([subject("TX_WARRANT_ISSUANCE", "wi-2")]);
   });
 
   it("holds every root once, and never drops one", () => {
@@ -254,9 +244,7 @@ describe("a check that declares its reads", () => {
 
     toValidate([looks])(baseContext({ warrantIssuances: [warrant()] }), acceptance);
 
-    expect(seen).not.toHaveProperty("nodes");
-    expect(seen).toHaveProperty("ocfPackageContent");
-    expect(seen).toHaveProperty("removals");
+    expect(Object.keys(seen).sort()).toEqual(["ocfPackageContent", "removals"]);
   });
 
   it("holds for every check in the real table: none reads a field it didn't declare", () => {
@@ -510,6 +498,12 @@ describe("a graded validator", () => {
     validatePackage([warrant(), warrant({ id: "wi-2", security_id: "war-2", stakeholder_id: "nobody", date: "2021-02-01" })], stakeholders);
 
     expect(validate).toHaveBeenCalledTimes(2);
+  });
+
+  it("runs the shared ID check once even when it stops a legacy stock issuance", () => {
+    const check = vi.spyOn(uniqueSecurityId, "run");
+    validatePackage([warrant(), on("TX_STOCK_ISSUANCE", "duplicate", "2021-02-01")], stakeholders);
+    expect(check).toHaveBeenCalledTimes(2);
   });
 
   it("built by defineValidator declares its reads on the checks it was given", () => {

@@ -3,28 +3,11 @@ import type { OcfTransaction, TransactionFor } from "../../types/ocf-input";
 import type { DeepReadonly } from "../../types/validator";
 import { securityField } from "../nodes";
 import type { CollectionElement, CollectionKey, TxKey } from "../ocfMachine";
-import { text, type CheckContext, type CheckObject } from "./checkKit";
-
-/**
- * Match the seven older plan security names to their equity compensation equivalents. Repricing has
- * only its current name.
- */
-export const OLDER_NAMES = {
-  TX_PLAN_SECURITY_ISSUANCE: "TX_EQUITY_COMPENSATION_ISSUANCE",
-  TX_PLAN_SECURITY_ACCEPTANCE: "TX_EQUITY_COMPENSATION_ACCEPTANCE",
-  TX_PLAN_SECURITY_EXERCISE: "TX_EQUITY_COMPENSATION_EXERCISE",
-  TX_PLAN_SECURITY_RELEASE: "TX_EQUITY_COMPENSATION_RELEASE",
-  TX_PLAN_SECURITY_RETRACTION: "TX_EQUITY_COMPENSATION_RETRACTION",
-  TX_PLAN_SECURITY_CANCELLATION: "TX_EQUITY_COMPENSATION_CANCELLATION",
-  TX_PLAN_SECURITY_TRANSFER: "TX_EQUITY_COMPENSATION_TRANSFER",
-} as const satisfies Partial<Record<TxKey, TxKey>>;
-
-/** Convert a known older transaction name to its current name. Preserve other input values. */
-export const currentName = (type: unknown): unknown =>
-  typeof type === "string" && Object.hasOwn(OLDER_NAMES, type) ? OLDER_NAMES[type as keyof typeof OLDER_NAMES] : type;
+import { currentName, type CurrentTxKey } from "../constants/constants";
+import { text, type CheckContext, type CheckObject, type ReadField } from "./checkKit";
 
 /** Include older names when checking the type of a transaction in the package history. */
-export const isOfType = <K extends TxKey>(
+export const isOfType = <K extends CurrentTxKey>(
   ele: DeepReadonly<OcfTransaction>,
   type: K,
 ): ele is Extract<DeepReadonly<OcfTransaction>, DeepReadonly<TransactionFor<K>>> => currentName(ele.object_type) === type;
@@ -58,27 +41,43 @@ export const stakeholderExists = {
   },
 } satisfies CheckObject<{ stakeholder_id: string }>;
 
-/**
- * Check for a removal attempt dated strictly before the transaction. Same-day vesting and removal
- * are allowed (#214). The index includes failed attempts, so check lifecycle reliability before
- * using it.
- */
+type DatedSecurity = { security_id: string; date: string };
+
+const removalBefore = (data: DatedSecurity, read: ReadField) => {
+  const removal = read(securityField(undefined, data.security_id, "removal"));
+  return removal && removal.date < data.date ? removal : undefined;
+};
+
+/** Same-day vesting and removal are allowed (#214). */
 export const noEarlierRemoval = {
   id: "no-earlier-removal",
   severity: "error",
   description: "No transaction dated before this one removed its security from the cap table.",
-  // A failed removal can appear in the index. Check the lifecycle field in every family so an
-  // earlier failure on the record can block this check.
-  reads: (data) => (["stockIssuances", "convertibleIssuances", "warrantIssuances", "equityCompensation"] as const)
-    .map((family) => securityField(family, data.security_id, "lifecycle")),
-  run: (context, data) => {
-    const removal = context.removals.get(data.security_id);
-    if (removal === undefined || !(removal.date < data.date)) return [];
+  reads: (data) => [securityField(undefined, data.security_id, "lifecycle"), securityField(undefined, data.security_id, "removal")],
+  run: (_context, data, read) => {
+    const removal = removalBefore(data, read);
+    if (removal === undefined) return [];
     return [
       text`The security ${data.security_id} was removed from the cap table by ${removal.id} on ${removal.date}.`,
     ];
   },
-} satisfies CheckObject<{ security_id: string; date: string }>;
+} satisfies CheckObject<DatedSecurity>;
+
+/** An ID belongs to its first issuance across all security families. */
+export const uniqueSecurityId = {
+  id: "unique-security-id",
+  severity: "error",
+  description: "Each security ID is issued only once.",
+  reads: (data) => [securityField(undefined, data.security_id, "issuance"), securityField(undefined, data.security_id, "removal")],
+  run: (_context, data, read) => {
+    const original = read(securityField(undefined, data.security_id, "issuance"));
+    // An earlier removal already has its own finding. Same-day reuse still needs this one.
+    if (original === undefined || removalBefore(data, read)) return [];
+    return [text`The security ID ${data.security_id} was already issued by ${original.id}.`];
+  },
+} satisfies CheckObject<DatedSecurity>;
+
+export const issuanceIdChecks = [noEarlierRemoval, uniqueSecurityId] as const;
 
 /**
  * Describe each family's issuance, acceptance, vesting, stock plan support and transactions that
@@ -89,11 +88,11 @@ type Family = {
   [C in CollectionKey]: {
     name: string;
     collection: C;
-    issuance: CollectionElement[C]["object_type"];
-    acceptance: Extract<TxKey, `TX_${string}_ACCEPTANCE`>;
+    issuance: Extract<CollectionElement[C]["object_type"], CurrentTxKey>;
+    acceptance: Extract<CurrentTxKey, `TX_${string}_ACCEPTANCE`>;
     vests: HasKey<CollectionElement[C], "vesting_terms_id" | "vesting_template_id">;
     returnsToPool: HasKey<CollectionElement[C], "stock_plan_id">;
-    leavesOutstanding?: readonly TxKey[];
+    leavesOutstanding?: readonly CurrentTxKey[];
   };
 }[CollectionKey];
 
@@ -244,15 +243,16 @@ export function familyChecksFor({
       // type and ID to exclude the transaction itself. Apply family exemptions under current and
       // older names, including vesting where the family supports it.
       transactions.forEach((ele) => {
+        const type = currentName(ele.object_type);
         if (
           "security_id" in ele &&
           ele.security_id === data.security_id &&
           ele.date <= data.date &&
-          currentName(ele.object_type) !== issuance &&
-          currentName(ele.object_type) !== acceptance &&
-          !(vests && (VESTING_TRANSACTIONS as readonly string[]).includes(ele.object_type)) &&
-          !(leavesOutstanding as readonly unknown[]).includes(currentName(ele.object_type)) &&
-          !(returnsToPool && ele.object_type === RETURN_TO_POOL) &&
+          type !== issuance &&
+          type !== acceptance &&
+          !(vests && (VESTING_TRANSACTIONS as readonly string[]).includes(type)) &&
+          !(leavesOutstanding as readonly string[]).includes(type) &&
+          !(returnsToPool && type === RETURN_TO_POOL) &&
           !(ele.object_type === data.object_type && ele.id === data.id)
         ) {
           messages.push(
