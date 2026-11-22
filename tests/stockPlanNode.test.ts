@@ -846,6 +846,27 @@ describe("stock issued from a plan", () => {
     expect(context.nodes.plan.get("plan-1")?.drawn.value).toBe("200");
   });
 
+  it.each([
+    { second: "a blocked release from the same plan", source: "option-b", first: [] as string[] },
+    { second: "a release from a missing grant", source: "missing", first: [] as string[] },
+    { second: "a blocked release, with another plan's release named first", source: "option-b", first: ["option-c"] },
+  ])("keeps a draw reliable when $second names stock a valid release already holds", ({ source, first }) => {
+    // The valid release expected this issuance and ran first, so a later failure cannot have held the stock.
+    const failed = subject("TX_PLAN_SECURITY_RELEASE", "release-late");
+    const nodes = reduce(withPlans(emptyNodes(), [PLAN, { ...PLAN, id: "plan-2" }]),
+      [grant("a", "option-a", "100")], [grant("b", "option-b", "100")], [grant("c", "option-c", "100", { stock_plan_id: "plan-2" })],
+      ...first.map((id): [Record<string, any>] => [releaseOf("release-first", id, "2022-02-01", "2022-02-15")]),
+      [blockedRelease],
+      [releaseOf("release-late", source, "2022-02-02", "2022-02-15"), [failed]],
+      [{ ...stock, date: "2022-02-15", quantity: "40" }],
+    );
+
+    expect(nodes.plan.get("plan-1")?.drawn).toMatchObject({ value: "200", defects: [] });
+    expect(securityAt(nodes, "stockIssuances", stock.security_id)?.carry).toEqual({
+      value: { plan: "plan-1", date: "2022-02-15" }, writer: subject(blockedRelease.object_type, blockedRelease.id), defects: [],
+    });
+  });
+
   it("puts a draw in doubt when a failed source expected it, though another source named the stock first", () => {
     const failed = subject("TX_PLAN_SECURITY_RELEASE", "release-b");
     const nodes = reduce(withPlans(emptyNodes(), [PLAN, { ...PLAN, id: "plan-2" }]),

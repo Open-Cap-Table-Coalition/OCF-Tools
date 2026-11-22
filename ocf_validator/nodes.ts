@@ -37,7 +37,8 @@ export type SecurityState<C extends CollectionKey> = {
 /**
  * A source named this security before its issuance. Keep the plan and date the source expected, so a
  * later issuance or claim that cannot match them ignores it. A failed source lists its failures. A
- * source that succeeded after another had named the security lists its writer.
+ * source that succeeded lists its writer. The list keeps the order in which the sources ran. A lone
+ * successful source needs no list.
  */
 export type PendingCarry = { readonly plan?: string; readonly date?: string; readonly roots: readonly Subject[]; readonly writer?: Subject };
 
@@ -316,12 +317,15 @@ export function securityField<C extends CollectionKey | undefined, P extends Fie
 
 /**
  * Collect the failed references that this plan and date cannot rule out. A reference with an unknown
- * plan or date could match any issuance.
+ * plan or date could match any issuance. A source that succeeded for this plan and date holds the
+ * security, so a failure after it changes nothing.
  */
 export const pendingRoots = (pending: readonly PendingCarry[], plan: unknown, date: unknown): readonly Subject[] => {
   const roots: Subject[] = [];
   for (const reference of pending) {
-    if ((reference.plan === undefined || reference.plan === plan) && (reference.date === undefined || reference.date === date)) {
+    if (reference.writer) {
+      if (reference.plan === plan && reference.date === date) break;
+    } else if ((reference.plan === undefined || reference.plan === plan) && (reference.date === undefined || reference.date === date)) {
       for (const root of reference.roots) addRoot(roots, root);
     }
   }

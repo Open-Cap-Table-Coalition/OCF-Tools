@@ -181,11 +181,10 @@ const removedThatDay = (node: Carrier, date: string | undefined): boolean =>
  * the field with no recorded expectation could match any issuance, so keep them as such.
  */
 function pendingAfter(node: Carrier, field: Field<unknown> | undefined, plan: string | undefined, date: string | undefined, by: Stamp): { pendingCarries?: readonly PendingCarry[] } {
-  return by.ok ? {} : pendingWith(node, field, { plan, date, roots: by.roots });
+  if (by.ok) return {};
+  const earlier = node.pendingCarries ?? (field?.defects.length ? [{ roots: field.defects }] : []);
+  return { pendingCarries: [...earlier, { plan, date, roots: by.roots }] };
 }
-
-const pendingWith = (node: Carrier, field: Field<unknown> | undefined, reference: PendingCarry): { pendingCarries: readonly PendingCarry[] } =>
-  ({ pendingCarries: [...(node.pendingCarries ?? (field?.defects.length ? [{ roots: field.defects }] : [])), reference] });
 
 type Carry = { plan?: string; date?: string };
 
@@ -325,19 +324,26 @@ function carryStock(nodes: NodeMap, id: string, plan: string | undefined, date: 
   const stock = held ?? blankSecurity(id, "stockIssuances");
   const issuance = stock.issuance.value;
   const claim = stock.carry?.value;
+  const same = (reference: Carry | undefined) => reference?.plan === plan && reference?.date === date;
   // An earlier source keeps the stock if it expected this issuance, or the same plan and date.
-  const kept = claim && (issuance ? claim.plan === issuance.stock_plan_id && claim.date === issuance.date : claim.plan === plan && claim.date === date);
+  const kept = issuance
+    ? claim && claim.plan === issuance.stock_plan_id && claim.date === issuance.date
+    : same(claim) || stock.pendingCarries?.some((reference) => reference.writer && same(reference));
   if (kept || (issuance && issuance.date !== date)) return nodes;
   // Stock can be issued and removed before its settlement or consolidation runs that day.
   if (stock.lifecycle.value === "removed" && !removedThatDay(stock, date)) return nodes;
-  // Another source expected a different plan or date. The issuance decides between them.
-  if (!issuance && claim) return withSecurity(nodes, {
-    ...stock,
-    ...(!by.ok && { carry: markDefects(stock.carry, by.roots) }),
-    ...pendingWith(stock, stock.carry, by.ok ? { plan, date, roots: [], writer: by.writer } : { plan, date, roots: by.roots }),
-  });
-  const carry = stamped(stock.carry, { plan, date }, by);
-  if (!issuance) return withSecurity(nodes, { ...stock, carry, ...pendingAfter(stock, stock.carry, plan, date, by) });
+  // Before issuance the first successful source takes the carry and others keep what they expected.
+  // The issuance decides between them. After it, a source the issuance did not meet gives way.
+  const carry = by.ok && claim && !issuance ? stock.carry : stamped(stock.carry, { plan, date }, by);
+  if (!issuance) {
+    if (by.ok && !claim && !stock.pendingCarries && !stock.carry?.defects.length) return withSecurity(nodes, { ...stock, carry });
+    const earlier = stock.pendingCarries ?? [
+      ...(stock.carry?.defects.length ? [{ roots: stock.carry.defects }] : []),
+      ...(claim && stock.carry?.writer ? [{ ...claim, roots: [], writer: stock.carry.writer }] : []),
+    ];
+    const reference = by.ok ? { plan, date, roots: [], writer: by.writer } : { plan, date, roots: by.roots };
+    return withSecurity(nodes, { ...stock, carry, pendingCarries: [...earlier, reference] });
+  }
   const draw = stock.draw?.value;
   if (!draw || draw.quantity === ZERO || (plan && plan !== draw.plan)) return nodes;
   const marked = withSecurity(nodes, { ...stock, carry, draw: stamped(stock.draw, { ...draw, quantity: ZERO }, by) });
