@@ -25,6 +25,7 @@ import { TX_WARRANT_TRANSFER } from "./validators/warrant/tx_warrant_transfer";
 import { TX_WARRANT_EXERCISE } from "./validators/warrant/tx_warrant_exercise";
 import { text, toValidate, type CheckObject } from "./validators/checkKit";
 import { issuanceIdChecks, noEarlierRemoval } from "./validators/checks";
+import { endOfDayFindings } from "./validators/stock_plan/pool";
 import { TX_STOCK_PLAN_POOL_ADJUSTMENT } from "./validators/stock_plan/tx_stock_plan_pool_adjustment";
 import { TX_STOCK_PLAN_RETURN_TO_POOL } from "./validators/stock_plan/tx_stock_plan_return_to_pool";
 import { withPlans } from "./stockPlan";
@@ -576,6 +577,7 @@ export const ocfMachine = setup({
   // Create fresh collections for each run so a caller cannot change another run's results.
   context: () => ({
     nodes: emptyNodes(),
+    nodesAtStartOfDay: emptyNodes(),
     ocfPackageContent: {
       manifest: {},
       stakeholders: [],
@@ -603,17 +605,29 @@ export const ocfMachine = setup({
         ...buildTransactionHandlers(),
         START: {
           target: "capTable",
-          actions: assign({
-            ocfPackageContent: ({ event }) => event.data,
-            removals: ({ event }) => earliestRemovals(event.data.transactions),
-            // Start with the reserves in the stock plan files.
-            nodes: ({ context, event }) => withPlans(context.nodes, event.data.stockPlans),
+          actions: assign(({ context, event }) => {
+            // Load plans before saving the starting map so an initial reserve does not count as a
+            // first-day transaction.
+            const nodes = withPlans(context.nodes, event.data.stockPlans);
+            return {
+              ocfPackageContent: event.data,
+              removals: earliestRemovals(event.data.transactions),
+              nodes,
+              nodesAtStartOfDay: nodes,
+            };
           }),
         },
+        // Check the day's final totals before taking the snapshot. Save this map as the starting
+        // point for the next day.
         RUN_EOD: {
           target: "capTable",
-          actions: assign({
-            snapshots: ({ context, event }) => [...context.snapshots, run_EOD(context, event)],
+          actions: assign(({ context, event }) => {
+            const found = endOfDayFindings(context, context.nodesAtStartOfDay, event.date);
+            return {
+              ...(found.length === 0 ? {} : { findings: [...context.findings, ...found] }),
+              snapshots: [...context.snapshots, run_EOD(context, event)],
+              nodesAtStartOfDay: context.nodes,
+            };
           }),
         },
         RUN_END: {

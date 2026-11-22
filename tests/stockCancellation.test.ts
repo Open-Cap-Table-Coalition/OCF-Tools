@@ -47,7 +47,8 @@ describe("returning cancelled stock to a plan", () => {
       { ...poolReturn, quantity: "0.1", stock_plan_id: "successor" },
       { ...poolReturn, id: "repeat", quantity: "0.0000000001", date: "2021-07-01" },
     ], [{ id: "holder" }], [{ id: "common" }], plans);
-    expect(context.findings).toMatchObject([{ check: "quantity-returnable", subject: { id: "repeat" } }]);
+    const transactionFindings = context.findings.filter((finding) => finding.subject.object_type !== "STOCK_PLAN");
+    expect(transactionFindings).toMatchObject([{ check: "quantity-returnable", subject: { id: "repeat" } }]);
     expect(context.snapshots.at(-1)?.stockPlans.map((p) => p.drawn)).toEqual(["0.3", "-0.1"]);
   });
 

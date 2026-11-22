@@ -1,0 +1,17 @@
+{
+  "file_type": "OCF_STAKEHOLDERS_FILE",
+  "items": [
+    {
+      "id": "emily",
+      "object_type": "STAKEHOLDER",
+      "name": { "legal_name": "Emily Employee" },
+      "stakeholder_type": "INDIVIDUAL"
+    },
+    {
+      "id": "omar",
+      "object_type": "STAKEHOLDER",
+      "name": { "legal_name": "Omar Engineer" },
+      "stakeholder_type": "INDIVIDUAL"
+    }
+  ]
+}
