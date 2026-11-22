@@ -1,3 +1,4 @@
+import { OrderedMap } from "immutable";
 import type { Subject } from "../types/finding";
 import { withNodeField, type Field, type NodeBase, type NodeMaps } from "./node";
 export type { Field, NodeBase } from "./node";
@@ -8,8 +9,7 @@ import type { CollectionElement, CollectionKey, Descriptor } from "./ocfMachine"
 // module.
 
 // Look up securities by ID and keep removed records so later checks can explain what happened. Each
-// field records its own value and writer. Updates copy the map and reuse unchanged records, so
-// earlier snapshots can read the earlier state.
+// field records its own value and writer. Index updates share unchanged records with earlier states.
 
 /** Issuance transaction for any of the four security families. */
 export type Issuance = CollectionElement[CollectionKey];
@@ -32,8 +32,46 @@ export type SecurityNode<C extends CollectionKey = CollectionKey> = SecuritiesBy
 /** Securities keyed by security_id, including removed securities, in issuance order. */
 export type NodeMap = NodeMaps<SecurityNode>;
 
-/** Initial state before reading any transactions. */
-export const emptyNodes = (): NodeMap => ({ security: new Map() });
+type SecurityMap = OrderedMap<unknown, SecurityNode>;
+type SecurityIndex = { history: SecurityMap; outstanding: SecurityMap };
+const indexes = new WeakMap<NodeMap, SecurityIndex>();
+
+/** Keep the public native map available for callers and structuredClone. */
+function fromIndex(index: SecurityIndex): NodeMap {
+  let history: ReadonlyMap<unknown, SecurityNode> | undefined;
+  const nodes = {
+    get security() {
+      return history ??= new Map(index.history);
+    },
+  };
+  indexes.set(nodes, index);
+  return nodes;
+}
+
+/** A caller can also supply a plain NodeMap or resume from a structured clone. */
+function indexOf(nodes: NodeMap): SecurityIndex {
+  const indexed = indexes.get(nodes);
+  if (indexed) return indexed;
+  const history = OrderedMap(nodes.security);
+  const index = { history, outstanding: history.filter(isOutstanding) };
+  indexes.set(nodes, index);
+  return index;
+}
+
+export const emptyNodes = (): NodeMap => {
+  const history = OrderedMap<unknown, SecurityNode>();
+  return fromIndex({ history, outstanding: history });
+};
+
+/** Look up any security, including one that has been removed. */
+export const securityById = (nodes: NodeMap, id: unknown): SecurityNode | undefined => {
+  const index = indexes.get(nodes);
+  return index ? index.history.get(id) : nodes.security.get(id);
+};
+
+/** Iterate in issuance order. Use the smaller index when only outstanding records are needed. */
+export const securityRecords = (nodes: NodeMap, scope: keyof SecurityIndex): Iterable<SecurityNode> =>
+  indexOf(nodes)[scope].values();
 
 /** Record the new value and the transaction that supplied it. */
 const written = <T>(value: T, writer: Subject): Field<T> => ({ value, writer, defects: [] });
@@ -47,12 +85,11 @@ const subjectOf = (transaction: Applied): Subject => ({
   id: transaction.id,
 });
 
-/** Copy the index and reuse the other records. */
-const withSecurity = (nodes: NodeMap, node: SecurityNode): NodeMap => {
-  const security = new Map(nodes.security);
-  security.set(node.id, node);
-  return { ...nodes, security };
-};
+/** Each write shares the unchanged branches of both ordered indexes. */
+const withSecurity = (index: SecurityIndex, node: SecurityNode): NodeMap => fromIndex({
+  history: index.history.set(node.id, node),
+  outstanding: isOutstanding(node) ? index.outstanding.set(node.id, node) : index.outstanding.remove(node.id),
+});
 
 /**
  * Apply a valid transaction to its family's securities. Issuance stores the record, removal updates
@@ -63,7 +100,8 @@ export function applyTransaction(nodes: NodeMap, descriptor: Descriptor, transac
   const writer = subjectOf(transaction);
 
   if (descriptor.effect === "append") {
-    if (nodes.security.has(transaction.security_id)) return nodes;
+    const index = indexOf(nodes);
+    if (index.history.has(transaction.security_id)) return nodes;
     // The descriptor selects the family for the parsed issuance. TypeScript needs that relationship
     // stated here.
     const node = {
@@ -73,13 +111,13 @@ export function applyTransaction(nodes: NodeMap, descriptor: Descriptor, transac
       lifecycle: written<LifecycleState>("outstanding", writer),
       issuance: written(transaction as unknown as Issuance, writer),
     } as SecurityNode;
-    return withSecurity(nodes, node);
+    return withSecurity(index, node);
   }
 
   if (descriptor.effect === "remove") {
     const node = outstandingSecurity(nodes, descriptor.collection, transaction.security_id);
     if (node === undefined) return nodes;
-    return withSecurity(nodes, withNodeField(node, "lifecycle", written<LifecycleState>("removed", writer)));
+    return withSecurity(indexOf(nodes), withNodeField(node, "lifecycle", written<LifecycleState>("removed", writer)));
   }
 
   return nodes;
@@ -94,19 +132,19 @@ export const isSecurityFamily = <C extends CollectionKey>(node: SecurityNode, fa
 
 /** Find an outstanding security in this family by ID. */
 export const outstandingSecurity = <C extends CollectionKey>(nodes: NodeMap, family: C, securityId: unknown): SecurityNode<C> | undefined => {
-  const node = nodes.security.get(securityId);
+  const node = securityById(nodes, securityId);
   return node !== undefined && isSecurityFamily(node, family) && isOutstanding(node) ? node : undefined;
 };
 
 /** Include all securities in this family in issuance order, including removed ones. */
 export const securitiesIn = <C extends CollectionKey>(nodes: NodeMap, family: C): SecurityNode<C>[] =>
-  [...nodes.security.values()].filter((node): node is SecurityNode<C> => isSecurityFamily(node, family));
+  [...securityRecords(nodes, "history")].filter((node): node is SecurityNode<C> => isSecurityFamily(node, family));
 
 /** List a family's outstanding issuances in the order used by the original collection. */
 export const outstanding = <C extends CollectionKey>(nodes: NodeMap, family: C): CollectionElement[C][] => {
   const issuances: CollectionElement[C][] = [];
-  for (const node of securitiesIn(nodes, family)) {
-    if (isOutstanding(node) && node.issuance.value !== undefined) {
+  for (const node of securityRecords(nodes, "outstanding")) {
+    if (isSecurityFamily(node, family) && node.issuance.value !== undefined) {
       issuances.push(node.issuance.value);
     }
   }

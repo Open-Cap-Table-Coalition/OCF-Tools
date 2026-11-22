@@ -1,6 +1,7 @@
 /** The build checks the public context and its security records. */
 import type { LegacyContext, OcfMachineContext } from "../ocf_validator/ocfMachine";
-import type { Field, NodeMap, SecurityNode, outstanding } from "../ocf_validator/nodes";
+import type { Field, NodeMap, SecurityNode } from "../ocf_validator/nodes";
+import type { outstanding } from "../index";
 import type { LifecycleState } from "../ocf_validator/lifecycle";
 import type { Subject } from "./finding";
 import type { Snapshot } from "./snapshot";

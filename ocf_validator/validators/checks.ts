@@ -1,7 +1,7 @@
 import type { OCFStockIssuance } from "@opencaptablecoalition/ocf-types";
 import type { OcfTransaction, TransactionFor } from "../../types/ocf-input";
 import type { DeepReadonly, OcfMachineContext } from "../../types/validator";
-import { outstandingSecurity } from "../nodes";
+import { outstandingSecurity, securityById } from "../nodes";
 import type { CollectionElement, CollectionKey, TxKey } from "../ocfMachine";
 import { currentName, type CurrentTxKey } from "../constants/constants";
 import { text, type CheckObject } from "./checkKit";
@@ -82,7 +82,7 @@ export const uniqueSecurityId = {
   severity: "error",
   description: "Each security ID is issued only once.",
   run: (context, data) => {
-    const original = context.nodes.security.get(data.security_id);
+    const original = securityById(context.nodes, data.security_id);
     // An earlier removal already has its own finding. Same-day reuse still needs this one.
     if (original === undefined || removalBefore(context, data)) return [];
     return [text`The security ID ${data.security_id} was already issued by ${original.issuance.writer?.id}.`];

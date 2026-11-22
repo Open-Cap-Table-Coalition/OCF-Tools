@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { applyTransaction, emptyNodes, outstanding, outstandingSecurity, securitiesIn, type NodeMap } from "../ocf_validator/nodes";
+import { applyTransaction, emptyNodes, outstandingSecurity, securitiesIn, type NodeMap } from "../ocf_validator/nodes";
+import { outstanding } from "../index";
 import { TX_DESCRIPTORS, type TxKey } from "../ocf_validator/ocfMachine";
 import { collection, validatePackage } from "./helpers";
 
@@ -80,6 +81,21 @@ describe("the reducer", () => {
 
     expect(after.security.get("war-2")).toBe(before.security.get("war-2"));
     expect(after.security.get("war-1")).not.toBe(before.security.get("war-1"));
+  });
+
+  it("can resume two independent runs from a cloned history", () => {
+    const first = issuance("wi-1", "war-1");
+    const second = issuance("wi-2", "war-2");
+    const cloned = structuredClone(apply(emptyNodes(), first, second));
+    expect(cloned.security).toBeInstanceOf(Map);
+
+    const left = apply(cloned, on("TX_WARRANT_CANCELLATION", "wc-1", "war-1"));
+    const right = apply(cloned, on("TX_WARRANT_CANCELLATION", "wc-2", "war-2"));
+
+    expect(outstanding(cloned, "warrantIssuances")).toEqual([first, second]);
+    expect(outstanding(left, "warrantIssuances")).toEqual([second]);
+    expect(outstanding(right, "warrantIssuances")).toEqual([first]);
+    expect([...left.security.keys()]).toEqual(["war-1", "war-2"]);
   });
 
   it("returns the same map for a transaction that changes nothing", () => {

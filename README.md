@@ -32,6 +32,15 @@ Validation goes through the transactions in date order and stops at the first on
 - `snapshots` holds the cap table at the end of each day with transactions, up to the last day validated in full.
 - `nodes` holds the state the run built the snapshots from: every security it issued, including the ones since removed. A security ID can be issued only once across all four families. Each security records where it is in its life and its issuance, and for each of those the transaction that last wrote it. It replaces the four arrays of outstanding issuances (`stockIssuances`, `convertibleIssuances`, `warrantIssuances`, `equityCompensation`) the output used to carry.
 
+To read one of the former issuance lists, use `outstanding` from the package entry point. It returns the family's outstanding issuances in their original order.
+
+```js
+const { ocfValidator, outstanding } = require("ocf-tools");
+
+const { nodes } = ocfValidator(ocfPackageFolderDir);
+const stock = outstanding(nodes, "stockIssuances");
+```
+
 ## OCF Snapshot
 
 This tool allows the user to see the outstanding captable of a OCF package on a given date.
@@ -46,7 +55,14 @@ const snapshot = ocfSnapshot(ocfPackageFolderDir, ocfSnapshotDate);
 
 ### (before publication to NPM)
 
-Download this repository and run `npm i; npm run build; npm link;`
+For a local JavaScript project, run these commands in the toolset checkout. The build type-checks the source, and the next command emits the JavaScript used by the linked package.
+
+```sh
+npm ci
+npm run build
+npm exec -- tsc --noEmit false --allowImportingTsExtensions false --noCheck
+npm link
+```
 
 In the project that you want to use ocf-tools, run `npm link ocf-tools` and add
 `const { readOcfPackage, ocfValidator, ocfSnapshot } = require("ocf-tools");`

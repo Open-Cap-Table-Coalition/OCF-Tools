@@ -106,9 +106,15 @@ export function lifecycleStep(
   return { allowed: true, next: getNextSnapshot(chart, from, event).value as LifecycleState };
 }
 
-/** Check the chart's tag to decide whether the security belongs on the cap table. */
-export const isOnCapTable = (
-  family: CollectionKey,
-  state: LifecycleState,
-  chart: LifecycleChart = lifecycleChart(family),
-): boolean => chart.resolveState({ value: state, context: {} }).hasTag(ON_CAP_TABLE);
+const visibility = new WeakMap<LifecycleChart, Record<LifecycleState, boolean>>();
+
+/** Resolve each state's tag once per chart. */
+export function isOnCapTable(family: CollectionKey, state: LifecycleState, chart = lifecycleChart(family)): boolean {
+  let states = visibility.get(chart);
+  if (!states) {
+    const tagged = (value: LifecycleState) => chart.resolveState({ value, context: {} }).hasTag(ON_CAP_TABLE);
+    states = { notIssued: tagged("notIssued"), outstanding: tagged("outstanding"), removed: tagged("removed") };
+    visibility.set(chart, states);
+  }
+  return states[state];
+}
