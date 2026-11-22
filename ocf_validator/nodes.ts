@@ -6,7 +6,7 @@ export type { Field, NodeBase } from "./node";
 import type { LifecycleState } from "./lifecycle";
 import type { CollectionElement, CollectionKey, Descriptor } from "./ocfMachine";
 
-import { poolWrites, type PoolTransaction, type Draw } from "./stockPlan";
+import { isStockPlanId, poolWrites, type PoolTransaction, type Draw } from "./stockPlan";
 export { withPlans, type Draw } from "./stockPlan";
 
 // Import only types from the chart and machine here. Both load validators that already import this
@@ -34,6 +34,12 @@ export type SecurityState<C extends CollectionKey> = {
 } : {}) & (C extends "equityCompensation" ? { provenance?: Subject; remaining?: string } : {})
   & (C extends "stockIssuances" ? { carry?: { plan?: string; date?: string }; consolidatedInto?: string } : {});
 
+/**
+ * A failed source named this security before its issuance. Keep the plan and date the source
+ * expected, so a later issuance or claim that cannot match them ignores the failure.
+ */
+export type PendingCarry = { readonly plan?: string; readonly date?: string; readonly roots: readonly Subject[] };
+
 /** An issuance withheld in another family has no known values or writers. */
 type WithheldIssuance = { readonly lifecycle: Field<never>; readonly issuance: Field<never> };
 type WithheldByFamily = Readonly<Partial<Record<CollectionKey, WithheldIssuance>>>;
@@ -44,8 +50,9 @@ type SecuritiesByFamily = {
     readonly family: F;
     /** Other families that attempted issuance while this ID was uncertain. Snapshots list the ID once. */
     readonly withheldByFamily?: WithheldByFamily;
-  } & (F extends "stockIssuances" ? {
-    readonly pendingCarries?: readonly { plan?: string; date?: string; roots: readonly Subject[] }[];
+  } & (F extends "equityCompensation" | "stockIssuances" ? {
+    /** Held only until the security's first successful issuance. */
+    readonly pendingCarries?: readonly PendingCarry[];
   } : {});
 };
 export type SecurityNode<C extends CollectionKey = CollectionKey> = SecuritiesByFamily[C];
@@ -55,14 +62,19 @@ export type PlanNode = NodeBase<"plan", { reserved: string; drawn: string }>;
 export type NodeMap = NodeMaps<SecurityNode | PlanNode>;
 
 type SecurityMap = OrderedMap<unknown, SecurityNode>;
+type PlanMap = OrderedMap<unknown, PlanNode>;
 type SecurityIndex = { history: SecurityMap; current: SecurityMap };
-const indexes = new WeakMap<NodeMap, SecurityIndex>();
+/** Maps with the same plans share one native plan map, held here once it is built. */
+type Index = SecurityIndex & { plan: PlanMap; planView: { native?: NodeMap["plan"] } };
+const indexes = new WeakMap<NodeMap, Index>();
 
-/** Keep the public native map available for callers and structuredClone. */
-function fromIndex(index: SecurityIndex, plan: NodeMap["plan"] = new Map()): NodeMap {
+/** Keep the public native maps available for callers and structuredClone. Build each on first read. */
+function fromIndex(index: Index): NodeMap {
   let history: ReadonlyMap<unknown, SecurityNode> | undefined;
   const nodes = {
-    plan,
+    get plan() {
+      return index.planView.native ??= new Map(index.plan);
+    },
     get security() {
       return history ??= new Map(index.history);
     },
@@ -72,24 +84,30 @@ function fromIndex(index: SecurityIndex, plan: NodeMap["plan"] = new Map()): Nod
 }
 
 /** A caller can also supply a plain NodeMap or resume from a structured clone. */
-function indexOf(nodes: NodeMap): SecurityIndex {
+function indexOf(nodes: NodeMap): Index {
   const indexed = indexes.get(nodes);
   if (indexed) return indexed;
   const history = OrderedMap(nodes.security);
-  const index = { history, current: history.filter(isCurrent) };
+  const index = { history, current: history.filter(isCurrent), plan: OrderedMap(nodes.plan ?? []), planView: { native: nodes.plan } };
   indexes.set(nodes, index);
   return index;
 }
 
 export const emptyNodes = (): NodeMap => {
   const history = OrderedMap<unknown, SecurityNode>();
-  return fromIndex({ history, current: history });
+  return fromIndex({ history, current: history, plan: OrderedMap(), planView: {} });
 };
 
 /** Look up any security, including one that has been removed. */
 export const securityById = (nodes: NodeMap, id: unknown): SecurityNode | undefined => {
   const index = indexes.get(nodes);
   return index ? index.history.get(id) : nodes.security.get(id);
+};
+
+/** Look up a stock plan without building the native plan map. */
+export const planById = (nodes: NodeMap, id: unknown): PlanNode | undefined => {
+  const index = indexes.get(nodes);
+  return index ? index.plan.get(id) : nodes.plan?.get(id);
 };
 
 /** Iterate in issuance order. Use the smaller index when only outstanding records are needed. */
@@ -143,15 +161,25 @@ const withheldFields = (node?: SecurityNode): WithheldIssuance => ({
   issuance: unknown(node?.issuance.defects),
 });
 
-/** Each write shares the unchanged branches of both ordered indexes. */
-export const withPlanMap = (nodes: NodeMap, plan: NodeMap["plan"]) => fromIndex(indexOf(nodes), plan);
+// Each write shares the unchanged branches of the ordered indexes.
+
+/** Add or replace plans. A new plan keeps the order in which it was first seen. */
+export function withPlanNodes(nodes: NodeMap, plans: readonly PlanNode[]): NodeMap {
+  const index = indexOf(nodes);
+  return fromIndex({ ...index, plan: index.plan.withMutations((map) => plans.forEach((plan) => map.set(plan.id, plan))), planView: {} });
+}
 
 export function withSecurity(nodes: NodeMap, node: SecurityNode): NodeMap {
   const index = indexOf(nodes);
+  const current = isCurrent(node);
+  // A record named before its issuance takes its place in the order when it is first issued, so a
+  // rebuilt index lists the same order.
+  const history = current && !index.current.has(node.id) ? index.history.remove(node.id) : index.history;
   return fromIndex({
-    history: index.history.set(node.id, node),
-    current: isCurrent(node) ? index.current.set(node.id, node) : index.current.remove(node.id),
-  }, nodes.plan);
+    ...index,
+    history: history.set(node.id, node),
+    current: current ? index.current.set(node.id, node) : index.current.remove(node.id),
+  });
 }
 
 /** Find the families this transaction can act on. */
@@ -244,6 +272,9 @@ function withheld(nodes: NodeMap, descriptor: Descriptor, transaction: Applied, 
   let updated = held;
   for (const family of familiesOf(descriptor)) {
     if (family === held.family) {
+      // A security that another transaction has only named has no lifecycle to mark yet. Marking it
+      // would list it in snapshots before any issuance.
+      if (held.lifecycle.value === undefined && held.lifecycle.defects.length === 0) continue;
       const lifecycle = markDefects(held.lifecycle, roots);
       if (lifecycle !== held.lifecycle) updated = { ...updated, lifecycle };
     } else {
@@ -264,7 +295,10 @@ function withheld(nodes: NodeMap, descriptor: Descriptor, transaction: Applied, 
  * Identify the security family, ID and field a check needs. The field definition determines the
  * returned value's type.
  */
-type Address<N, F> = { readonly kind: "security"; readonly family: F; readonly id: unknown; readonly field: FieldKey<N> };
+type Address<N, F> = { readonly kind: "security"; readonly family: F; readonly id: unknown; readonly field: FieldKey<N>; readonly claim?: Claim };
+
+/** The grant and date of a transaction that names a security as its balance, result or settlement. */
+export type Claim = { readonly source: unknown; readonly date: unknown };
 type SecurityRef = { [C in CollectionKey]: Address<SecurityNode<C>, C> }[CollectionKey]
   | Address<SecurityNode, undefined>;
 type PlanRef = { readonly kind: "plan"; readonly id: unknown; readonly field: FieldKey<PlanNode> };
@@ -274,17 +308,48 @@ type Referent<R extends FieldRef> = R extends PlanRef ? PlanNode :
 export type FieldRefValue<R extends FieldRef> = FieldValue<Referent<R>, Extract<R["field"], FieldKey<Referent<R>>>>;
 
 export function securityField<C extends CollectionKey | undefined, P extends FieldKey<SecurityNode<C extends CollectionKey ? C : CollectionKey>>>(
-  family: C, id: unknown, field: P,
+  family: C, id: unknown, field: P, claim?: Claim,
 ) {
-  return { kind: "security", family, id, field } as const;
+  return { kind: "security", family, id, field, ...(claim && { claim }) } as const;
 }
+
+/**
+ * Collect the failed references that this plan and date cannot rule out. A reference with an unknown
+ * plan or date could match any issuance.
+ */
+export const pendingRoots = (pending: readonly PendingCarry[], plan: unknown, date: unknown): readonly Subject[] => {
+  const roots: Subject[] = [];
+  for (const reference of pending) {
+    if ((reference.plan === undefined || reference.plan === plan) && (reference.date === undefined || reference.date === date)) {
+      for (const root of reference.roots) addRoot(roots, root);
+    }
+  }
+  return roots;
+};
 
 export function planField<P extends FieldKey<PlanNode>>(id: unknown, field: P) {
   return { kind: "plan", id, field } as const;
 }
 
+/**
+ * Another source's failure on a carried charge matters only to a claim that could reach the same
+ * issuance. A grant without a plan carries no charge. A grant with a plan carries it only to an
+ * issuance with that plan on the claim's date.
+ */
+function claimDefects(nodes: NodeMap, node: SecurityNode, defects: readonly Subject[], claim: Claim): readonly Subject[] {
+  const source = securityAt(nodes, "equityCompensation", claim.source)?.issuance.value;
+  const plan = source?.stock_plan_id;
+  if (source && !isStockPlanId(plan)) return [];
+  if ("pendingCarries" in node && node.pendingCarries) return pendingRoots(node.pendingCarries, plan, claim.date);
+  const issued = node.issuance.value;
+  if (!issued) return defects;
+  const otherPlan = source !== undefined && (!("stock_plan_id" in issued) || issued.stock_plan_id !== plan);
+  const otherDate = claim.date !== undefined && issued.date !== claim.date;
+  return otherPlan || otherDate ? [] : defects;
+}
+
 export function fieldAt<R extends FieldRef>(nodes: NodeMap, ref: R, removals?: OcfMachineContext["removals"]): Field<FieldRefValue<R>> | undefined {
-  if (ref.kind === "plan") return nodes.plan?.get(ref.id)?.[ref.field] as Field<FieldRefValue<R>> | undefined;
+  if (ref.kind === "plan") return planById(nodes, ref.id)?.[ref.field] as Field<FieldRefValue<R>> | undefined;
   const node = securityById(nodes, ref.id);
   if (!node) return;
   const shared = ref.field === "lifecycle" || ref.field === "issuance" ? ref.field : undefined;
@@ -295,6 +360,9 @@ export function fieldAt<R extends FieldRef>(nodes: NodeMap, ref: R, removals?: O
   let field = fields[ref.field];
   if (ref.family === undefined && shared && field && node.withheldByFamily) {
     for (const other of Object.values(node.withheldByFamily)) field = markDefects(field, other[shared].defects);
+  }
+  if (ref.claim && field?.defects.length && (ref.field === "carry" || ref.field === "provenance")) {
+    field = { ...field, defects: claimDefects(nodes, node, field.defects, ref.claim) };
   }
   // Older saved records identify the applied removal by its lifecycle writer.
   if (ref.field === "removal" && !field && node.lifecycle.value === "removed") {

@@ -3,7 +3,7 @@ import type { Descriptor, CollectionKey } from "./ocfMachine";
 import { withNodeField, type Field } from "./node";
 import { currentName } from "./constants/constants";
 import type { LifecycleState } from "./lifecycle";
-import { isSecurityFamily, markDefects, securityById, withPlanMap, withSecurity, written, type NodeMap, type PlanNode, type SecurityNode } from "./nodes";
+import { isSecurityFamily, markDefects, pendingRoots, planById, securityById, withPlanNodes, withSecurity, written, type NodeMap, type PendingCarry, type PlanNode, type SecurityNode } from "./nodes";
 import { add, exceeds, isNumeric, isQuantity, subtract } from "./numeric";
 
 /** The plan and quantity charged for this grant. */
@@ -64,10 +64,10 @@ const ZERO = "0";
 
 /** Start a newly referenced plan at zero drawn shares with an unknown reserve. */
 const planAt = (nodes: NodeMap, id: unknown): PlanNode =>
-  nodes.plan?.get(id) ?? { kind: "plan", id, reserved: unknown(), drawn: { value: ZERO, writer: undefined, defects: [] } };
+  planById(nodes, id) ?? { kind: "plan", id, reserved: unknown(), drawn: { value: ZERO, writer: undefined, defects: [] } };
 
-/** Copy the plan index and reuse the other plan records. */
-const withPlan = (nodes: NodeMap, plan: PlanNode): NodeMap => withPlanMap(nodes, new Map(nodes.plan).set(plan.id, plan));
+/** Replace one plan and reuse the other plan records. */
+const withPlan = (nodes: NodeMap, plan: PlanNode): NodeMap => withPlanNodes(nodes, [plan]);
 
 /** A stock issuance draws from a plan when it names that plan. */
 export const isStockPlanId = (id: unknown): id is string => typeof id === "string" && id.trim().length > 0;
@@ -81,16 +81,16 @@ const names = (id: unknown): boolean => id !== undefined && id !== null;
  */
 export function withPlans(nodes: NodeMap, stockPlans: unknown): NodeMap {
   if (!Array.isArray(stockPlans) || stockPlans.length === 0) return nodes;
-  const plan = new Map(nodes.plan);
+  const plans: PlanNode[] = [];
   for (const stockPlan of stockPlans) {
     if (typeof stockPlan !== "object" || stockPlan === null || !isStockPlanId(stockPlan.id)) continue;
     const reserved = (stockPlan as { initial_shares_reserved?: unknown }).initial_shares_reserved;
-    plan.set(stockPlan.id, {
+    plans.push({
       ...planAt(nodes, stockPlan.id),
       reserved: { value: isQuantity(reserved) ? reserved : undefined, writer: undefined, defects: [] },
     });
   }
-  return withPlanMap(nodes, plan);
+  return withPlanNodes(nodes, plans);
 }
 
 /**
@@ -168,40 +168,66 @@ function adjusted(nodes: NodeMap, planId: unknown, quantity: unknown, move: type
   return withPlan(nodes, withNodeField(plan, "drawn", written(move(plan.drawn.value ?? ZERO, quantity), by.writer, plan.drawn)));
 }
 
+/** Securities that can draw on a plan or carry a charge already drawn. */
+type Carrier = SecurityNode<"equityCompensation" | "stockIssuances">;
+
+/** A security can be issued and reliably removed before its source runs that day. */
+const removedThatDay = (node: Carrier, date: string | undefined): boolean =>
+  node.issuance.value !== undefined && date !== undefined && node.removal?.value?.date === date &&
+  !node.removal.defects.length && !node.lifecycle.defects.length && !node.issuance.defects.length;
+
+/** Remember what a failed source expected of a security that is not issued yet. */
+const pendingAfter = (node: Carrier, plan: string | undefined, date: string | undefined, by: Stamp): { pendingCarries?: readonly PendingCarry[] } =>
+  by.ok ? {} : { pendingCarries: [...(node.pendingCarries ?? []), { plan, date, roots: by.roots }] };
+
+/** Before issuance, keep only the failed references this plan and date cannot rule out. */
+const unsettled = (node: Carrier, field: Field<unknown>, planId: string, date?: string): readonly Subject[] =>
+  node.pendingCarries ? pendingRoots(node.pendingCarries, planId, date) : field.defects;
+
 /** A source can name a balance grant or settlement stock before that security is issued. */
-function carriedCharge(node: SecurityNode | undefined, planId: unknown, date?: string): Field<unknown> | undefined {
-  if (node?.family === "equityCompensation") return node.provenance;
-  if (node?.family === "stockIssuances" && isStockPlanId(planId)) {
+function carriedCharge(node: SecurityNode | undefined, planId: string, date?: string): Field<unknown> | undefined {
+  if (node?.family === "equityCompensation" && node.provenance) {
+    return { ...node.provenance, defects: unsettled(node, node.provenance, planId, date) };
+  }
+  if (node?.family === "stockIssuances" && node.carry) {
     const source = node.carry;
-    if (!source) return undefined;
-    // Unknown plan or date cannot rule out a pending reference.
-    const defects = node.pendingCarries?.reduce<readonly Subject[]>((roots, pending) =>
-      (pending.plan === undefined || pending.plan === planId) && (pending.date === undefined || pending.date === date)
-        ? withRoots(roots, pending.roots) : roots, []) ?? source.defects;
+    const defects = unsettled(node, source, planId, date);
     const matches = source.value?.date === date && source.value?.plan === planId;
     if (defects.length || matches) return { ...source, value: matches ? source.value : undefined, defects };
   }
   return undefined;
 }
 
+/** The first issuance settles which failed references still apply to the security. */
+function settled(node: Carrier, defects: readonly Subject[]): Carrier {
+  if (node.family === "stockIssuances") {
+    const { pendingCarries: _settled, ...stock } = node;
+    return stock.carry ? { ...stock, carry: { ...stock.carry, defects } } : stock;
+  }
+  const { pendingCarries: _settled, ...grant } = node;
+  return grant.provenance ? { ...grant, provenance: { ...grant.provenance, defects } } : grant;
+}
+
 /** Charge the plan for a grant's first independent issuance. */
 function drawn(before: NodeMap, nodes: NodeMap, transaction: PoolTransaction, by: Stamp, family: CollectionKey): NodeMap {
-  if (!isStockPlanId(transaction.stock_plan_id)) return nodes;
   let node = securityById(nodes, transaction.security_id);
   const held = securityById(before, transaction.security_id);
 
   // An earlier issuance already accounted for this ID.
   if (held !== undefined && held.lifecycle.value !== undefined) return nodes;
 
-  if (by.ok && node?.family === "equityCompensation" && isNumeric(transaction.quantity)) {
-    node = { ...node, remaining: written(transaction.quantity, by.writer) };
+  // The source already accounted for these shares when it named this grant.
+  const planId = transaction.stock_plan_id;
+  const provenance = isStockPlanId(planId) && held?.family === family ? carriedCharge(held, planId, transaction.date) : undefined;
+  // No plan charge can reach an issuance without a plan, so no failed reference applies to it.
+  if (by.ok && node && "pendingCarries" in node && node.pendingCarries) {
+    node = settled(node, provenance?.defects ?? []);
     nodes = withSecurity(nodes, node);
   }
+  if (!isStockPlanId(planId)) return nodes;
 
-  // The source already accounted for these shares when it named this grant.
-  const provenance = held?.family === family ? carriedCharge(held, transaction.stock_plan_id, transaction.date) : undefined;
-  if (by.ok && node?.family === "stockIssuances" && node.carry && node.pendingCarries) {
-    node = { ...node, carry: { ...node.carry, defects: provenance?.defects ?? [] } };
+  if (by.ok && node?.family === "equityCompensation" && isNumeric(transaction.quantity)) {
+    node = { ...node, remaining: written(transaction.quantity, by.writer) };
     nodes = withSecurity(nodes, node);
   }
   const inDoubt = provenance !== undefined && provenance.defects.length > 0;
@@ -216,9 +242,9 @@ function drawn(before: NodeMap, nodes: NodeMap, transaction: PoolTransaction, by
       ? nodes
       : withSecurity(nodes, {
           ...node,
-          draw: stamped(node.draw, { plan: transaction.stock_plan_id, quantity: transaction.quantity as string }, how),
+          draw: stamped(node.draw, { plan: planId, quantity: transaction.quantity as string }, how),
         });
-  return adjusted(marked, transaction.stock_plan_id, transaction.quantity, add, how);
+  return adjusted(marked, planId, transaction.quantity, add, how);
 }
 
 /**
@@ -232,7 +258,10 @@ function carried(nodes: NodeMap, transaction: PoolTransaction, by: Stamp): NodeM
 
   const original = securityById(nodes, transaction.security_id);
   const grant = original?.family === "equityCompensation" ? original.issuance.value : undefined;
-  if (by.ok && !isStockPlanId(grant?.stock_plan_id)) return nodes;
+  const sourcePlan = grant?.stock_plan_id;
+  // A grant known to have no plan has no charge to carry, even when its transaction failed.
+  if (!isStockPlanId(sourcePlan) && (by.ok || grant)) return nodes;
+  const plan = isStockPlanId(sourcePlan) ? sourcePlan : undefined;
   return named.reduce<NodeMap>((map, id) => {
     if (id === transaction.security_id) return map;
     const held = securityById(map, id);
@@ -241,7 +270,9 @@ function carried(nodes: NodeMap, transaction: PoolTransaction, by: Stamp): NodeM
     const node = held ?? blankSecurity(id, "equityCompensation");
 
     const target = node.issuance.value;
-    if (node.provenance?.value || (target && (node.lifecycle.value !== "outstanding" ||
+    // A balance or resulting grant can be issued and removed before its source runs that day.
+    const live = node.lifecycle.value === "outstanding" || (node.lifecycle.value === "removed" && removedThatDay(node, transaction.date));
+    if (node.provenance?.value || (target && (!live ||
       target.date !== transaction.date || (grant && grant.stock_plan_id !== target.stock_plan_id)))) return map;
     const drew = node.draw?.value;
     const gaveBack = drew !== undefined && drew.quantity !== ZERO;
@@ -249,6 +280,7 @@ function carried(nodes: NodeMap, transaction: PoolTransaction, by: Stamp): NodeM
       ...node,
       provenance: stamped(node.provenance, source, by),
       ...(gaveBack ? { draw: stamped(node.draw, { plan: drew.plan, quantity: ZERO }, by) } : {}),
+      ...(!target && pendingAfter(node, plan, transaction.date, by)),
     });
     return gaveBack ? adjusted(next, drew.plan, drew.quantity, subtract, by) : next;
   }, nodes);
@@ -277,14 +309,9 @@ function carryStock(nodes: NodeMap, id: string, plan: string | undefined, date: 
   const issuance = stock.issuance.value;
   if (stock.carry?.value || (issuance && issuance.date !== date)) return nodes;
   // Stock can be issued and removed before its settlement or consolidation runs that day.
-  if (stock.lifecycle.value === "removed" && (!issuance || !date || stock.removal?.value?.date !== date ||
-      stock.removal.defects.length || stock.lifecycle.defects.length || stock.issuance.defects.length)) return nodes;
+  if (stock.lifecycle.value === "removed" && !removedThatDay(stock, date)) return nodes;
   const carry = stamped(stock.carry, { plan, date }, by);
-  if (!issuance) return withSecurity(nodes, {
-    ...stock,
-    carry,
-    ...(!by.ok && { pendingCarries: [...stock.pendingCarries ?? [], { plan, date, roots: by.roots }] }),
-  });
+  if (!issuance) return withSecurity(nodes, { ...stock, carry, ...pendingAfter(stock, plan, date, by) });
   const draw = stock.draw?.value;
   if (!draw || draw.quantity === ZERO || (plan && plan !== draw.plan)) return nodes;
   const marked = withSecurity(nodes, { ...stock, carry, draw: stamped(stock.draw, { ...draw, quantity: ZERO }, by) });
@@ -328,8 +355,10 @@ function carriedStock(nodes: NodeMap, transaction: PoolTransaction, by: Stamp): 
   const source = securityById(nodes, transaction.security_id);
   if (source?.family === "stockIssuances" && source.consolidatedInto?.value) return nodes;
   const settlement = type === "TX_EQUITY_COMPENSATION_EXERCISE" || type === "TX_EQUITY_COMPENSATION_RELEASE";
-  const sourcePlan = source?.family === (settlement ? "equityCompensation" : "stockIssuances") ? source.issuance.value?.stock_plan_id : undefined;
-  if (!isStockPlanId(sourcePlan) && by.ok) return nodes;
+  const issued = source?.family === (settlement ? "equityCompensation" : "stockIssuances") ? source.issuance.value : undefined;
+  const sourcePlan = issued?.stock_plan_id;
+  // A source known to have no plan has no charge to carry, even when its transaction failed.
+  if (!isStockPlanId(sourcePlan) && (by.ok || issued)) return nodes;
   const plan = isStockPlanId(sourcePlan) ? sourcePlan : undefined;
   const date = type === "TX_EQUITY_COMPENSATION_RELEASE" ? transaction.settlement_date ?? transaction.date : transaction.date;
   for (const id of new Set(replacementStockIds(transaction))) {
