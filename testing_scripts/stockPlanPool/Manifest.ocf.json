@@ -1,0 +1,27 @@
+{
+  "ocf_version": "1.1.1-alpha+main",
+  "file_type": "OCF_MANIFEST_FILE",
+  "issuer": {
+    "id": "poolCo",
+    "comments": [],
+    "object_type": "ISSUER",
+    "legal_name": "Pool Co",
+    "formation_date": "2021-01-01",
+    "country_of_formation": "US"
+  },
+  "as_of": "2022-12-31",
+  "generated_at": "2022-12-31T00:00:00.000Z",
+  "stock_plans_files": [{ "filepath": "./StockPlans.ocf.json", "md5": "00000000000000000000000000000000" }],
+  "stock_legend_templates_files": [],
+  "stock_classes_files": [{ "filepath": "./StockClasses.ocf.json", "md5": "00000000000000000000000000000000" }],
+  "transactions_files": [{ "filepath": "./Transactions.ocf.json", "md5": "00000000000000000000000000000000" }],
+  "stakeholders_files": [{ "filepath": "./Stakeholders.ocf.json", "md5": "00000000000000000000000000000000" }],
+  "vesting_terms_files": [],
+  "valuations_files": [],
+  "comments": [
+    "Check the daily share totals and findings for three stock plans (#225, #235).",
+    "Plan A reserves 1,000 shares. Grant a-bad names a missing stakeholder. Grant a-good draws 300 shares for a known stakeholder.",
+    "Plan B reserves 100 shares. Grants b-1 and b-2 draw 80 and 30 shares, exceeding the reserve by 10.",
+    "Plan C reserves 500 shares. Grant c-1 draws 100 using TX_PLAN_SECURITY_ISSUANCE. Cancellation c-cancel names c-balance for the remaining 60 shares. Return c-return credits the 40 cancelled shares."
+  ]
+}

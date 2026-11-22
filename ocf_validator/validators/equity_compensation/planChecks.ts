@@ -1,9 +1,10 @@
+import type { TransactionFor } from "../../../types/ocf-input";
 import type { DeepReadonly } from "../../../types/validator";
 import { currentName } from "../../constants/constants";
 import { securityField } from "../../nodes";
 import { add, exceeds, isQuantity, subtract } from "../../numeric";
 import { isStockPlanId } from "../../stockPlan";
-import { text, type CheckObject } from "../checkKit";
+import { text, type CheckContext, type CheckObject } from "../checkKit";
 import { isOfType } from "../checks";
 
 type Movement = {
@@ -33,12 +34,39 @@ export const planSourceQuantity = {
   },
 } satisfies CheckObject<Movement>;
 
+/** List the securities the transaction names and the date their issuances must carry. */
 function outputs(data: DeepReadonly<Movement>) {
   const type = currentName(data.object_type);
   const stock = type === "TX_EQUITY_COMPENSATION_EXERCISE" || type === "TX_EQUITY_COMPENSATION_RELEASE";
   const balance = !stock && data.balance_security_id;
   const results = type !== "TX_EQUITY_COMPENSATION_CANCELLATION" && Array.isArray(data.resulting_security_ids) ? data.resulting_security_ids : [];
-  return { stock, ids: balance ? [balance, ...results] : results };
+  const date = type === "TX_EQUITY_COMPENSATION_RELEASE" ? data.settlement_date ?? data.date : data.date;
+  return { stock, date, ids: balance ? [balance, ...results] : results };
+}
+
+type Issuance = DeepReadonly<TransactionFor<"TX_STOCK_ISSUANCE" | "TX_EQUITY_COMPENSATION_ISSUANCE">>;
+type IssuanceIndex = Map<string, Map<unknown, Issuance>>;
+const issuanceIndexes = new WeakMap<object, IssuanceIndex>();
+
+/**
+ * Find the first issuance of this type and security ID in the package. Index the package once per
+ * run so many deferred settlements do not each scan every transaction. Each run builds a new
+ * removals index from its transactions, so that index identifies the run.
+ */
+function firstIssuance({ ocfPackageContent, removals }: DeepReadonly<CheckContext>, type: Issuance["object_type"], id: unknown): Issuance | undefined {
+  let index = issuanceIndexes.get(removals);
+  if (!index) {
+    index = new Map();
+    for (const tx of ocfPackageContent.transactions) {
+      if (!isOfType(tx, "TX_STOCK_ISSUANCE") && !isOfType(tx, "TX_EQUITY_COMPENSATION_ISSUANCE")) continue;
+      const name = currentName(tx.object_type);
+      const byId = index.get(name) ?? new Map<unknown, Issuance>();
+      if (!byId.has(tx.security_id)) byId.set(tx.security_id, tx);
+      index.set(name, byId);
+    }
+    issuanceIndexes.set(removals, index);
+  }
+  return index.get(type)?.get(id);
 }
 
 /** Check the issuance even when settlement or same-day processing puts it after the source. */
@@ -47,28 +75,31 @@ export const planReplacement = {
   severity: "error",
   description: "Replacement grants and same-plan settlement stock match their source and its available shares.",
   reads: (data) => {
-    const { stock, ids } = outputs(data);
+    const { stock, date, ids } = outputs(data);
     if (!ids.length) return [];
+    // Another source's failed reference to an unissued output blocks this check only if both could
+    // name the same issuance.
+    const claim = { source: data.security_id, date };
     return [
       securityField("equityCompensation", data.security_id, "issuance"),
       securityField("equityCompensation", data.security_id, "remaining"),
       ...ids.flatMap((id) => [
         securityField(undefined, id, "issuance"),
         securityField(undefined, id, "lifecycle"),
-        ...(stock ? [securityField("stockIssuances", id, "removal")] : []),
-        stock ? securityField("stockIssuances", id, "carry") : securityField("equityCompensation", id, "provenance"),
+        stock ? securityField("stockIssuances", id, "removal") : securityField("equityCompensation", id, "removal"),
+        stock ? securityField("stockIssuances", id, "carry", claim) : securityField("equityCompensation", id, "provenance", claim),
       ]),
     ];
   },
-  run: ({ ocfPackageContent }, data, read) => {
-    const { stock, ids } = outputs(data);
+  run: (context, data, read) => {
+    const { stock, date, ids } = outputs(data);
     if (!ids.length) return [];
     const source = read(securityField("equityCompensation", data.security_id, "issuance"));
     if (!source) return []; // The issuance-exists check reports a missing source.
     const family = stock ? "TX_STOCK_ISSUANCE" : "TX_EQUITY_COMPENSATION_ISSUANCE";
     // Usually the target has already been issued. Look ahead only for outstanding references.
     const targets = ids.map((id) => read(securityField(undefined, id, "issuance")) ??
-      ocfPackageContent.transactions.find((tx) => isOfType(tx, family) && tx.security_id === id));
+      firstIssuance(context, family, id));
     // A planless grant or stock from a different plan has no charge to carry from this source.
     const carriesCharge = targets.some((tx) => tx && "stock_plan_id" in tx && isStockPlanId(tx.stock_plan_id) &&
       (!stock || tx.stock_plan_id === source.stock_plan_id));
@@ -78,16 +109,16 @@ export const planReplacement = {
     if (!isQuantity(remaining) || !isQuantity(data.quantity) || exceeds(data.quantity, remaining)) {
       return isStockPlanId(source.stock_plan_id) ? [] : ["The source quantity cannot support the replacement issuances."];
     }
-    const date = stock && currentName(data.object_type) === "TX_EQUITY_COMPENSATION_RELEASE" ? data.settlement_date ?? data.date : data.date;
     let total = "0";
     let hasResults = false;
     for (const [index, id] of ids.entries()) {
       const target = targets[index];
       const claimed = stock ? read(securityField("stockIssuances", id, "carry")) : read(securityField("equityCompensation", id, "provenance"));
       const balance = !stock && id === data.balance_security_id;
-      const removedOutsideSettlement = read(securityField(undefined, id, "lifecycle")) === "removed" &&
-        (!stock || !date || read(securityField("stockIssuances", id, "removal"))?.date !== date);
-      if (!target || !isOfType(target, family) || removedOutsideSettlement ||
+      // An output can be issued and removed before this transaction runs that day.
+      const removal = stock ? read(securityField("stockIssuances", id, "removal")) : read(securityField("equityCompensation", id, "removal"));
+      const removedEarlier = read(securityField(undefined, id, "lifecycle")) === "removed" && (!date || removal?.date !== date);
+      if (!target || !isOfType(target, family) || removedEarlier ||
           claimed || target.date !== date || !isQuantity(target.quantity) ||
           (source.stock_class_id && target.stock_class_id && source.stock_class_id !== target.stock_class_id) ||
           (!stock && (target.stock_plan_id !== source.stock_plan_id ||

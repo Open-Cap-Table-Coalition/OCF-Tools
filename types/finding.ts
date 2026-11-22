@@ -18,6 +18,8 @@ interface FindingFields {
   message: string;
   /** The OCF object the check evaluated. Package-wide findings would need their own subject type. */
   subject: Subject;
+  /** Date of the daily plan check, when applicable. */
+  date?: string;
 }
 
 /** The check ran and found a problem. */
@@ -32,7 +34,7 @@ export interface BlockedFinding extends FindingFields {
 }
 
 /**
- * A finding records the check, affected object, severity and outcome. A blocked finding also
- * identifies the earlier failures.
+ * A finding records a check's result for an object. A daily plan finding also gives the date. A
+ * blocked finding identifies the earlier failures that prevented the check.
  */
 export type Finding = FailedFinding | BlockedFinding;

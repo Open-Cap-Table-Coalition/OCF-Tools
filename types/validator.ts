@@ -22,6 +22,8 @@ export type OcfMachineContext = {
    * the run stops before it. A security record tracks its applied removal separately.
    */
   removals: ReadonlyMap<unknown, DeepReadonly<OcfTransaction>>;
+  /** Save the records at the start of the day so daily checks can identify which plans changed. */
+  nodesAtStartOfDay: NodeMap;
   report: any[];
   findings: Finding[];
   /**
