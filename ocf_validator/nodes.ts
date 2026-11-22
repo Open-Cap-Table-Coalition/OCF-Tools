@@ -44,7 +44,9 @@ type SecuritiesByFamily = {
     readonly family: F;
     /** Other families that attempted issuance while this ID was uncertain. Snapshots list the ID once. */
     readonly withheldByFamily?: WithheldByFamily;
-  };
+  } & (F extends "stockIssuances" ? {
+    readonly pendingCarries?: readonly { plan?: string; date?: string; roots: readonly Subject[] }[];
+  } : {});
 };
 export type SecurityNode<C extends CollectionKey = CollectionKey> = SecuritiesByFamily[C];
 

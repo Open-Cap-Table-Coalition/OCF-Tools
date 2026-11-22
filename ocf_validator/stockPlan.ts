@@ -173,7 +173,13 @@ function carriedCharge(node: SecurityNode | undefined, planId: unknown, date?: s
   if (node?.family === "equityCompensation") return node.provenance;
   if (node?.family === "stockIssuances" && isStockPlanId(planId)) {
     const source = node.carry;
-    if (source?.defects.length || (source?.value?.date === date && source?.value?.plan === planId)) return source;
+    if (!source) return undefined;
+    // Unknown plan or date cannot rule out a pending reference.
+    const defects = node.pendingCarries?.reduce<readonly Subject[]>((roots, pending) =>
+      (pending.plan === undefined || pending.plan === planId) && (pending.date === undefined || pending.date === date)
+        ? withRoots(roots, pending.roots) : roots, []) ?? source.defects;
+    const matches = source.value?.date === date && source.value?.plan === planId;
+    if (defects.length || matches) return { ...source, value: matches ? source.value : undefined, defects };
   }
   return undefined;
 }
@@ -194,6 +200,10 @@ function drawn(before: NodeMap, nodes: NodeMap, transaction: PoolTransaction, by
 
   // The source already accounted for these shares when it named this grant.
   const provenance = held?.family === family ? carriedCharge(held, transaction.stock_plan_id, transaction.date) : undefined;
+  if (by.ok && node?.family === "stockIssuances" && node.carry && node.pendingCarries) {
+    node = { ...node, carry: { ...node.carry, defects: provenance?.defects ?? [] } };
+    nodes = withSecurity(nodes, node);
+  }
   const inDoubt = provenance !== undefined && provenance.defects.length > 0;
   if (provenance?.value !== undefined && !inDoubt) return nodes;
 
@@ -270,7 +280,11 @@ function carryStock(nodes: NodeMap, id: string, plan: string | undefined, date: 
   if (stock.lifecycle.value === "removed" && (!issuance || !date || stock.removal?.value?.date !== date ||
       stock.removal.defects.length || stock.lifecycle.defects.length || stock.issuance.defects.length)) return nodes;
   const carry = stamped(stock.carry, { plan, date }, by);
-  if (!issuance) return withSecurity(nodes, { ...stock, carry });
+  if (!issuance) return withSecurity(nodes, {
+    ...stock,
+    carry,
+    ...(!by.ok && { pendingCarries: [...stock.pendingCarries ?? [], { plan, date, roots: by.roots }] }),
+  });
   const draw = stock.draw?.value;
   if (!draw || draw.quantity === ZERO || (plan && plan !== draw.plan)) return nodes;
   const marked = withSecurity(nodes, { ...stock, carry, draw: stamped(stock.draw, { ...draw, quantity: ZERO }, by) });
@@ -314,8 +328,9 @@ function carriedStock(nodes: NodeMap, transaction: PoolTransaction, by: Stamp): 
   const source = securityById(nodes, transaction.security_id);
   if (source?.family === "stockIssuances" && source.consolidatedInto?.value) return nodes;
   const settlement = type === "TX_EQUITY_COMPENSATION_EXERCISE" || type === "TX_EQUITY_COMPENSATION_RELEASE";
-  const plan = source?.family === (settlement ? "equityCompensation" : "stockIssuances") ? source.issuance.value?.stock_plan_id : undefined;
-  if (!isStockPlanId(plan) && by.ok) return nodes;
+  const sourcePlan = source?.family === (settlement ? "equityCompensation" : "stockIssuances") ? source.issuance.value?.stock_plan_id : undefined;
+  if (!isStockPlanId(sourcePlan) && by.ok) return nodes;
+  const plan = isStockPlanId(sourcePlan) ? sourcePlan : undefined;
   const date = type === "TX_EQUITY_COMPENSATION_RELEASE" ? transaction.settlement_date ?? transaction.date : transaction.date;
   for (const id of new Set(replacementStockIds(transaction))) {
     if (typeof id === "string" && id && id !== transaction.security_id) nodes = carryStock(nodes, id, plan, date, by);

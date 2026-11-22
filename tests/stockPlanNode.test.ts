@@ -615,6 +615,70 @@ describe("stock issued from a plan", () => {
   });
 
   it.each([
+    { plan: "plan-2", date: "2022-02-15", drawn: "40", defects: false },
+    { plan: "plan-1", date: "2022-02-16", drawn: "140", defects: false },
+    { plan: "plan-1", date: "2022-02-15", drawn: "100", defects: true },
+  ])("limits a blocked release's pending defect to matching settlement stock (%j)", ({ plan, date, drawn, defects }) => {
+    const bad = { id: "bad", object_type: "TX_EQUITY_COMPENSATION_EXERCISE", security_id: "option",
+      quantity: "101", date: "2022-01-15", resulting_security_ids: [] };
+    const release = { id: "release", object_type: "TX_PLAN_SECURITY_RELEASE", security_id: "option",
+      quantity: "40", date: "2022-02-01", settlement_date: "2022-02-15", resulting_security_ids: [stock.security_id] };
+    const root = subject(bad.object_type, bad.id);
+    const context = validatePackage([
+      grant("g-1", "option", "100"), bad, release,
+      { ...stock, stock_plan_id: plan, date, quantity: "40" },
+    ], stakeholders, [{ id: "common" }], [PLAN, { ...PLAN, id: "plan-2" }]);
+
+    expect(context.findings).toContainEqual(expect.objectContaining({
+      subject: subject(release.object_type, release.id), check: "plan-source-quantity", outcome: "blocked", roots: [root],
+    }));
+    expect(context.nodes.plan.get(plan)?.drawn).toMatchObject({ value: drawn, defects: defects ? [root] : [] });
+    expect(securityAt(context.nodes, "stockIssuances", stock.security_id)?.carry?.defects).toEqual(defects ? [root] : []);
+  });
+
+  it("keeps the roots of separate pending stock references with their own plans", () => {
+    const rootA = subject("TX_PLAN_SECURITY_RELEASE", "release-a");
+    const rootB = subject("TX_PLAN_SECURITY_RELEASE", "release-b");
+    const release = { object_type: "TX_PLAN_SECURITY_RELEASE", quantity: "40", date: "2022-02-01",
+      settlement_date: "2022-02-15", resulting_security_ids: [stock.security_id] };
+    const nodes = reduce(withPlans(emptyNodes(), [PLAN, { ...PLAN, id: "plan-2" }]),
+      [grant("a", "option-a", "100")],
+      [grant("b", "option-b", "100", { stock_plan_id: "plan-2" })],
+      [{ ...release, id: "release-a", security_id: "option-a" }, [rootA]],
+      [{ ...release, id: "release-b", security_id: "option-b" }, [rootB]],
+      [{ ...stock, stock_plan_id: "plan-2", date: "2022-02-15", quantity: "40" }],
+    );
+
+    expect(nodes.plan.get("plan-2")?.drawn).toMatchObject({ value: "100", defects: [rootB] });
+    expect(securityAt(nodes, "stockIssuances", stock.security_id)?.carry?.defects).toEqual([rootB]);
+  });
+
+  it("keeps a pending defect when the source plan is unknown and the settlement date matches", () => {
+    const root = subject("TX_PLAN_SECURITY_RELEASE", "release");
+    const release = { id: "release", object_type: "TX_PLAN_SECURITY_RELEASE", security_id: "missing",
+      quantity: "40", date: "2022-02-01", settlement_date: "2022-02-15", resulting_security_ids: [stock.security_id] };
+    const nodes = reduce(withPlan(), [release, [root]], [{ ...stock, date: "2022-02-15", quantity: "40" }]);
+
+    expect(nodes.plan.get("plan-1")?.drawn).toMatchObject({ value: "0", defects: [root] });
+  });
+
+  it("recognizes a successful carry after an unrelated failed reference", () => {
+    const root = subject("TX_PLAN_SECURITY_RELEASE", "release-a");
+    const release = { object_type: "TX_PLAN_SECURITY_RELEASE", quantity: "40", date: "2022-02-01",
+      settlement_date: "2022-02-15", resulting_security_ids: [stock.security_id] };
+    const nodes = reduce(withPlans(emptyNodes(), [PLAN, { ...PLAN, id: "plan-2" }]),
+      [grant("a", "option-a", "100")],
+      [grant("b", "option-b", "100", { stock_plan_id: "plan-2" })],
+      [{ ...release, id: "release-a", security_id: "option-a" }, [root]],
+      [{ ...release, id: "release-b", security_id: "option-b" }],
+      [{ ...stock, stock_plan_id: "plan-2", date: "2022-02-15", quantity: "40" }],
+    );
+
+    expect(nodes.plan.get("plan-2")?.drawn).toMatchObject({ value: "100", defects: [] });
+    expect(securityAt(nodes, "stockIssuances", stock.security_id)?.carry?.defects).toEqual([]);
+  });
+
+  it.each([
     { secondPlan: "plan-1", sum: "100", expected: "100" },
     { secondPlan: "plan-1", sum: "101", expected: "201" },
     { secondPlan: "plan-2", sum: "100", expected: "150" },
