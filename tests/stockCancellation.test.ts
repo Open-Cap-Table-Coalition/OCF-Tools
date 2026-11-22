@@ -40,6 +40,18 @@ describe("returning cancelled stock to a plan", () => {
     expect(context.snapshots.at(-1)?.stockPlans.map((p) => p.drawn)).toEqual(totals);
   });
 
+  it.each(["TX_STOCK_CANCELLATION", "TX_STOCK_REPURCHASE"])("returns fractional shares retired by %s exactly once", (type) => {
+    const balance = { ...issuance, id: "issue-balance", security_id: "balance", quantity: "0.2", date: cancellation.date };
+    const context = validatePackage([
+      { ...issuance, quantity: "0.3" }, balance, { ...cancellation, object_type: type, quantity: "0.1", balance_security_id: "balance" },
+      { ...poolReturn, quantity: "0.1", stock_plan_id: "successor" },
+      { ...poolReturn, id: "repeat", quantity: "0.0000000001", date: "2021-07-01" },
+    ], [{ id: "holder" }], [{ id: "common" }], plans);
+    const transactionFindings = context.findings.filter((finding) => finding.subject.object_type !== "STOCK_PLAN");
+    expect(transactionFindings).toMatchObject([{ check: "quantity-returnable", subject: { id: "repeat" } }]);
+    expect(context.snapshots.at(-1)?.stockPlans.map((p) => p.drawn)).toEqual(["0.3", "-0.1"]);
+  });
+
   it("counts the balance shares once on a partial RSA cancellation", () => {
     const balance = { ...issuance, id: "issue-balance", security_id: "balance", quantity: "60", date: cancellation.date };
     const context = validatePackage([

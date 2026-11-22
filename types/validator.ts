@@ -10,7 +10,7 @@ import type { Finding, Severity } from "./finding";
  */
 export type OcfMachineContext = {
   /**
-   * Current security records. Applying a transaction returns an updated map. Use outstanding to list
+   * Current security and stock plan records. Applying a transaction returns an updated map. Use outstanding to list
    * a family's current issuances.
    */
   nodes: NodeMap;
@@ -19,8 +19,7 @@ export type OcfMachineContext = {
    * An index of the package, not a record of the run: each security's
    * earliest transaction in the package that removes it from its collection
    * (a cancellation, conversion, transfer, and so on), by security_id, even if
-   * the run stops before it. Built when the run starts, for the
-   * no-earlier-removal check.
+   * the run stops before it. A security record tracks its applied removal separately.
    */
   removals: ReadonlyMap<unknown, DeepReadonly<OcfTransaction>>;
   /** Save the records at the start of the day so daily checks can identify which plans changed. */
@@ -28,8 +27,7 @@ export type OcfMachineContext = {
   report: any[];
   findings: Finding[];
   /**
-   * Store the findings that stopped a legacy issuance after an earlier removal so the failure
-   * message can identify the cause.
+   * Error findings from the shared ID checks on the latest legacy stock issuance.
    */
   lastErrorFindings: Finding[];
   snapshots: Snapshot[];
@@ -59,9 +57,26 @@ export type GradedValidator<T> = (
 ) => Finding[];
 
 /**
- * Describe what the coverage report should show for each check. The ID is unique within a validator.
- * The same definition supplies the message severity used during validation. A check without run
- * appears with implemented set to false.
+ * One check a validator performs (or should perform), written as data. This
+ * replaces the old free-text `CURRENT CHECKS` / `MISSING CHECKS` comment blocks.
+ *
+ * The machine doesn't read these while validating; the coverage report does.
+ * But for validators built with `defineValidator` (see
+ * `ocf_validator/validators/checkKit.ts`), the same definitions also produce the
+ * findings, so `severity` affects behavior, not just the report.
+ *
+ *  - `id`:          the check's name, e.g. "issuance-exists". It must be unique
+ *                   within one transaction type's list; the same id can appear
+ *                   under different transaction types. Copied onto each finding.
+ *  - `severity`:    "error" or "warning". Copied onto every finding the check
+ *                   produces. Only errors block a transaction, so changing a
+ *                   check to "warning" lets transactions that fail it through.
+ *  - `description`: the sentence the report shows for this check. Required.
+ *  - `implemented`: left out for a check the validator performs; `false` for a
+ *                   known gap, a check that's needed but not written yet. It
+ *                   can only be `false`, never `true`, so it only ever marks a
+ *                   gap. `defineValidator` sets it for you: a check with no
+ *                   `run` is a gap.
  */
 export type Check = {
   id: string;

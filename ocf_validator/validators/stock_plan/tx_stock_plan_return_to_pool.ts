@@ -1,9 +1,11 @@
-import { isStockPlanId, securityField } from "../../nodes";
+import { securityField } from "../../nodes";
+import { isStockPlanId } from "../../stockPlan";
 import { defineValidator, text, type CheckObject } from "../checkKit";
-import { countable } from "../checks";
+import { exceeds, isNumeric } from "../../numeric";
+import { countable, destinationPlan } from "../checks";
 
 // A return credits the named plan, which can differ from the source plan. Require a reliably removed
-// equity compensation security or plan-issued stock. The quantity limit still needs implementation.
+// equity compensation security or plan-issued stock.
 
 const securityRemoved = {
   id: "security-removed",
@@ -29,7 +31,26 @@ const quantityReturnable = {
   id: "quantity-returnable",
   severity: "error",
   description: "No more is returned than the security's removals took out of it, less what was returned before.",
-} satisfies CheckObject;
+  reads: ({ security_id }) => [
+    securityField("equityCompensation", security_id, "returnable"),
+    securityField("stockIssuances", security_id, "returnable"),
+    securityField("equityCompensation", security_id, "removal"),
+    securityField("stockIssuances", security_id, "removal"),
+    securityField("stockIssuances", security_id, "issuance"),
+  ],
+  run: (_context, { security_id, quantity }, read) => {
+    const left = read(securityField("equityCompensation", security_id, "returnable")) ??
+      read(securityField("stockIssuances", security_id, "returnable"));
+    if (left === undefined) {
+      const stock = read(securityField("stockIssuances", security_id, "issuance"));
+      const removal = read(securityField("equityCompensation", security_id, "removal")) ??
+        (isStockPlanId(stock?.stock_plan_id) && read(securityField("stockIssuances", security_id, "removal")));
+      return removal ? [text`The removed quantity eligible for return from ${security_id} is unknown.`] : [];
+    }
+    if (!isNumeric(quantity) || !exceeds(quantity, left)) return [];
+    return [text`Only ${left} shares of security ${security_id} remain eligible for return, but the transaction returns ${quantity}.`];
+  },
+} satisfies CheckObject<{ security_id: string; quantity: string }>;
 
 export const TX_STOCK_PLAN_RETURN_TO_POOL = defineValidator({
   transaction: "TX_STOCK_PLAN_RETURN_TO_POOL",
@@ -37,5 +58,5 @@ export const TX_STOCK_PLAN_RETURN_TO_POOL = defineValidator({
   lifecycle: "after removal",
   families: ["stockIssuances", "equityCompensation"],
   pool: "returns",
-  checks: [countable("quantity"), securityRemoved, quantityReturnable],
+  checks: [destinationPlan, countable("quantity"), securityRemoved, quantityReturnable],
 });

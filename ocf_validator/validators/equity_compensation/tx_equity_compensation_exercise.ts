@@ -1,3 +1,4 @@
+import { planReplacement, planSourceQuantity } from "./planChecks";
 import { defineValidator, asGap, underOlderName, type CheckObject } from "../checkKit";
 import { issuanceExists, noOtherTransactions, quantityOutstanding } from "./checks";
 
@@ -45,6 +46,8 @@ export const TX_EQUITY_COMPENSATION_EXERCISE = defineValidator({
   checks: [
     issuanceExists,
     quantityOutstanding,
+    planSourceQuantity,
+    planReplacement,
     resultingStockExists,
     // The exercise doesn't perform the family's no-other-transactions yet, so
     // it's listed as a gap. It reuses cancellation's definition so the two stay

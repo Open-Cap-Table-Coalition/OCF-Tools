@@ -1,9 +1,10 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import {
   buildLifecycleChart,
   isOnCapTable,
   lifecycleChart,
   lifecycleStep,
+  type LifecycleContext,
   type LifecycleState,
 } from "../ocf_validator/lifecycle";
 import { TX_DESCRIPTORS, type CollectionKey, type Descriptor } from "../ocf_validator/ocfMachine";
@@ -12,10 +13,10 @@ const FAMILIES: CollectionKey[] = ["stockIssuances", "convertibleIssuances", "wa
 const STATES: LifecycleState[] = ["notIssued", "outstanding", "removed"];
 
 /** Keep the last allowed state while testing the next transaction in the sequence. */
-const walk = (family: CollectionKey, history: string[]): (LifecycleState | "not allowed")[] => {
+const walk = (family: CollectionKey, history: string[], context: LifecycleContext = {}): (LifecycleState | "not allowed")[] => {
   let state: LifecycleState = "notIssued";
   return history.map((type) => {
-    const step = lifecycleStep(family, state, type);
+    const step = lifecycleStep(family, state, type, context);
     if (!step.allowed) return "not allowed";
     state = step.next;
     return state;
@@ -186,7 +187,7 @@ describe("the lookup on short real histories", () => {
   it("allows a plan-issued stock return only after cancellation", () => {
     expect(walk("stockIssuances", [
       "TX_STOCK_ISSUANCE", "TX_STOCK_PLAN_RETURN_TO_POOL", "TX_STOCK_CANCELLATION", "TX_STOCK_PLAN_RETURN_TO_POOL",
-    ])).toEqual(["outstanding", "not allowed", "removed", "removed"]);
+    ], { stock_plan_id: "plan-1" })).toEqual(["outstanding", "not allowed", "removed", "removed"]);
   });
 
   it("follows a grant under the plan security names the same way", () => {
@@ -256,19 +257,24 @@ describe("the lookup is a pure function of the stored state", () => {
     expect(lifecycleStep("equityCompensation", "removed", "TX_STOCK_PLAN_RETURN_TO_POOL")).toEqual({ allowed: true, next: "removed" });
   });
 
-  it("takes the security's fields as the chart's context", () => {
-    // The chart accepts fields for future guards. Its current decisions are independent of those
-    // fields.
-    expect(lifecycleStep("equityCompensation", "outstanding", "TX_EQUITY_COMPENSATION_EXERCISE", { quantity: "100" })).toEqual({
-      allowed: true,
-      next: "outstanding",
-    });
+  it.each([undefined, ""])("refuses a stock return when the issuance has no plan (%s)", (stock_plan_id) => {
+    expect(lifecycleStep("stockIssuances", "removed", "TX_STOCK_PLAN_RETURN_TO_POOL", { stock_plan_id })).toEqual({ allowed: false });
   });
 });
 
 // Snapshot visibility
 
 describe("the on-the-cap-table tag", () => {
+  it("reuses the chart's tag decisions across snapshots", () => {
+    const chart = buildLifecycleChart("warrantIssuances");
+    const resolve = vi.spyOn(chart, "resolveState");
+    const visible = () => STATES.filter((state) => isOnCapTable("warrantIssuances", state, chart));
+    expect(visible()).toEqual(["outstanding"]);
+    resolve.mockClear();
+    expect(visible()).toEqual(["outstanding"]);
+    expect(resolve).not.toHaveBeenCalled();
+  });
+
   it.each(FAMILIES)("marks only an outstanding %s security", (family) => {
     expect(STATES.filter((state) => isOnCapTable(family, state))).toEqual(["outstanding"]);
   });

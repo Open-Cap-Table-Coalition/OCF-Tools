@@ -9,7 +9,8 @@ import * as os from "os";
 import * as path from "path";
 import { expect } from "vitest";
 import { createActor } from "xstate";
-import { ocfValidator } from "../ocf_validator";
+import { validateOcfPackage } from "../ocf_validator";
+import { readOcfPackage } from "../read_ocf_package";
 import { applyTransaction, emptyNodes, outstanding, type NodeMap } from "../ocf_validator/nodes";
 import { earliestRemovals, ocfMachine, TX_DESCRIPTORS, type CollectionKey, type Descriptor, type OcfMachineEvent } from "../ocf_validator/ocfMachine";
 import type { Finding } from "../types/finding";
@@ -72,24 +73,26 @@ export const baseContext = (overrides: ContextSeed = {}): OcfMachineContext => {
 export const collection = <C extends CollectionKey>(context: OcfMachineContext, family: C) =>
   outstanding(context.nodes, family);
 
-/**
- * Write a temporary package with the supplied transactions and reference data. Call the public
- * validator to exercise file loading and date ordering, compare the lifecycle charts, then remove
- * the package.
- */
-export const validatePackage = (
+export const validateWithShadow = (dir: string) => {
+  const visits: Finding[][] = [];
+  const context = validateOcfPackage(readOcfPackage(dir), (findings) => visits.push(findings));
+  return { ...context, shadow: expectShadowExplained(context.ocfPackageContent.transactions, { context, visits }) };
+};
+
+/** Run a validator on a temporary OCF package written to disk. */
+export const validatePackageWith = <T>(validate: (dir: string) => T) => (
   transactions: Record<string, unknown>[],
   stakeholders: { id: string }[] = [],
   stockClasses: { id: string }[] = [],
   stockPlans: Record<string, unknown>[] = [],
-): OcfMachineContext => {
+) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ocf-tools-test-"));
   try {
     const write = (name: string, content: unknown) =>
       fs.writeFileSync(path.join(dir, name), JSON.stringify(content));
     write("Stakeholders.ocf.json", { items: stakeholders });
     write("StockClasses.ocf.json", { items: stockClasses });
-    write("StockPlans.ocf.json", { items: stockPlans });
+    if (stockPlans.length) write("StockPlans.ocf.json", { items: stockPlans });
     write("Transactions.ocf.json", { items: transactions });
     write("Manifest.ocf.json", {
       issuer: { legal_name: "Test Co" },
@@ -97,19 +100,25 @@ export const validatePackage = (
       transactions_files: [{ filepath: "Transactions.ocf.json" }],
       stock_classes_files: [{ filepath: "StockClasses.ocf.json" }],
       vesting_terms_files: [],
-      stock_plans_files: [{ filepath: "StockPlans.ocf.json" }],
+      stock_plans_files: stockPlans.length ? [{ filepath: "StockPlans.ocf.json" }] : [],
       stock_legend_templates_files: [],
       valuations_files: [],
     });
-    const context = ocfValidator(dir);
-    // The validator sorts the input in place. Compare the charts and the two checks in that same
-    // order.
-    expectShadowExplained(context.ocfPackageContent.transactions);
-    return context;
+    return validate(dir);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
 };
+
+export const validatePackage = validatePackageWith(validateWithShadow);
+
+/** Seed an applied removal for checks that run directly against a context. */
+export function contextAfterCancellation(family: string, security_id = "sec1") {
+  return validatePackage([
+    { ...txRecord(`TX_${family}_ISSUANCE`, "issue", security_id, "2020-01-01"), stakeholder_id: "sh1" },
+    txRecord(`TX_${family}_CANCELLATION`, "cancel", security_id, "2020-06-01"),
+  ], [{ id: "sh1" }]);
+}
 
 /** Start the machine in capTable with the supplied records and issuances. */
 export const startSeeded = (context: OcfMachineContext & ContextSeed) =>

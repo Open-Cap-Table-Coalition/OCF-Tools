@@ -1,6 +1,6 @@
 import { LegacyContext } from "../../ocfMachine";
-import { isStockPlanId } from "../../nodes";
-import { isNegative, isNumeric } from "../../numeric";
+import { isStockPlanId } from "../../stockPlan";
+import { isQuantity } from "../../numeric";
 
 /*
 CURRENT CHECKS:
@@ -66,10 +66,12 @@ const valid_tx_stock_issuance = (context: LegacyContext, event: any, isGuard: Bo
   }
 
   const chargesPlan = isStockPlanId(event.data.stock_plan_id);
-  const quantityValid = !chargesPlan || (isNumeric(event.data.quantity) && !isNegative(event.data.quantity));
+  const planIdValid = event.data.stock_plan_id == null || chargesPlan;
+  if (!planIdValid) report.plan_id_validity = false;
+  const quantityValid = !chargesPlan || isQuantity(event.data.quantity);
   if (chargesPlan) report.plan_quantity_validity = quantityValid;
 
-  if (stockClass_validity && stakeholder_validity && stockLegend_validity && quantityValid) {
+  if (stockClass_validity && stakeholder_validity && stockLegend_validity && planIdValid && quantityValid) {
     validity = true;
   }
 

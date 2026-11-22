@@ -1,7 +1,7 @@
 import * as path from "path";
 import { describe, it, expect, vi } from "vitest";
 import { ocfValidator } from "../ocf_validator";
-import { POOL_WRITES } from "../ocf_validator/nodes";
+import { POOL_WRITES } from "../ocf_validator/stockPlan";
 import { poolNotExceeded, STOCK_PLAN_CHECKS } from "../ocf_validator/validators/stock_plan/pool";
 import type { Finding, Subject } from "../types/finding";
 import { validatePackage } from "./helpers";
@@ -200,7 +200,7 @@ describe("the pool check", () => {
       {
         id: "pool-not-exceeded",
         severity: "error",
-        description: "At the end of each day, a stock plan's grants have drawn no more shares than the plan has reserved.",
+        description: "At the end of each day, shares drawn from a stock plan must fit within its reserve.",
       },
     ]);
     expect(poolNotExceeded.reads({ object_type: "STOCK_PLAN", id: "plan-1", date: "2022-01-01" })).toEqual([

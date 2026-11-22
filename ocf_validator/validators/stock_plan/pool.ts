@@ -18,7 +18,7 @@ type PlanOnDay = { object_type: "STOCK_PLAN"; id: string; date: string };
 export const poolNotExceeded = {
   id: "pool-not-exceeded",
   severity: "error",
-  description: "At the end of each day, a stock plan's grants have drawn no more shares than the plan has reserved.",
+  description: "At the end of each day, shares drawn from a stock plan must fit within its reserve.",
   reads: (data) => [planField(data.id, "reserved"), planField(data.id, "drawn")],
   run: (_context, data, read) => {
     const reserved = read(planField(data.id, "reserved"));
