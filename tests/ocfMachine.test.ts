@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { afterEach, describe, it, expect, vi } from "vitest";
 import { createActor } from "xstate";
 import {
   nodesUpdate,
@@ -11,6 +11,7 @@ import {
   type TxKey,
   type CollectionKey,
 } from "../ocf_validator/ocfMachine";
+import * as nodes from "../ocf_validator/nodes";
 import type { Finding } from "../types/finding";
 import type { GradedValidator, OcfMachineContext } from "../types/validator";
 import { baseContext, contextWith, startSeeded, ev, collection } from "./helpers";
@@ -510,6 +511,8 @@ describe("graded validators through the dispatch helpers", () => {
 // deleted with `legacyValidate` when the last family migrates.
 
 describe("legacy validators through the machine", () => {
+  afterEach(() => vi.restoreAllMocks());
+
   const seededWithStakeholder = () =>
     baseContext({
       ocfPackageContent: {
@@ -543,6 +546,30 @@ describe("legacy validators through the machine", () => {
       stakeholder_validity: true,
     });
     expect(snapshot.context.findings).toEqual([]);
+  });
+
+  it("issues stock without scanning outstanding holdings for either validation or reporting", () => {
+    const actor = startSeeded({
+      ...seededWithStakeholder(),
+      warrantIssuances: [{ id: "wi1", security_id: "w1", object_type: "TX_WARRANT_ISSUANCE" }],
+    });
+    const holdings = vi.spyOn(nodes, "outstanding");
+    actor.send(ev("TX_STOCK_ISSUANCE", stockIssuance()));
+
+    expect(actor.getSnapshot().context.report.at(-1)?.transaction_id).toBe("si1");
+    expect(holdings).not.toHaveBeenCalled();
+  });
+
+  it("builds the holdings list once when a transfer reads it several times", () => {
+    const context = baseContext({
+      stockIssuances: [stockIssuance({ object_type: "TX_STOCK_ISSUANCE", quantity: "10" })],
+    });
+    const holdings = vi.spyOn(nodes, "outstanding");
+    const transfer = ev("TX_STOCK_TRANSFER", { id: "transfer", security_id: "s-sec1", resulting_security_ids: [] });
+    const update = outcomeUpdate(TX_DESCRIPTORS.TX_STOCK_TRANSFER, context, transfer);
+
+    expect(update.report?.at(-1)?.incoming_stockIssuance_validity).toBe(true);
+    expect(holdings).toHaveBeenCalledTimes(1);
   });
 
   it("fails an invalid transaction with the report entry serialized in the result and findings still empty", () => {

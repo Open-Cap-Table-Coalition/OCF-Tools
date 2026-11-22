@@ -96,16 +96,18 @@ type Validator<T> = (
   isGuard: boolean,
 ) => any;
 
-/**
- * Legacy stock validators still read an array of outstanding stock. Build that array from the
- * current records for each call.
- */
+/** Some legacy validators read outstanding stock as an array. */
 export type LegacyContext = OcfMachineContext & { stockIssuances: OCFStockIssuance[] };
 
-const legacyContext = (context: OcfMachineContext): LegacyContext => ({
-  ...context,
-  stockIssuances: outstanding(context.nodes, "stockIssuances"),
-});
+const legacyContext = (context: OcfMachineContext): LegacyContext => {
+  let stockIssuances: OCFStockIssuance[] | undefined;
+  return {
+    ...context,
+    get stockIssuances() {
+      return stockIssuances ??= outstanding(context.nodes, "stockIssuances");
+    },
+  };
+};
 
 /**
  * A descriptor specifies the validator, affected family and security change. Issuances and removals
