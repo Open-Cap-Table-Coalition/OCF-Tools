@@ -55,6 +55,7 @@ export const planReplacement = {
       ...ids.flatMap((id) => [
         securityField(undefined, id, "issuance"),
         securityField(undefined, id, "lifecycle"),
+        ...(stock ? [securityField("stockIssuances", id, "removal")] : []),
         stock ? securityField("stockIssuances", id, "carry") : securityField("equityCompensation", id, "provenance"),
       ]),
     ];
@@ -84,7 +85,9 @@ export const planReplacement = {
       const target = targets[index];
       const claimed = stock ? read(securityField("stockIssuances", id, "carry")) : read(securityField("equityCompensation", id, "provenance"));
       const balance = !stock && id === data.balance_security_id;
-      if (!target || !isOfType(target, family) || (read(securityField(undefined, id, "lifecycle")) === "removed") ||
+      const removedOutsideSettlement = read(securityField(undefined, id, "lifecycle")) === "removed" &&
+        (!stock || !date || read(securityField("stockIssuances", id, "removal"))?.date !== date);
+      if (!target || !isOfType(target, family) || removedOutsideSettlement ||
           claimed || target.date !== date || !isQuantity(target.quantity) ||
           (source.stock_class_id && target.stock_class_id && source.stock_class_id !== target.stock_class_id) ||
           (!stock && (target.stock_plan_id !== source.stock_plan_id ||

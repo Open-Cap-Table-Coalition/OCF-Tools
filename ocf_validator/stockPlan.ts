@@ -131,9 +131,10 @@ function creditReturn(nodes: NodeMap, tx: PoolTransaction, by: Stamp): NodeMap {
 
 /** A transfer or conversion moves shares into another security. Only a retirement frees them for return. */
 function trackSourceQuantity(before: NodeMap, nodes: NodeMap, descriptor: Descriptor, tx: PoolTransaction, by: Stamp): NodeMap {
-  if (!by.ok || (descriptor.effect !== "remove" && descriptor.pool !== "carriesStock")) return nodes;
-  const source = securityById(before, tx.security_id);
-  if (source?.lifecycle.value !== "outstanding" || (source.family !== "equityCompensation" && source.family !== "stockIssuances")) return nodes;
+  if (descriptor.effect !== "remove" && descriptor.pool !== "carriesStock") return nodes;
+  if (securityById(before, tx.security_id)?.lifecycle.value !== "outstanding") return nodes;
+  const source = securityById(nodes, tx.security_id);
+  if (source?.family !== "equityCompensation" && source?.family !== "stockIssuances") return nodes;
   const issuance = source.issuance.value;
   if (!issuance || (source.family === "stockIssuances" && !isStockPlanId(issuance.stock_plan_id))) return nodes;
   const remaining = source.family === "equityCompensation" && source.remaining ? source.remaining.value : issuance.quantity;
@@ -143,18 +144,17 @@ function trackSourceQuantity(before: NodeMap, nodes: NodeMap, descriptor: Descri
   const type = currentName(tx.object_type);
   if (source.family === "equityCompensation" && (type === "TX_EQUITY_COMPENSATION_EXERCISE" || type === "TX_EQUITY_COMPENSATION_RELEASE")) {
     const value = fits ? subtract(remaining, quantity) : undefined;
-    return withSecurity(nodes, { ...source, remaining: written(value, by.writer) });
+    const previous = source.remaining ?? { ...source.issuance, value: issuance.quantity };
+    return withSecurity(nodes, { ...source, remaining: stamped(previous, value, by) });
   }
-  const removed = securityById(nodes, tx.security_id);
-  if (descriptor.effect !== "remove" || removed?.lifecycle.value !== "removed" ||
-      (removed.family !== "equityCompensation" && removed.family !== "stockIssuances")) return nodes;
+  if (!by.ok || descriptor.effect !== "remove" || source.lifecycle.value !== "removed") return nodes;
   let value = ZERO;
   if (type === "TX_STOCK_RETRACTION" || type === "TX_EQUITY_COMPENSATION_RETRACTION") value = countable ? remaining : ZERO;
   if (type === "TX_STOCK_CANCELLATION" || type === "TX_STOCK_REPURCHASE" || type === "TX_EQUITY_COMPENSATION_CANCELLATION") {
     value = fits ? quantity : ZERO;
   }
-  if (removed.family === "stockIssuances" && removed.consolidatedInto?.value) value = ZERO;
-  return withSecurity(nodes, { ...removed, returnable: written(value, by.writer) });
+  if (source.family === "stockIssuances" && source.consolidatedInto?.value) value = ZERO;
+  return withSecurity(nodes, { ...source, returnable: written(value, by.writer) });
 }
 
 /** Add to or subtract from the plan's drawn shares. */
@@ -264,12 +264,15 @@ function carryStock(nodes: NodeMap, id: string, plan: string | undefined, date: 
   const held = securityById(nodes, id);
   if (held && held.family !== "stockIssuances") return nodes;
   const stock = held ?? blankSecurity(id, "stockIssuances");
-  if (stock.carry?.value || stock.lifecycle.value === "removed") return nodes;
-  const carry = stamped(stock.carry, { plan, date }, by);
   const issuance = stock.issuance.value;
+  if (stock.carry?.value || (issuance && issuance.date !== date)) return nodes;
+  // Stock can be issued and removed before its settlement or consolidation runs that day.
+  if (stock.lifecycle.value === "removed" && (!issuance || !date || stock.removal?.value?.date !== date ||
+      stock.removal.defects.length || stock.lifecycle.defects.length || stock.issuance.defects.length)) return nodes;
+  const carry = stamped(stock.carry, { plan, date }, by);
   if (!issuance) return withSecurity(nodes, { ...stock, carry });
   const draw = stock.draw?.value;
-  if (issuance.date !== date || !draw || draw.quantity === ZERO || (plan && plan !== draw.plan)) return nodes;
+  if (!draw || draw.quantity === ZERO || (plan && plan !== draw.plan)) return nodes;
   const marked = withSecurity(nodes, { ...stock, carry, draw: stamped(stock.draw, { ...draw, quantity: ZERO }, by) });
   return adjusted(marked, draw.plan, draw.quantity, subtract, by);
 }

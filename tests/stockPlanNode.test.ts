@@ -413,6 +413,30 @@ describe("reserved", () => {
 // Failed plan changes
 
 describe("a failed transaction's writes to the pool", () => {
+  it.each(["TX_EQUITY_COMPENSATION_EXERCISE", "TX_PLAN_SECURITY_RELEASE"])("preserves the remaining quantity and failure roots after a failed %s", (type) => {
+    const prior = { id: "prior", object_type: "TX_EQUITY_COMPENSATION_EXERCISE", security_id: "option", quantity: "25",
+      resulting_security_ids: [], date: "2022-01-15" };
+    const bad = { ...prior, id: "bad", object_type: type, quantity: "90", date: "2022-01-20" };
+    const root = subject(type, "bad");
+    const context = run([
+      grant("issue", "option", "100"), prior, bad,
+      grant("balance", "balance", "5", { date: "2022-02-01" }),
+      cancellation("later", "option", "80", { balance_security_id: "balance" }),
+    ]);
+
+    expect(context.findings.filter((finding) => finding.outcome === "failed")).toMatchObject([
+      { subject: root, check: "plan-source-quantity" },
+    ]);
+    const later = context.findings.filter((finding) => finding.subject.id === "later");
+    for (const check of ["plan-source-quantity", "plan-replacement"]) {
+      expect(later.find((finding) => finding.check === check)).toMatchObject({ outcome: "blocked", roots: [root] });
+    }
+    expect(securityAt(context.nodes, "equityCompensation", "option")).toMatchObject({
+      remaining: { value: "75", writer: subject(prior.object_type, prior.id), defects: [root] },
+      lifecycle: { value: "outstanding", defects: [root] },
+    });
+  });
+
   it("withholds a return from a marked security, including a return to another plan", () => {
     const bad = grant("g-bad", "opt-1", "100", { stakeholder_id: "nobody" });
     const BAD = subject("TX_EQUITY_COMPENSATION_ISSUANCE", "g-bad");
@@ -603,6 +627,63 @@ describe("stock issued from a plan", () => {
     }]);
     expect(context.result).toMatch(/appears valid/);
     expect(context.snapshots.at(-1)?.stockPlans[0].drawn).toBe(expected);
+  });
+
+  it("carries a consolidated output cancelled on its issuance date and later returned", () => {
+    const second = { ...stock, id: "issue-b", security_id: "b" };
+    const output = { ...stock, id: "combined", security_id: "combined", date: "2022-03-01", quantity: "100" };
+    const merge = { id: "merge", object_type: "TX_STOCK_CONSOLIDATION", security_ids: [stock.security_id, second.security_id],
+      resulting_security_id: output.security_id, date: output.date };
+    const cancel = { id: "cancel", object_type: "TX_STOCK_CANCELLATION", security_id: output.security_id, date: output.date, quantity: "100" };
+    const context = runStock([stock, second, output, merge, cancel, returnToPool("return", output.security_id, "100", { date: "2022-03-02" })]);
+
+    expect(context.result).toMatch(/appears valid/);
+    expect(drawnByDay(context)).toEqual([[stock.date, "100"], [output.date, "100"], ["2022-03-02", "0"]]);
+    for (const id of merge.security_ids) {
+      expect(securityAt(context.nodes, "stockIssuances", id)?.consolidatedInto?.value).toBe(output.security_id);
+    }
+    expect(securityAt(context.nodes, "stockIssuances", output.security_id)).toMatchObject({
+      lifecycle: { value: "removed", writer: subject(cancel.object_type, cancel.id) },
+      draw: { value: { quantity: "0" } }, returnable: { value: "0" },
+    });
+  });
+
+  it.each([
+    ["TX_EQUITY_COMPENSATION_EXERCISE", "TX_STOCK_CANCELLATION", "50"],
+    ["TX_PLAN_SECURITY_RELEASE", "TX_STOCK_REPURCHASE", "50"],
+    ["TX_EQUITY_COMPENSATION_EXERCISE", "TX_STOCK_TRANSFER", "0"],
+  ])("carries %s settlement stock removed by %s on the settlement date", (type, removal, allowance) => {
+    const settle = { id: "settle", object_type: type, security_id: "option", quantity: stock.quantity, date: stock.date,
+      settlement_date: stock.date, resulting_security_ids: [stock.security_id] };
+    const transfer = removal === "TX_STOCK_TRANSFER";
+    const replacements = transfer ? [{ ...stock, id: "recipient", security_id: "recipient" }] : [];
+    const remove = { id: "remove", object_type: removal, security_id: stock.security_id, date: stock.date, quantity: stock.quantity,
+      resulting_security_ids: replacements.map((issue) => issue.security_id) };
+    const context = runStock([grant("g-1", "option", "100"), stock, ...replacements, settle, remove]);
+
+    expect(context.result).toMatch(/appears valid/);
+    expect(context.snapshots.at(-1)?.stockPlans[0].drawn).toBe("100");
+    expect(securityAt(context.nodes, "stockIssuances", stock.security_id)).toMatchObject({
+      lifecycle: { value: "removed", writer: subject(removal, remove.id) },
+      draw: { value: { quantity: "0" }, writer: subject(type, settle.id) },
+      returnable: { value: allowance, writer: subject(removal, remove.id) },
+    });
+    expect(securityAt(context.nodes, "equityCompensation", "option")?.remaining?.value).toBe("50");
+  });
+
+  it("rejects settlement stock removed on a different date from issuance", () => {
+    const issuance = grant("option", "option", "100");
+    const remove = { id: "remove", object_type: "TX_STOCK_CANCELLATION", security_id: stock.security_id,
+      date: "2022-02-02", quantity: stock.quantity };
+    const settle = { id: "settle", object_type: "TX_EQUITY_COMPENSATION_RELEASE", security_id: "option",
+      quantity: stock.quantity, date: "2022-02-03", settlement_date: stock.date, resulting_security_ids: [stock.security_id] };
+    const context = runStock([issuance, stock, remove, settle]);
+
+    expect(context.findings).toMatchObject([{ check: "plan-replacement", outcome: "failed", subject: { id: settle.id } }]);
+    expect(context.nodes.plan.get(PLAN.id)?.drawn.value).toBe("150");
+    expect(securityAt(context.nodes, "stockIssuances", stock.security_id)).toMatchObject({
+      draw: { value: { quantity: "50" } }, returnable: { value: "50" },
+    });
   });
 
   it("keeps an independent stock draw when cancellation names it outside the balance field", () => {
