@@ -15,6 +15,7 @@ import {
   emittedCheckIds,
   expectFindingShape,
   type FailingScenarios,
+  collection,
 } from "./helpers";
 
 const MIGRATED_KEYS = [
@@ -73,8 +74,8 @@ describe("warrant issuance validity", () => {
 
     const snapshot = actor.getSnapshot();
     expect(snapshot.value).toBe("capTable");
-    expect(snapshot.context.warrantIssuances).toHaveLength(1);
-    expect(snapshot.context.warrantIssuances[0]).toMatchObject({ id: "war1", security_id: "sec1" });
+    expect(collection(snapshot.context, "warrantIssuances")).toHaveLength(1);
+    expect(collection(snapshot.context, "warrantIssuances")[0]).toMatchObject({ id: "war1", security_id: "sec1" });
     expect(snapshot.context.findings).toEqual([]);
   });
 
@@ -86,7 +87,7 @@ describe("warrant issuance validity", () => {
     expect(snapshot.value).toBe("validationError");
     expect(snapshot.context.findings).toHaveLength(1);
     expect(snapshot.context.findings[0].check).toBe("stakeholder-exists");
-    expect(snapshot.context.warrantIssuances).toEqual([]);
+    expect(collection(snapshot.context, "warrantIssuances")).toEqual([]);
     expect(snapshot.context.result).toContain("stakeholder-exists");
   });
 });
@@ -118,14 +119,14 @@ describe("warrant acceptance validity", () => {
       warrantIssuances: [issuanceRecord("sec1")] as any,
       transactions: [issuanceRecord("sec1")],
     });
-    const before = structuredClone(seeded.warrantIssuances);
+    const before = structuredClone(collection(seeded, "warrantIssuances"));
 
     const actor = startSeeded(seeded);
     actor.send(ev("TX_WARRANT_ACCEPTANCE", acceptance()));
 
     const snapshot = actor.getSnapshot();
     expect(snapshot.value).toBe("capTable");
-    expect(snapshot.context.warrantIssuances).toEqual(before);
+    expect(collection(snapshot.context, "warrantIssuances")).toEqual(before);
     expect(snapshot.context.findings).toEqual([]);
   });
 
@@ -178,8 +179,8 @@ describe("warrant retraction validity", () => {
 
     const snapshot = actor.getSnapshot();
     expect(snapshot.value).toBe("capTable");
-    expect(snapshot.context.warrantIssuances.some((w: any) => w.security_id === "sec1")).toBe(false);
-    expect(snapshot.context.warrantIssuances.some((w: any) => w.security_id === "sec2")).toBe(true);
+    expect(collection(snapshot.context, "warrantIssuances").some((w: any) => w.security_id === "sec1")).toBe(false);
+    expect(collection(snapshot.context, "warrantIssuances").some((w: any) => w.security_id === "sec2")).toBe(true);
     expect(snapshot.context.findings).toEqual([]);
   });
 
@@ -234,8 +235,8 @@ describe("warrant cancellation validity", () => {
 
     const snapshot = actor.getSnapshot();
     expect(snapshot.value).toBe("capTable");
-    expect(snapshot.context.warrantIssuances.some((w: any) => w.security_id === "sec1")).toBe(false);
-    expect(snapshot.context.warrantIssuances.some((w: any) => w.security_id === "sec2")).toBe(true);
+    expect(collection(snapshot.context, "warrantIssuances").some((w: any) => w.security_id === "sec1")).toBe(false);
+    expect(collection(snapshot.context, "warrantIssuances").some((w: any) => w.security_id === "sec2")).toBe(true);
   });
 
   it("emits one no-other-transactions finding per past offender, exempting acceptances and itself", () => {
@@ -306,8 +307,8 @@ describe("warrant transfer validity", () => {
 
     const snapshot = actor.getSnapshot();
     expect(snapshot.value).toBe("capTable");
-    expect(snapshot.context.warrantIssuances.some((w: any) => w.security_id === "sec1")).toBe(false);
-    expect(snapshot.context.warrantIssuances.some((w: any) => w.security_id === "sec2")).toBe(true);
+    expect(collection(snapshot.context, "warrantIssuances").some((w: any) => w.security_id === "sec1")).toBe(false);
+    expect(collection(snapshot.context, "warrantIssuances").some((w: any) => w.security_id === "sec2")).toBe(true);
   });
 
   it("never emits no-other-transactions, even when a past transaction references the security", () => {
@@ -634,7 +635,7 @@ describe("warrant exercise drives the machine to completion", () => {
     const snapshot = actor.getSnapshot();
     expect(snapshot.value).toBe("capTable");
     expect(snapshot.context.findings).toEqual([]);
-    expect(snapshot.context.warrantIssuances).toEqual([]);
+    expect(collection(snapshot.context, "warrantIssuances")).toEqual([]);
   });
 
   it("completes an empty-resulting exercise on its warning alone and still removes the exercised warrant", () => {
@@ -651,7 +652,7 @@ describe("warrant exercise drives the machine to completion", () => {
     expect(snapshot.context.findings).toHaveLength(1);
     expect(snapshot.context.findings[0].check).toBe("resulting-security-named");
     expect(snapshot.context.findings[0].severity).toBe("warning");
-    expect(snapshot.context.warrantIssuances).toEqual([]);
+    expect(collection(snapshot.context, "warrantIssuances")).toEqual([]);
   });
 
   it("clears an exercise of a warrant that started vesting first, removing the exercised warrant and recording no findings", () => {
@@ -668,7 +669,7 @@ describe("warrant exercise drives the machine to completion", () => {
     const snapshot = actor.getSnapshot();
     expect(snapshot.value).toBe("capTable");
     expect(snapshot.context.findings).toEqual([]);
-    expect(snapshot.context.warrantIssuances).toEqual([]);
+    expect(collection(snapshot.context, "warrantIssuances")).toEqual([]);
   });
 });
 
@@ -842,7 +843,7 @@ describe("a conflicting transaction pair flags the later transaction, not the ea
     expect(afterRetraction.value).toBe("capTable");
     expect(afterRetraction.context.findings).toEqual([]);
     // The retraction removed the issuance from the live collection.
-    expect(afterRetraction.context.warrantIssuances.some((w: any) => w.security_id === "sec1")).toBe(false);
+    expect(collection(afterRetraction.context, "warrantIssuances").some((w: any) => w.security_id === "sec1")).toBe(false);
 
     actor.send(ev("TX_WARRANT_ACCEPTANCE", acceptance));
     const { context, value } = actor.getSnapshot();
@@ -871,6 +872,10 @@ describe("a conflicting transaction pair flags the later transaction, not the ea
 // failing scenario because no code path emits it.
 const failingScenarios: FailingScenarios<MigratedKey> = {
   TX_WARRANT_ISSUANCE: [
+    {
+      context: contextWith({ stakeholders: [{ id: "sh1" }], warrantIssuances: [issuanceRecord("sec1")] }),
+      data: { ...txRecord("TX_WARRANT_ISSUANCE", "duplicate"), stakeholder_id: "sh1" },
+    },
     {
       context: baseContext(),
       data: { id: "i1", object_type: "TX_WARRANT_ISSUANCE", security_id: "sec1", stakeholder_id: "nobody", date: "2021-01-01" },

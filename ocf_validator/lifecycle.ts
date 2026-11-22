@@ -3,10 +3,9 @@ import type { LifecycleWord } from "../types/validator";
 import { lifecycleFamilies, TX_DESCRIPTORS, type CollectionKey, type Descriptor } from "./ocfMachine";
 import { hasStockPlan } from "./validators/stock/tx_stock_cancellation";
 
-// Build one chart per security family from the transaction table (#233). For example, exercise
-// removes a warrant but leaves an equity grant outstanding. The caller stores each security's state
-// so it can update several securities together. Tests compare chart decisions with the existing
-// removal and transaction checks.
+// Build one chart per family from the descriptors. Exercise removes a warrant but leaves an equity
+// grant outstanding. The caller keeps each security's state. Tests compare transitions with the
+// existing checks. Snapshots use the chart's tag to decide which securities to show.
 
 /** The security's state between transactions. */
 export type LifecycleState = "notIssued" | "outstanding" | "removed";
@@ -107,9 +106,15 @@ export function lifecycleStep(
   return { allowed: true, next: getNextSnapshot(chart, from, event).value as LifecycleState };
 }
 
-/** Check the chart's tag to decide whether the security belongs on the cap table. */
-export const isOnCapTable = (
-  family: CollectionKey,
-  state: LifecycleState,
-  chart: LifecycleChart = lifecycleChart(family),
-): boolean => chart.resolveState({ value: state, context: {} }).hasTag(ON_CAP_TABLE);
+const visibility = new WeakMap<LifecycleChart, Record<LifecycleState, boolean>>();
+
+/** Resolve each state's tag once per chart. */
+export function isOnCapTable(family: CollectionKey, state: LifecycleState, chart = lifecycleChart(family)): boolean {
+  let states = visibility.get(chart);
+  if (!states) {
+    const tagged = (value: LifecycleState) => chart.resolveState({ value, context: {} }).hasTag(ON_CAP_TABLE);
+    states = { notIssued: tagged("notIssued"), outstanding: tagged("outstanding"), removed: tagged("removed") };
+    visibility.set(chart, states);
+  }
+  return states[state];
+}

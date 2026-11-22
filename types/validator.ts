@@ -1,26 +1,19 @@
-import type {
-  OCFStockIssuance,
-  OCFConvertibleIssuance,
-  OCFWarrantIssuance,
-  OCFEquityCompensationIssuance,
-} from "@opencaptablecoalition/ocf-types";
+import type { NodeMap } from "../ocf_validator/nodes";
 import type { OcfPackageContent } from "../read_ocf_package";
 import type { OcfTransaction } from "./ocf-input";
 import type { Snapshot } from "./snapshot";
 import type { Finding, Severity } from "./finding";
 
 /**
- * The machine context a validator receives: the package under validation, the
- * per-family collections accumulated so far, and the record channels —
- * `report` for legacy dual-mode validators, `findings` for graded ones.
- * `report` retires with the legacy convention once every family returns
- * findings.
+ * The context holds the input package, current records and results. Older validators write to
+ * report. Validators built from checks write to findings.
  */
 export type OcfMachineContext = {
-  stockIssuances: OCFStockIssuance[];
-  equityCompensation: OCFEquityCompensationIssuance[];
-  convertibleIssuances: OCFConvertibleIssuance[];
-  warrantIssuances: OCFWarrantIssuance[];
+  /**
+   * Current security records. Applying a transaction returns an updated map. Use outstanding to list
+   * a family's current issuances.
+   */
+  nodes: NodeMap;
   ocfPackageContent: OcfPackageContent;
   /**
    * An index of the package, not a record of the run: each security's

@@ -23,8 +23,9 @@ import { TX_WARRANT_RETRACTION } from "./validators/warrant/tx_warrant_retractio
 import { TX_WARRANT_CANCELLATION } from "./validators/warrant/tx_warrant_cancellation";
 import { TX_WARRANT_TRANSFER } from "./validators/warrant/tx_warrant_transfer";
 import { TX_WARRANT_EXERCISE } from "./validators/warrant/tx_warrant_exercise";
-import { text, toValidate } from "./validators/checkKit";
-import { noEarlierRemoval } from "./validators/checks";
+import { text, toValidate, type CheckObject } from "./validators/checkKit";
+import { issuanceIdChecks, noEarlierRemoval } from "./validators/checks";
+import { applyTransaction, emptyNodes, outstanding } from "./nodes";
 import { TX_EQUITY_COMPENSATION_ISSUANCE, TX_PLAN_SECURITY_ISSUANCE } from "./validators/equity_compensation/tx_equity_compensation_issuance";
 import { TX_EQUITY_COMPENSATION_ACCEPTANCE, TX_PLAN_SECURITY_ACCEPTANCE } from "./validators/equity_compensation/tx_equity_compensation_acceptance";
 import { TX_EQUITY_COMPENSATION_EXERCISE, TX_PLAN_SECURITY_EXERCISE } from "./validators/equity_compensation/tx_equity_compensation_exercise";
@@ -41,16 +42,13 @@ import run_EOD from "./eod";
 // types/validator.ts directly.
 export type { GradedValidator, OcfMachineContext } from "../types/validator";
 
-// ---------------------------------------------------------------------------
-// Cap-table collections
-// ---------------------------------------------------------------------------
+// Security families
 
 /**
- * The element type held by each family collection. Pairing a collection name
- * with a payload of the wrong family is a *compile* error (see
- * `appendToCollection`).
+ * These keys identify the family in the transaction table, security records and charts. They come
+ * from the original collection names.
  */
-interface CollectionElement {
+export interface CollectionElement {
   stockIssuances: OCFStockIssuance;
   convertibleIssuances: OCFConvertibleIssuance;
   warrantIssuances: OCFWarrantIssuance;
@@ -78,32 +76,6 @@ export type OcfMachineEvent =
   | { type: "RUN_END"; date: string };
 
 // ---------------------------------------------------------------------------
-// Family-collection helpers
-// ---------------------------------------------------------------------------
-
-/**
- * Append `data` to a family collection. The `collection` literal pins `C`, so
- * `current` and `data` must both belong to that family — appending a wrong-family
- * payload (e.g. a warrant payload onto the convertible collection) is a COMPILE
- * error. Exercised in `types/ocf-machine-table.assert.ts`.
- */
-export function appendToCollection<C extends CollectionKey>(
-  _collection: C,
-  current: CollectionElement[C][],
-  data: CollectionElement[C],
-): CollectionElement[C][] {
-  return [...current, data];
-}
-
-/** Remove every member of a collection matching `securityId`. */
-function removeFromCollection<E extends { security_id: string }>(
-  current: E[],
-  securityId: unknown,
-): E[] {
-  return current.filter((obj) => obj.security_id !== securityId);
-}
-
-// ---------------------------------------------------------------------------
 // Per-transaction descriptors
 // ---------------------------------------------------------------------------
 
@@ -119,18 +91,31 @@ function removeFromCollection<E extends { security_id: string }>(
  * family migrates to the graded shape.
  */
 type Validator<T> = (
-  context: OcfMachineContext,
+  context: LegacyContext,
   event: { data?: T },
   isGuard: boolean,
 ) => any;
 
+/** Some legacy validators read outstanding stock as an array. */
+export type LegacyContext = OcfMachineContext & { stockIssuances: OCFStockIssuance[] };
+
+const legacyContext = (context: OcfMachineContext): LegacyContext => {
+  let stockIssuances: OCFStockIssuance[] | undefined;
+  return {
+    ...context,
+    get stockIssuances() {
+      return stockIssuances ??= outstanding(context.nodes, "stockIssuances");
+    },
+  };
+};
+
 /**
- * A descriptor tells the machine which validator handles a transaction and how it changes
- * outstanding securities. Issuances and removals name one collection. Other transactions list the
- * families they can affect. The lifecycle field describes the allowed change for each family.
+ * A descriptor specifies the validator, affected family and security change. Issuances and removals
+ * name a collection. Other transactions list applicable families. The machine uses the effect to
+ * update records, and the charts use the lifecycle field.
  *
- * The types tie an issuance to its collection and require each new validator to list its checks.
- * Legacy validators still return a pass/fail result and a report entry.
+ * The types tie an issuance to its family. Validators that return findings also declare their checks
+ * for the coverage report. Legacy validators supply their own report entries.
  */
 type Descriptor =
   | { effect: "passthrough"; lifecycle: LifecycleWord; families: readonly CollectionKey[] }
@@ -327,7 +312,7 @@ export function isValidOutcome(
   if ("validate" in descriptor) {
     return !descriptor.validate(context, event.data).some(isErrorFinding);
   }
-  return descriptor.legacyValidate(context, event, true);
+  return descriptor.legacyValidate(legacyContext(context), event, true);
 }
 
 /**
@@ -349,7 +334,7 @@ export function outcomeUpdate(
       lastErrorFindings: found.filter(isErrorFinding),
     };
   }
-  return { report: [...context.report, descriptor.legacyValidate(context, event, false)] };
+  return { report: [...context.report, descriptor.legacyValidate(legacyContext(context), event, false)] };
 }
 
 /**
@@ -402,66 +387,23 @@ export const malformedResult = (ocfPackageContent: OcfPackageContent, transactio
 // ---------------------------------------------------------------------------
 
 /**
- * Valid-branch collection mutation, driven by the descriptor's `effect` and
- * `collection`. `append` descriptors push the issuance onto their family
- * collection; `remove` descriptors filter it by `security_id`; `none` descriptors
- * (and control events) mutate nothing.
+ * Apply a valid transaction's effect to the security records. Return an update only if the map
+ * changed.
  */
-export function collectionUpdate(
+export function nodesUpdate(
   context: OcfMachineContext,
   event: OcfMachineEvent,
 ): Partial<OcfMachineContext> {
   if (isControlEvent(event)) return {};
-  const descriptor = TX_DESCRIPTORS[event.type];
-
-  if (descriptor.effect === "append") {
-    // The per-key narrowing makes `event.data` the matching family payload, so a
-    // wrong-family append is a compile error (see appendToCollection). TypeScript
-    // cannot pair a runtime `descriptor.collection` with the narrowed payload, so
-    // the collection literal comes from the per-type case, not the descriptor.
-    switch (event.type) {
-      case "TX_STOCK_ISSUANCE":
-        return { stockIssuances: appendToCollection("stockIssuances", context.stockIssuances, event.data) };
-      case "TX_CONVERTIBLE_ISSUANCE":
-        return { convertibleIssuances: appendToCollection("convertibleIssuances", context.convertibleIssuances, event.data) };
-      case "TX_WARRANT_ISSUANCE":
-        return { warrantIssuances: appendToCollection("warrantIssuances", context.warrantIssuances, event.data) };
-      case "TX_EQUITY_COMPENSATION_ISSUANCE":
-      case "TX_PLAN_SECURITY_ISSUANCE":
-        return { equityCompensation: appendToCollection("equityCompensation", context.equityCompensation, event.data) };
-      default:
-        return {};
-    }
-  }
-
-  if (descriptor.effect === "remove") {
-    const securityId = "security_id" in event.data ? event.data.security_id : undefined;
-    // `removeFromCollection` is family-agnostic (it only needs security_id); the
-    // descriptor's own `collection` picks the field, retiring the name-prefix guess.
-    switch (descriptor.collection) {
-      case "stockIssuances":
-        return { stockIssuances: removeFromCollection(context.stockIssuances, securityId) };
-      case "convertibleIssuances":
-        return { convertibleIssuances: removeFromCollection(context.convertibleIssuances, securityId) };
-      case "warrantIssuances":
-        return { warrantIssuances: removeFromCollection(context.warrantIssuances, securityId) };
-      case "equityCompensation":
-        return { equityCompensation: removeFromCollection(context.equityCompensation, securityId) };
-    }
-  }
-
-  return {};
+  const nodes = applyTransaction(context.nodes, TX_DESCRIPTORS[event.type], event.data);
+  return nodes === context.nodes ? {} : { nodes };
 }
 
 // ---------------------------------------------------------------------------
 // Removed securities
 // ---------------------------------------------------------------------------
 
-/**
- * The earliest transaction in `transactions` that removes each security from
- * its collection (an effect of "remove"), by security_id: the machine's
- * `removals`, which no-earlier-removal reads. START builds it, once per run.
- */
+/** Index the earliest recorded removal attempt for each security ID when the run starts. */
 export const earliestRemovals = (transactions: readonly OcfTransaction[]): OcfMachineContext["removals"] => {
   const removals = new Map<unknown, OcfTransaction>();
   for (const ele of transactions) {
@@ -474,51 +416,50 @@ export const earliestRemovals = (transactions: readonly OcfTransaction[]): OcfMa
   return removals;
 };
 
-/** Wrap the shared removal check so the machine can call it like a transaction validator. */
-const notRemoved = {
+/** Stock issuance and passthrough transactions run shared checks before their own handlers. */
+const sharedChecks = (checks: readonly CheckObject<any>[]) => ({
   effect: "none",
   lifecycle: "stays",
   families: [],
-  validate: toValidate([noEarlierRemoval]),
-  checks: [noEarlierRemoval],
-} satisfies ActiveDescriptor;
+  checks,
+  validate: toValidate(checks),
+} as const satisfies ActiveDescriptor);
 
-/** Some transactions need a separate check for an earlier removal. */
-export const checksRemovalFirst = (type: string, descriptor: Descriptor): boolean =>
-  (descriptor.effect === "passthrough" && type !== "TX_STOCK_PLAN_RETURN_TO_POOL") ||
-  (descriptor.effect === "append" && "legacyValidate" in descriptor);
+const stockIssuanceChecks = sharedChecks(issuanceIdChecks);
+const passthroughChecks = sharedChecks([noEarlierRemoval]);
 
-/**
- * Build the `on` map for every key in `TX_DESCRIPTORS`. Active keys share the
- * two-branch transition. Graded validators declare no-earlier-removal where it
- * applies; for the transactions that can't declare it, the machine runs it
- * first. A legacy issuance runs it before its own validator, and a
- * passthrough type runs only it and is otherwise a no-op. The return to pool
- * is exempt: it records where a removed security's shares went.
- */
+export function checksBeforeValidation(type: string, descriptor: Descriptor) {
+  if (descriptor.effect === "append" && "legacyValidate" in descriptor) return stockIssuanceChecks;
+  if (descriptor.effect === "passthrough" && type !== "TX_STOCK_PLAN_RETURN_TO_POOL") return passthroughChecks;
+}
+
 function buildTransactionHandlers() {
   const activeTransitions = [
     {
       guard: "isValidTx",
       target: "capTable",
-      actions: ["recordOutcome", "mutateCollection"],
+      actions: ["recordOutcome", "applyToNodes"],
     },
     {
       target: "validationError",
       actions: ["recordOutcome", "setValidationError"],
     },
   ] as const;
-  const afterRemoval = {
-    guard: "followsRemoval",
-    target: "validationError",
-    actions: ["recordRemoval", "setRemovalError"],
-  } as const;
 
   const handlerFor = (type: TxKey) => {
     const descriptor = TX_DESCRIPTORS[type];
-    const checkRemoval = checksRemovalFirst(type, descriptor);
-    if (descriptor.effect === "passthrough") return checkRemoval ? [afterRemoval] : {};
-    return checkRemoval ? [afterRemoval, ...activeTransitions] : activeTransitions;
+    const checks = checksBeforeValidation(type, descriptor);
+    const transitions = descriptor.effect === "passthrough" ? [] : activeTransitions;
+    if (!checks) return transitions;
+    const onFailure = {
+      guard: { type: "failsSharedChecks", params: checks },
+      target: "validationError",
+      actions: [
+        { type: "recordSharedChecks", params: checks },
+        { type: "setSharedError", params: checks },
+      ],
+    } as const;
+    return [onFailure, ...transitions];
   };
 
   return (Object.keys(TX_DESCRIPTORS) as TxKey[]).reduce(
@@ -545,10 +486,8 @@ export const ocfMachine = setup({
       const descriptor = activeDescriptorFor(event.type);
       return descriptor ? isValidOutcome(descriptor, context, event) : false;
     },
-    // A passthrough transaction or issuance on a removed security (see
-    // noEarlierRemoval and buildTransactionHandlers).
-    followsRemoval: ({ context, event }) =>
-      !isControlEvent(event) && !isValidOutcome(notRemoved, context, event),
+    failsSharedChecks: ({ context, event }, checks: ActiveDescriptor) =>
+      !isControlEvent(event) && !isValidOutcome(checks, context, event),
   },
   actions: {
     // Record the validator's outcome on its shape's channel — legacy report
@@ -567,27 +506,20 @@ export const ocfMachine = setup({
         failureResult(isControlEvent(event) ? undefined : activeDescriptorFor(event.type), context, event),
     }),
 
-    // Valid branch collection mutation, driven by the descriptor's `effect` and
-    // `collection`. `none` descriptors (and control events) mutate nothing.
-    mutateCollection: assign(({ context, event }) => collectionUpdate(context, event)),
+    // Update the security records after validation succeeds.
+    applyToNodes: assign(({ context, event }) => nodesUpdate(context, event)),
 
-    // The followsRemoval branch's record and failure message, as for a
-    // graded validator's invalid branch.
-    recordRemoval: assign(({ context, event }) => outcomeUpdate(notRemoved, context, event)),
-    setRemovalError: assign({
-      result: ({ context, event }) => failureResult(notRemoved, context, event),
-    }),
+    recordSharedChecks: assign(({ context, event }, checks: ActiveDescriptor) => outcomeUpdate(checks, context, event)),
+    setSharedError: assign(({ context, event }, checks: ActiveDescriptor) => ({
+      result: failureResult(checks, context, event),
+    })),
   },
 }).createMachine({
   id: "OCF-xstate",
   initial: "capTable",
-  // A function, so each run starts with its own arrays: a caller that changes
-  // one in a run's returned context can't change the next run's.
+  // Create fresh collections for each run so a caller cannot change another run's results.
   context: () => ({
-    stockIssuances: [],
-    equityCompensation: [],
-    convertibleIssuances: [],
-    warrantIssuances: [],
+    nodes: emptyNodes(),
     ocfPackageContent: {
       manifest: {},
       stakeholders: [],

@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { lifecycleFamilies, TX_DESCRIPTORS, type TxKey } from "../ocf_validator/ocfMachine";
 import { currentName, OLDER_NAMES } from "../ocf_validator/constants/constants";
 import { ocfValidator } from "../index";
-import { validatePackage, validatePackageWith } from "./helpers";
+import { collection, validatePackage, validatePackageWith } from "./helpers";
 
 // Check that the seven older names share validation and state changes with the corresponding current
 // names.
@@ -78,7 +78,7 @@ describe("a history under the older names runs as the same history under the cur
     expect(context.result).toBe(VALID);
     // Cancellation removes the outstanding grant.
     expect(context.snapshots.map((snapshot) => snapshot.equityCompensation.length)).toEqual([1, 1, 1, 1, 0]);
-    expect(context.equityCompensation).toEqual([]);
+    expect(collection(context, "equityCompensation")).toEqual([]);
   });
 
   it.each([
@@ -91,7 +91,7 @@ describe("a history under the older names runs as the same history under the cur
         [{ id: "sh-1" }],
       );
       expect(context.result).toBe(VALID);
-      expect(context.equityCompensation).toEqual([]);
+      expect(collection(context, "equityCompensation")).toEqual([]);
     }
   });
 
@@ -188,7 +188,7 @@ describe.each([
 
     expect(context.findings).toEqual([]);
     expect(context.result).toBe(VALID);
-    expect(context.equityCompensation).toEqual([issuance]);
+    expect(collection(context, "equityCompensation")).toEqual([issuance]);
     expect(context.snapshots).toMatchObject([{ date: day, equityCompensation: [{ quantity: "100" }] }]);
   });
 

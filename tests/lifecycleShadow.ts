@@ -1,11 +1,11 @@
-// Compare each chart's decisions with no-earlier-removal and no-other-transactions (#233). Follow
+// Compare each chart with the issuance and removal checks (#233). Follow
 // transaction order even when validation fails. Whole-package tests use this comparison to catch new
 // differences.
 
 import { getNextSnapshot } from "xstate";
 import { lifecycleStep, type LifecycleState } from "../ocf_validator/lifecycle";
-import { checksRemovalFirst, lifecycleFamilies, ocfMachine, TX_DESCRIPTORS, type CollectionKey, type OcfMachineEvent } from "../ocf_validator/ocfMachine";
-import { noEarlierRemoval } from "../ocf_validator/validators/checks";
+import { checksBeforeValidation, lifecycleFamilies, ocfMachine, TX_DESCRIPTORS, type CollectionKey, type OcfMachineEvent } from "../ocf_validator/ocfMachine";
+import { applyTransaction } from "../ocf_validator/nodes";
 import { toValidate, type CheckObject } from "../ocf_validator/validators/checkKit";
 import type { Finding } from "../types/finding";
 import type { OcfMachineContext } from "../types/validator";
@@ -13,7 +13,7 @@ import { baseContext } from "./helpers";
 
 const NO_EARLIER_REMOVAL = "no-earlier-removal";
 const NO_OTHER_TRANSACTIONS = "no-other-transactions";
-const SHADOWED = [NO_EARLIER_REMOVAL, NO_OTHER_TRANSACTIONS];
+const SHADOWED = [NO_EARLIER_REMOVAL, NO_OTHER_TRANSACTIONS, "unique-security-id"];
 
 /** Package fields used to compare a transaction with its chart. */
 type Transaction = { id?: unknown; object_type: string; date: string; security_id?: unknown; security_ids?: unknown; [field: string]: unknown };
@@ -87,11 +87,15 @@ export function shadowRows(transactions: readonly Transaction[], run?: Run): Sha
     const skipped = run !== undefined && actual === undefined;
     const rules: readonly CheckObject<any>[] = "rules" in descriptor ? descriptor.rules : [];
     const checks = rules.filter((rule) => rule.run && (SHADOWED.includes(rule.id) || (skipped && rule.id === "issuance-exists")));
-    if (checksRemovalFirst(transaction.object_type, descriptor)) checks.unshift(noEarlierRemoval);
+    checks.unshift(...(checksBeforeValidation(transaction.object_type, descriptor)?.checks ?? []));
     const runs = checks.map((check) => check.id).filter((id) => SHADOWED.includes(id));
     const replayed = skipped ? replay(context, transaction, checks) : undefined;
     if (replayed) context = replayed.context;
     const findings = actual ?? replayed?.findings ?? toValidate(checks)(context, transaction);
+    // Without a package run, keep the prior issuances available to the ID check.
+    if (!run && findings.length === 0 && typeof transaction.id === "string") {
+      context = { ...context, nodes: applyTransaction(context.nodes, descriptor, { ...transaction, id: transaction.id }) };
+    }
     const reported = [...new Set(findings.map((f) => f.check).filter((id) => SHADOWED.includes(id)))];
     const missingIssuance = findings.some((f) => f.check === "issuance-exists" && f.severity === "error");
 

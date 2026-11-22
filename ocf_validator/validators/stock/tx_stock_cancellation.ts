@@ -12,12 +12,12 @@
     9. Only issuance, acceptance, this cancellation, and a subsequent return of plan-issued shares may reference the security.
 */
 
-import {OcfMachineContext} from '../../ocfMachine';
+import {LegacyContext} from '../../ocfMachine';
 
 export const hasStockPlan = (id: unknown): boolean => typeof id === "string" && id.length > 0;
 
 const valid_tx_stock_cancellation = (
-  context: OcfMachineContext,
+  context: LegacyContext,
   event: any,
   isGuard: Boolean = false
 ) => {

@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import {
   buildLifecycleChart,
   isOnCapTable,
@@ -265,6 +265,16 @@ describe("the lookup is a pure function of the stored state", () => {
 // Snapshot visibility
 
 describe("the on-the-cap-table tag", () => {
+  it("reuses the chart's tag decisions across snapshots", () => {
+    const chart = buildLifecycleChart("warrantIssuances");
+    const resolve = vi.spyOn(chart, "resolveState");
+    const visible = () => STATES.filter((state) => isOnCapTable("warrantIssuances", state, chart));
+    expect(visible()).toEqual(["outstanding"]);
+    resolve.mockClear();
+    expect(visible()).toEqual(["outstanding"]);
+    expect(resolve).not.toHaveBeenCalled();
+  });
+
   it.each(FAMILIES)("marks only an outstanding %s security", (family) => {
     expect(STATES.filter((state) => isOnCapTable(family, state))).toEqual(["outstanding"]);
   });

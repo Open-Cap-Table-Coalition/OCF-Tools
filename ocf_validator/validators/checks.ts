@@ -1,7 +1,8 @@
 import type { OCFStockIssuance } from "@opencaptablecoalition/ocf-types";
 import type { OcfTransaction, TransactionFor } from "../../types/ocf-input";
 import type { DeepReadonly, OcfMachineContext } from "../../types/validator";
-import type { CollectionKey, TxKey } from "../ocfMachine";
+import { outstandingSecurity, securityById } from "../nodes";
+import type { CollectionElement, CollectionKey, TxKey } from "../ocfMachine";
 import { currentName, type CurrentTxKey } from "../constants/constants";
 import { text, type CheckObject } from "./checkKit";
 
@@ -40,6 +41,13 @@ export const stakeholderExists = {
   },
 } satisfies CheckObject<{ stakeholder_id: string }>;
 
+type DatedSecurity = { security_id: string; date: string };
+
+const removalBefore = (context: DeepReadonly<OcfMachineContext>, data: DatedSecurity) => {
+  const removal = context.removals.get(data.security_id);
+  return removal && removal.date < data.date ? removal : undefined;
+};
+
 /**
  * No transaction dated before this one removed its security from the cap
  * table: no cancellation, conversion, warrant exercise, repurchase,
@@ -53,21 +61,35 @@ export const stakeholderExists = {
  * (#214).
  *
  * A removal dated the same day doesn't count, since a security can be issued,
- * vest, and be removed on one day. A same-day reuse of the security_id is left
- * to the removal's own checks, which catch it only in part.
+ * vest, and be removed on one day.
  */
 export const noEarlierRemoval = {
   id: "no-earlier-removal",
   severity: "error",
   description: "No transaction dated before this one removed its security from the cap table.",
   run: (context, data) => {
-    const removal = context.removals.get(data.security_id);
-    if (removal === undefined || !(removal.date < data.date)) return [];
+    const removal = removalBefore(context, data);
+    if (removal === undefined) return [];
     return [
       text`The security ${data.security_id} was removed from the cap table by ${removal.id} on ${removal.date}.`,
     ];
   },
-} satisfies CheckObject<{ security_id: string; date: string }>;
+} satisfies CheckObject<DatedSecurity>;
+
+/** An ID belongs to its first issuance across all security families. */
+export const uniqueSecurityId = {
+  id: "unique-security-id",
+  severity: "error",
+  description: "Each security ID is issued only once.",
+  run: (context, data) => {
+    const original = securityById(context.nodes, data.security_id);
+    // An earlier removal already has its own finding. Same-day reuse still needs this one.
+    if (original === undefined || removalBefore(context, data)) return [];
+    return [text`The security ID ${data.security_id} was already issued by ${original.issuance.writer?.id}.`];
+  },
+} satisfies CheckObject<DatedSecurity>;
+
+export const issuanceIdChecks = [noEarlierRemoval, uniqueSecurityId] as const;
 
 /**
  * Describe each family's issuance, acceptance, vesting, stock plan support and transactions that
@@ -78,10 +100,10 @@ type Family = {
   [C in CollectionKey]: {
     name: string;
     collection: C;
-    issuance: Extract<OcfMachineContext[C][number]["object_type"], CurrentTxKey>;
+    issuance: Extract<CollectionElement[C]["object_type"], CurrentTxKey>;
     acceptance: Extract<CurrentTxKey, `TX_${string}_ACCEPTANCE`>;
-    vests: HasKey<OcfMachineContext[C][number], "vesting_terms_id" | "vesting_template_id">;
-    returnsToPool: HasKey<OcfMachineContext[C][number], "stock_plan_id">;
+    vests: HasKey<CollectionElement[C], "vesting_terms_id" | "vesting_template_id">;
+    returnsToPool: HasKey<CollectionElement[C], "stock_plan_id">;
     leavesOutstanding?: readonly CurrentTxKey[];
   };
 }[CollectionKey];
@@ -131,9 +153,8 @@ export function familyChecksFor({
   leavesOutstanding = [],
 }: Family) {
   /**
-   * Look for an outstanding issuance in this family. If it is missing, use the package history to
-   * distinguish a missing issuance, one dated later and one already removed. Prefer an issuance on
-   * or before the transaction date when reporting the reason.
+   * Look up an outstanding security by family and ID. If it is missing, use the package history to
+   * explain whether it was never issued, issued later or already removed.
    */
   const issuanceExists = {
     id: "issuance-exists",
@@ -152,13 +173,7 @@ export function familyChecksFor({
         return messages;
       }
 
-      let issuanceExists = false;
-      context[collection].forEach((ele) => {
-        if (ele.security_id === data.security_id) {
-          issuanceExists = true;
-        }
-      });
-      if (issuanceExists) return messages;
+      if (outstandingSecurity(context.nodes, collection, data.security_id) !== undefined) return messages;
 
       // Check the transaction type before accessing fields specific to an issuance.
       const { transactions } = context.ocfPackageContent;
@@ -389,13 +404,9 @@ export function resultingChecksFor({
     run: (context, data) => {
       const messages: string[] = [];
 
-      // The reference stakeholder comes from the live issuance this transaction
-      // acts on — the same record issuance-exists matches. With no live record,
-      // issuance-exists already carries the failure and there is no reference
-      // to compare against, so this check stays silent.
-      const reference = context[collection].find(
-        (ele) => ele.security_id === data.security_id,
-      );
+      // Compare the stakeholder with the outstanding issuance. If the issuance is missing,
+      // issuance-exists already explains the problem.
+      const reference = outstandingSecurity(context.nodes, collection, data.security_id)?.issuance.value;
       if (reference === undefined) return messages;
 
       // As with the date check, only resulting ids backed by exactly one stock
