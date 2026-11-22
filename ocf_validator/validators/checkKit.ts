@@ -1,5 +1,6 @@
 import type { TransactionFor } from "../../types/ocf-input";
-import type { Finding } from "../../types/finding";
+import type { Finding, Subject } from "../../types/finding";
+import { addRoot, fieldAt, type FieldRef, type FieldRefValue, type NodeMap } from "../nodes";
 import type {
   Check,
   DeepReadonly,
@@ -10,35 +11,26 @@ import type {
 import type { CollectionKey, TxKey } from "../ocfMachine";
 
 /**
- * One validation check, written as a plain object: its id, severity, and
- * description, plus a `run` function that performs it.
+ * Define each check once with an ID, severity, description and optional run function. Return one
+ * message per problem. Omitting run lists a known gap in coverage.
  *
- * `run` returns a list of failure messages, one per problem found, or an empty
- * list if the check passes. It returns only the message text. `defineValidator`
- * fills in each finding's severity, check id, and subject from this object, so
- * a check can't get them wrong.
+ * Declare each state field the check needs in reads. The runner blocks the check if an earlier
+ * failure makes one of those fields unreliable. Other checks still run. Use the supplied read
+ * function for those fields. Package data is available through the context.
  *
- * A check with no `run` is a declared gap: a check we know is needed but
- * haven't written yet. The coverage report lists it as not implemented, and it
- * never produces findings.
- *
- * `P` names the transaction fields the check reads, e.g. `{ security_id: string }`.
- * Any transaction that has those fields can reuse the check, and
- * `defineValidator` won't compile a check attached to a transaction that lacks
- * them.
- *
- * Write a check as `{ ... } satisfies CheckObject<P>` and leave `run`'s
- * parameters unannotated. They then take their types from here, which makes the
- * context and the transaction read-only inside `run`: a check that tries to
- * modify either won't compile.
- *
- * Keep `run` declared as a property (`run?: (...) => ...`), not a method
- * (`run?(...)`). TypeScript checks method parameters more loosely, so the
- * wrong-field protection above would quietly stop working.
+ * Use satisfies CheckObject<P> to check the input fields and keep the inputs read-only. Declare run
+ * as a function property so TypeScript checks parameter compatibility.
  */
 export type CheckObject<P = unknown> = Pick<Check, "id" | "severity" | "description"> & {
-  run?: (context: DeepReadonly<OcfMachineContext>, data: DeepReadonly<P>) => string[];
+  reads?: (data: DeepReadonly<P>) => readonly FieldRef[];
+  run?: (context: DeepReadonly<CheckContext>, data: DeepReadonly<P>, read: ReadField) => string[];
 };
+
+/** Checks use the supplied reader for current security records. */
+export type CheckContext = Pick<OcfMachineContext, "ocfPackageContent" | "removals">;
+
+/** Read a declared field. A missing or unknown value produces undefined. An undeclared read throws. */
+export type ReadField = <R extends FieldRef>(ref: R) => DeepReadonly<FieldRefValue<R>> | undefined;
 
 const show = (value: unknown): string => {
   try {
@@ -108,21 +100,67 @@ const toMetadata = (checks: readonly CheckObject<any>[]): readonly Check[] =>
     return metadata;
   });
 
+const describeField = (ref: FieldRef) => text`the ${ref.field} of security ${ref.id}`;
+
+const sameField = (a: FieldRef, b: FieldRef): boolean =>
+  a.kind === b.kind && a.family === b.family && a.id === b.id && a.field === b.field;
+
+/** Collect the distinct failures affecting these fields and the first affected field for the message. */
+const defectsOn = (nodes: NodeMap, refs: readonly FieldRef[]): { roots: Subject[]; ref?: FieldRef } => {
+  const roots: Subject[] = [];
+  let first: FieldRef | undefined;
+  for (const ref of refs) {
+    const defects = fieldAt(nodes, ref)?.defects ?? [];
+    if (defects.length > 0) first ??= ref;
+    for (const root of defects) addRoot(roots, root);
+  }
+  return { roots, ref: first };
+};
+
+/** Format the transaction types and IDs for a finding. */
+const namesOf = (roots: readonly Subject[]): string => {
+  const names = roots.map((root) => text`${root.object_type} ${root.id}`);
+  if (names.length <= 2) return names.join(" and ");
+  return `${names.slice(0, -1).join(", ")}, and ${names[names.length - 1]}`;
+};
+
 /**
- * Run the implemented checks in order. Make one failed finding per message and use the check's
- * severity. If a check throws, record an error for that check.
+ * Run implemented checks in order. Produce a failed finding for each message. A check with
+ * unreliable inputs produces a blocked finding naming the earlier failures. Continue with the
+ * remaining checks. A thrown exception produces an error finding.
  */
 export const toValidate =
   (checks: readonly CheckObject<any>[]): GradedValidator<any> =>
   (context, data: any) => {
     const subject = { object_type: data.object_type, id: data.id };
+    const { nodes, ocfPackageContent, removals } = context;
+    const checkContext = { ocfPackageContent, removals };
     const findings: Finding[] = [];
     for (const check of checks) {
       if (!check.run) continue;
       let severity = check.severity;
       let messages: string[];
       try {
-        messages = check.run(context, data);
+        const refs = check.reads?.(data) ?? [];
+        const { roots, ref } = defectsOn(nodes, refs);
+        if (ref !== undefined) {
+          findings.push({
+            severity,
+            outcome: "blocked",
+            check: check.id,
+            message: `Not checked: it reads ${describeField(ref)}, which can't be relied on because ${namesOf(roots)} failed.`,
+            subject,
+            roots,
+          });
+          continue;
+        }
+        const read: ReadField = (wanted) => {
+          if (!refs.some((declared) => sameField(declared, wanted))) {
+            throw new Error(`It read ${describeField(wanted)}, which it doesn't declare in its reads.`);
+          }
+          return fieldAt(nodes, wanted, removals)?.value as DeepReadonly<FieldRefValue<typeof wanted>> | undefined;
+        };
+        messages = check.run(checkContext, data, read);
       } catch (error) {
         severity = "error";
         messages = [text`The check threw ${error}`];

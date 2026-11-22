@@ -19,16 +19,13 @@ export type OcfMachineContext = {
    * An index of the package, not a record of the run: each security's
    * earliest transaction in the package that removes it from its collection
    * (a cancellation, conversion, transfer, and so on), by security_id, even if
-   * the run stops before it. Built when the run starts, for the
-   * no-earlier-removal check.
+   * the run stops before it. A security record tracks its applied removal separately.
    */
   removals: ReadonlyMap<unknown, DeepReadonly<OcfTransaction>>;
   report: any[];
   findings: Finding[];
   /**
-   * Machine bookkeeping, not validator input: the error findings of the most
-   * recently recorded transaction. Written at record time, read only by the
-   * failure branch to build the failure message.
+   * Error findings from the shared ID checks on the latest legacy stock issuance.
    */
   lastErrorFindings: Finding[];
   snapshots: Snapshot[];
@@ -49,14 +46,8 @@ export type DeepReadonly<T> = T extends readonly (infer E)[]
       : T;
 
 /**
- * A graded validator for a transaction whose payload is `T`: receives the
- * payload directly — no guard flag — and returns findings. The machine derives
- * everything else from that one return value: the transaction is valid iff no
- * finding carries severity "error" (warnings alone do not block), and the
- * findings are recorded on `context.findings`, never on `context.report`.
- * The machine invokes a validator up to twice per transaction (guard and
- * record), always with identical inputs, so a validator must be pure; its
- * inputs are typed `DeepReadonly` so mutating them is a compile error.
+ * A validator returns findings for one transaction. The machine records them and applies writes only
+ * when no error-level finding prevents it. Warnings allow writes, and later transactions still run.
  */
 export type GradedValidator<T> = (
   context: DeepReadonly<OcfMachineContext>,

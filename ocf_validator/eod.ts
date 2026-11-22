@@ -1,21 +1,42 @@
 import type { OcfMachineContext } from "../types/validator";
-import type { Snapshot } from "../types/snapshot";
+import type { DefectMark, Snapshot } from "../types/snapshot";
 import { isOnCapTable } from "./lifecycle";
-import { securityRecords } from "./nodes";
+import { securityRecords, type SecurityNode } from "./nodes";
 import type { CollectionKey } from "./ocfMachine";
 
-const families = ["stockIssuances", "convertibleIssuances", "warrantIssuances", "equityCompensation"] as const satisfies readonly CollectionKey[];
+const snapshotList = {
+  stockIssuances: "stockIssuances",
+  convertibleIssuances: "convertibles",
+  warrantIssuances: "warrants",
+  equityCompensation: "equityCompensation",
+} as const satisfies Record<CollectionKey, keyof Snapshot>;
+const families = Object.keys(snapshotList) as CollectionKey[];
+
+const defectMark = ({ lifecycle, issuance }: SecurityNode): DefectMark | undefined => {
+  if (!lifecycle.defects.length && !issuance.defects.length) return;
+  return {
+    defects: {
+      ...(lifecycle.defects.length > 0 && { lifecycle: [...lifecycle.defects] }),
+      ...(issuance.defects.length > 0 && { issuance: [...issuance.defects] }),
+    },
+  };
+};
 
 /** Build all four snapshot lists in issuance order. */
 const RUN_EOD = (context: OcfMachineContext, event: { date: string }): Snapshot => {
   const snapshot: Snapshot = { date: event.date, stockIssuances: [], convertibles: [], warrants: [], equityCompensation: [] };
   // Today's charts show only outstanding securities. Honor any chart that also tags another state.
   const includeRemoved = families.some((family) => isOnCapTable(family, "removed") || isOnCapTable(family, "notIssued"));
-  for (const node of securityRecords(context.nodes, includeRemoved ? "history" : "outstanding")) {
+  for (const node of securityRecords(context.nodes, includeRemoved ? "history" : "current")) {
     const state = node.lifecycle.value;
-    if (state === undefined || !isOnCapTable(node.family, state) || node.issuance.value === undefined) continue;
+    if (state !== undefined && !isOnCapTable(node.family, state)) continue;
+    const mark = defectMark(node);
+    if (node.issuance.value === undefined) {
+      if (mark) snapshot[snapshotList[node.family]].push(mark);
+      continue;
+    }
     const { date, custom_id, stakeholder_id: stakeholder } = node.issuance.value;
-    const common = { date, custom_id, stakeholder };
+    const common = { date, custom_id, stakeholder, ...mark };
     switch (node.family) {
       case "stockIssuances": {
         const stock = node.issuance.value;

@@ -24,13 +24,15 @@ This tool tests the logical and structural validity of an OCF package. We are co
 const ocfValidation = ocfValidator(ocfPackageFolderDir);
 ```
 
-Validation goes through the transactions in date order and stops at the first one that fails. The tool outputs an object whose fields include:
+Validation processes transactions in date order. Convertible, warrant, and equity compensation validators record errors and continue. A failed check withholds the transaction’s writes and marks affected fields as unreliable. Later checks that need those fields report a blocked finding. Independent checks still run. Legacy stock validation failures, unknown transaction types, and internal errors can stop validation early.
 
-- `result: string` says whether the package appears valid, or what made the validation fail: usually the transaction that failed and why. It's the one field that says whether the package is valid. A valid package can still have warnings, and the result counts them: "…appears valid, with 1 warning."
-- `findings` lists the problems found by the checks that report findings. Today those are the convertible, warrant, and equity compensation validators' checks, plus one run on every issuance and on the transactions nothing else validates, except a return to pool: that no earlier transaction removed the security. Each finding has a `severity` (`"error"` or `"warning"`), an `outcome`, the id of the `check` that produced it, a `message`, and a `subject`: the `object_type` and `id` of the transaction it's about. An error fails its transaction; a warning doesn't. The `outcome` is separate from the severity. It is `"failed"` for a check that ran and found its problem, which is every finding today. `"blocked"` is for a check that couldn't run because of an earlier failure; such a finding also has `roots`, the `object_type` and `id` of every transaction whose failure it traces back to. Nothing produces a blocked finding yet. Use `check` and `subject` to group findings. Keep the full list because one check can report several messages for the same subject, such as one for each missing stock issuance.
-- `report` lists, for each stock transaction the tool validates, the checks it did and whether each passed. The stock validators haven't moved to findings yet; a stock issuance that reuses a security ID fails with a finding naming the original issuance or the earlier removal.
-- `snapshots` holds the cap table at the end of each day with transactions, up to the last day validated in full.
-- `nodes` holds the state the run built the snapshots from: every security it issued, including the ones since removed. A security ID can be issued only once across all four families. Each security records where it is in its life and its issuance, and for each of those the transaction that last wrote it. It replaces the four arrays of outstanding issuances (`stockIssuances`, `convertibleIssuances`, `warrantIssuances`, `equityCompensation`) the output used to carry.
+The output includes these fields.
+
+- `result` states whether the package appears valid. A completed run counts failed errors, blocked checks, and warnings separately. If validation stops early, the result identifies the failure.
+- `findings` lists each check’s `severity` (error or warning), `outcome`, `check` ID, `message`, and `subject` (the transaction’s `object_type` and `id`). A `failed` finding reports a problem the check found. A `blocked` finding lists the earlier failures in `roots`. Warnings allow the transaction’s writes. Use `check` and `subject` to group findings, keeping every message in each group.
+- `report` contains the legacy stock validators’ checks. A stock issuance that reuses a security ID produces a finding naming the original issuance or the earlier removal.
+- `snapshots` contains the cap table at the end of each transaction day the run completed. A row’s optional `defects` lists the causes of uncertainty under `lifecycle` or `issuance`. A failed first issuance appears as a row containing only its defects.
+- `nodes` holds each security’s issuance and lifecycle, including removed securities. Each field records its last writer and any defects. A security ID can be issued only once across all four families.
 
 To read one of the former issuance lists, use `outstanding` from the package entry point. It returns the family's outstanding issuances in their original order.
 
@@ -49,7 +51,7 @@ This tool allows the user to see the outstanding captable of a OCF package on a 
 const snapshot = ocfSnapshot(ocfPackageFolderDir, ocfSnapshotDate);
 ```
 
-`ocfSnapshot` returns the validator's last snapshot on or before that date, or `null` if there isn't one. It doesn't report the validation's result or findings. If the validation failed, it returns the cap table as of the last day validated in full, even for a later date, without saying so. To get the cap table and the validation's outcome together, call `ocfValidator` and read `snapshots`, `result`, and `findings` from its output.
+`ocfSnapshot` returns the validator's last snapshot on or before that date, or `null` if there isn't one. It doesn't report the validation's result or findings. An entry the validation couldn't vouch for carries the `defects` mark described above. If the validation was stopped, it returns the cap table as of the last day validated in full, even for a later date, without saying so. To get the cap table and the validation's outcome together, call `ocfValidator` and read `snapshots`, `result`, and `findings` from its output.
 
 ## How to use the toolset
 

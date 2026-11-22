@@ -36,8 +36,9 @@ export type ShadowRow = {
   runs: string[];
   /** Checks that reported a problem. */
   reported: string[];
+  blocked: boolean;
   /** Whether the validator or the replay found the issuance missing. */
-  issuanceCheck?: "failed" | "replayed";
+  issuanceCheck?: "failed" | "replayed" | "blocked";
   /** Earlier transaction that removed this security, if known. */
   removedBy: Transaction | undefined;
   /** The first removal the validator indexed for this security. */
@@ -96,8 +97,9 @@ export function shadowRows(transactions: readonly Transaction[], run?: Run): Sha
     if (!run && findings.length === 0 && typeof transaction.id === "string") {
       context = { ...context, nodes: applyTransaction(context.nodes, descriptor, { ...transaction, id: transaction.id }) };
     }
-    const reported = [...new Set(findings.map((f) => f.check).filter((id) => SHADOWED.includes(id)))];
-    const missingIssuance = findings.some((f) => f.check === "issuance-exists" && f.severity === "error");
+    const failed = findings.filter((f) => f.outcome === "failed");
+    const reported = [...new Set(failed.map((f) => f.check).filter((id) => SHADOWED.includes(id)))];
+    const issuance = findings.find((f) => f.check === "issuance-exists" && f.severity === "error");
 
     for (const security of securitiesOf(transaction)) {
       let known = securities.get(security);
@@ -126,7 +128,8 @@ export function shadowRows(transactions: readonly Transaction[], run?: Run): Sha
         allowed: step.allowed,
         runs,
         reported,
-        issuanceCheck: missingIssuance ? (skipped ? "replayed" : "failed") : undefined,
+        blocked: findings.some((f) => f.outcome === "blocked" && SHADOWED.includes(f.check)),
+        issuanceCheck: issuance?.outcome === "failed" && skipped ? "replayed" : issuance?.outcome,
         indexedRemoval: context.removals.get(security),
         removedBy: state === "removed" ? known?.removedBy : undefined,
       });
@@ -153,6 +156,9 @@ export const EXPLANATIONS = {
   "the validator stopped before checking the issuance":
     "The validator stopped earlier. When we check the removed security, its issuance is missing.",
 
+  "an earlier failure blocked the check":
+    "The validator could not determine the security’s state after an earlier failure.",
+
   "wrong security family":
     "The transaction's family does not match the security's issuance, so its issuance check rejects it.",
 
@@ -177,6 +183,9 @@ export type Explanation = keyof typeof EXPLANATIONS;
 /** Identify a known difference so tests can report any new one. */
 export function explain(row: ShadowRow): Explanation | undefined {
   const refusedInSilence = !row.allowed && row.reported.length === 0;
+  if (refusedInSilence && (row.blocked || (row.runs.length === 0 && row.issuanceCheck === "blocked"))) {
+    return "an earlier failure blocked the check";
+  }
   if (!refusedInSilence || row.state !== "removed" || row.removedBy === undefined) return undefined;
 
   if (!row.family) return undefined;

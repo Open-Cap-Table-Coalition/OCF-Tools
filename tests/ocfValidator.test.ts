@@ -97,15 +97,26 @@ describe("a transaction on a security an earlier transaction removed", () => {
     { id: "ve-1", object_type: "TX_VESTING_EVENT", security_id: "safe-1", vesting_condition_id: "vc-1", date: "2021-07-01" },
     { id: "ci-2", object_type: "TX_CONVERTIBLE_ISSUANCE", security_id: "safe-1", stakeholder_id: "sh-1", date: "2021-07-01" },
     { id: "wi-1", object_type: "TX_WARRANT_ISSUANCE", security_id: "safe-1", stakeholder_id: "sh-1", date: "2021-07-01" },
-    { id: "si-1", object_type: "TX_STOCK_ISSUANCE", security_id: "safe-1", stakeholder_id: "sh-1", date: "2021-07-01" },
     { id: "eci-1", object_type: "TX_EQUITY_COMPENSATION_ISSUANCE", security_id: "safe-1", stakeholder_id: "sh-1", date: "2021-07-01" },
   ])("fails a later $object_type on it", (transaction) => {
+    const context = validateAfter(transaction);
+
+    // Include the error in the completed result.
+    expect(context.findings).toEqual([removed(transaction)]);
+    expect(context.result).toBe("The validation of the OCF package for Test Co is complete and found 1 error.");
+    expect(context.snapshots.map((s) => s.date)).toEqual(["2021-01-01", "2021-06-01", "2021-07-01"]);
+  });
+
+  it("still stops the run on a later TX_STOCK_ISSUANCE on it, which is a stock failure", () => {
+    // A legacy stock issuance stops the run if its earlier-removal check fails.
+    const transaction = { id: "si-1", object_type: "TX_STOCK_ISSUANCE", security_id: "safe-1", stakeholder_id: "sh-1", date: "2021-07-01" };
     const context = validateAfter(transaction);
 
     expect(context.findings).toEqual([removed(transaction)]);
     expect(context.result).toBe(
       `The validation of the OCF package for Test Co failed on ${transaction.id}: ${JSON.stringify([removed(transaction)], null, 2)}`,
     );
+    expect(context.snapshots.map((s) => s.date)).toEqual(["2021-01-01", "2021-06-01"]);
   });
 
   it("fails a later release under the older name TX_PLAN_SECURITY_RELEASE through the release's own checks", () => {
@@ -126,12 +137,17 @@ describe("a transaction on a security an earlier transaction removed", () => {
   });
 
   it("names the first removal of a security removed twice", () => {
-    // The second cancellation would fail on its own, but the run stops at the
-    // vesting event between the two.
+    // The validator reaches the second cancellation. Its security was already removed, and the first
+    // cancellation and vesting event also name it.
     const vesting = { id: "ve-1", object_type: "TX_VESTING_EVENT", security_id: "safe-1", vesting_condition_id: "vc-1", date: "2021-07-01" };
     const context = validateAfter(vesting, { ...cancellation, id: "cc-2", date: "2021-08-01" });
 
-    expect(context.findings).toEqual([removed(vesting)]);
+    expect(context.findings[0]).toEqual(removed(vesting));
+    expect(context.findings.slice(1).map((f) => [f.subject.id, f.check, f.outcome])).toEqual([
+      ["cc-2", "issuance-exists", "failed"],
+      ["cc-2", "no-other-transactions", "failed"],
+      ["cc-2", "no-other-transactions", "failed"],
+    ]);
   });
 
   it("runs a removal before a transaction it's dated before, even on a noncanonical date", () => {
@@ -142,7 +158,8 @@ describe("a transaction on a security an earlier transaction removed", () => {
     const context = validateAfter(vesting);
 
     expect(context.findings).toEqual([removed(vesting)]);
-    expect(context.snapshots.map((s) => s.date)).toEqual(["2021-01-01", "2021-06-01"]);
+    // Include the vesting date in the snapshots even though the transaction failed.
+    expect(context.snapshots.map((s) => s.date)).toEqual(["2021-01-01", "2021-06-01", "2021-06_01"]);
   });
 
   it("reports an issuance's own failures along with the reuse", () => {
@@ -208,9 +225,7 @@ describe("malformed package values", () => {
       subject: { object_type: "TX_CONVERTIBLE_CONVERSION", id: "cv-1" },
     };
     expect(context.findings).toEqual([finding]);
-    expect(context.result).toBe(
-      `The validation of the OCF package for Test Co failed on cv-1: ${JSON.stringify([finding], null, 2)}`,
-    );
+    expect(context.result).toBe("The validation of the OCF package for Test Co is complete and found 1 error.");
   });
 
   it("names a failing transaction whose id isn't a string", () => {
@@ -218,8 +233,10 @@ describe("malformed package values", () => {
       { id: unprintable, object_type: "TX_CONVERTIBLE_ISSUANCE", security_id: "safe-1", stakeholder_id: "nobody", date: "2021-01-01" },
     ]);
 
-    expect(context.result).toMatch(/^The validation of the OCF package for Test Co failed on \{"toString":null\}: /);
+    // Count the failure and retain the transaction's actual ID in its finding.
+    expect(context.result).toBe("The validation of the OCF package for Test Co is complete and found 1 error.");
     expect(context.findings.map((f) => f.check)).toEqual(["stakeholder-exists"]);
+    expect(context.findings[0].subject).toEqual({ object_type: "TX_CONVERTIBLE_ISSUANCE", id: unprintable });
   });
 
   const issuance = { id: "ci-2", object_type: "TX_CONVERTIBLE_ISSUANCE", security_id: "safe-2", stakeholder_id: "sh-1", date: "2021-02-01" };

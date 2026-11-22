@@ -197,12 +197,17 @@ describe.each([
     const acceptance = on(`${second}_ACCEPTANCE`, "accept", day);
     const context = validate([acceptance, retraction, grant(`${first}_ISSUANCE`)], [{ id: "sh-1" }]);
 
-    expect(context.findings).toEqual([{
+    expect(context.findings).toMatchObject([{
       severity: "error",
       outcome: "failed",
       check: "no-acceptance",
       message: "An equity compensation acceptance (accept) references the transaction's security_id.",
       subject: { object_type: retraction.object_type, id: "retract" },
+    }, {
+      check: "issuance-exists", outcome: "blocked", subject: { object_type: acceptance.object_type },
+      roots: [{ object_type: retraction.object_type, id: "retract" }],
+    }, {
+      check: "no-retraction", outcome: "failed", subject: { object_type: acceptance.object_type },
     }]);
   });
 

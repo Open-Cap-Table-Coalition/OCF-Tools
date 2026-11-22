@@ -111,6 +111,14 @@ export const validatePackageWith = <T>(validate: (dir: string) => T) => (
 
 export const validatePackage = validatePackageWith(validateWithShadow);
 
+/** Seed an applied removal for checks that run directly against a context. */
+export function contextAfterCancellation(family: string, security_id = "sec1") {
+  return validatePackage([
+    { ...txRecord(`TX_${family}_ISSUANCE`, "issue", security_id, "2020-01-01"), stakeholder_id: "sh1" },
+    txRecord(`TX_${family}_CANCELLATION`, "cancel", security_id, "2020-06-01"),
+  ], [{ id: "sh1" }]);
+}
+
 /** Start the machine in capTable with the supplied records and issuances. */
 export const startSeeded = (context: OcfMachineContext & ContextSeed) =>
   createActor(ocfMachine, {

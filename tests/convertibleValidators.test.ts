@@ -6,6 +6,7 @@ import {
   startSeeded,
   ev,
   contextWith,
+  contextAfterCancellation,
   validatePackage,
   withStakeholder,
   txRecord,
@@ -79,16 +80,22 @@ describe("convertible issuance validity", () => {
     expect(snapshot.context.findings).toEqual([]);
   });
 
-  it("halts an invalid issuance in validationError with the error finding recorded", () => {
+  it("records an invalid issuance's error finding and goes on, with the security withheld and marked", () => {
     const actor = startSeeded(withStakeholder("someone-else"));
     actor.send(ev("TX_CONVERTIBLE_ISSUANCE", issuance()));
 
     const snapshot = actor.getSnapshot();
-    expect(snapshot.value).toBe("validationError");
+    // The validator continues after this transaction fails.
+    expect(snapshot.value).toBe("capTable");
     expect(snapshot.context.findings).toHaveLength(1);
     expect(snapshot.context.findings[0].check).toBe("stakeholder-exists");
     expect(collection(snapshot.context, "convertibleIssuances")).toEqual([]);
-    expect(snapshot.context.result).toContain("stakeholder-exists");
+    // Keep a record with unknown values and identify the failed issuance.
+    const root = snapshot.context.findings[0].subject;
+    expect(snapshot.context.nodes.security.get("sec1")).toMatchObject({
+      lifecycle: { value: undefined, defects: [root] },
+      issuance: { value: undefined, defects: [root] },
+    });
   });
 });
 
@@ -898,7 +905,8 @@ describe("a conflicting transaction pair flags the later transaction, not the ea
 
     actor.send(ev("TX_CONVERTIBLE_RETRACTION", retraction));
     const { context, value } = actor.getSnapshot();
-    expect(value).toBe("validationError");
+    // The validator continues after this transaction fails.
+    expect(value).toBe("capTable");
 
     const errors = context.findings.filter((f) => f.severity === "error");
     expect(errors).toHaveLength(1);
@@ -929,7 +937,8 @@ describe("a conflicting transaction pair flags the later transaction, not the ea
 
     actor.send(ev("TX_CONVERTIBLE_ACCEPTANCE", acceptance));
     const { context, value } = actor.getSnapshot();
-    expect(value).toBe("validationError");
+    // The validator continues after this transaction fails.
+    expect(value).toBe("capTable");
 
     const errors = context.findings.filter((f) => f.severity === "error");
     expect(errors.map((f) => f.check).sort()).toEqual(["issuance-exists", "no-retraction"]);
@@ -964,13 +973,7 @@ const failingScenarios: FailingScenarios<MigratedKey> = {
     },
     // Reuses the security_id of a security cancelled before it.
     {
-      context: baseContext({
-        ocfPackageContent: {
-          ...baseContext().ocfPackageContent,
-          stakeholders: [{ id: "sh1" }],
-          transactions: [txRecord("TX_CONVERTIBLE_CANCELLATION", "c0", "sec1", "2020-06-01")],
-        } as OcfMachineContext["ocfPackageContent"],
-      }),
+      context: contextAfterCancellation("CONVERTIBLE"),
       data: { id: "i1", object_type: "TX_CONVERTIBLE_ISSUANCE", security_id: "sec1", stakeholder_id: "sh1", date: "2021-01-01" },
     },
   ],
@@ -1035,7 +1038,7 @@ describe("declared and emitted checks stay consistent across the family", () => 
 // ---------------------------------------------------------------------------
 
 describe("convertible family findings migrate to the findings channel", () => {
-  it("routes an invalid convertible transaction to findings, leaves report clear, and serializes the errors in the failure result", () => {
+  it("routes an invalid convertible transaction to findings, leaves report clear, and counts the errors in the result", () => {
     const actor = startSeeded(baseContext());
     // No stakeholder matches, so the issuance is invalid.
     actor.send(ev("TX_CONVERTIBLE_ISSUANCE", {
@@ -1047,14 +1050,18 @@ describe("convertible family findings migrate to the findings channel", () => {
     }));
 
     const { context, value } = actor.getSnapshot();
-    expect(value).toBe("validationError");
+    // The validator continues after this transaction fails.
+    expect(value).toBe("capTable");
     // The errors landed on findings…
     expect(context.findings.length).toBeGreaterThan(0);
     expect(context.findings.every((f) => f.severity === "error")).toBe(true);
     // …no report entry was written for a migrated convertible type…
     const migrated = MIGRATED_KEYS as readonly string[];
     expect(context.report.some((entry: any) => migrated.includes(entry?.transaction_type))).toBe(false);
-    // …and the failure result serialized the error findings.
-    expect(context.result).toContain(JSON.stringify(context.findings, null, 2));
+    // The final result counts the findings.
+    actor.send({ type: "RUN_END", date: "2021-01-01" });
+    expect(actor.getSnapshot().context.result).toBe(
+      `The validation of the OCF package for Test Co is complete and found ${context.findings.length} error${context.findings.length === 1 ? "" : "s"}.`,
+    );
   });
 });

@@ -21,19 +21,20 @@ const fixture = (...segments: string[]) => path.resolve(__dirname, "..", ...segm
 // Package fixtures
 
 describe("the packages on disk", () => {
-  // testPackage covers a grant and vesting. Acme covers 39 transactions including stock removals.
-  // Its class split has no individual security to compare.
+  // testPackage and Acme exercise valid security histories. Acme's class split names no security. In
+  // markedSecurities, a missing stakeholder and missing resulting stock cause validation errors even
+  // though the transactions follow allowed lifecycle transitions.
   it.each([
     { name: "testing_scripts/testPackage", dir: fixture("testing_scripts", "testPackage"), transactions: 2, rows: 2 },
     { name: "sample_ocf_folders/acme_holdings_limited", dir: fixture("sample_ocf_folders", "acme_holdings_limited"), transactions: 39, rows: 38 },
+    { name: "testing_scripts/markedSecurities", dir: fixture("testing_scripts", "markedSecurities"), transactions: 6, rows: 6 },
   ])("$name: the chart and the checks agree on every transaction", ({ dir, transactions, rows: expected }) => {
     const context = validateWithShadow(dir);
     const rows = context.shadow;
 
     expect(context.ocfPackageContent.transactions).toHaveLength(transactions);
     expect(rows).toHaveLength(expected);
-    // Both checks pass and the chart accepts each transaction.
-    expect(context.result).toMatch(/appears valid\.$/);
+    // The chart and both checks accept these transactions.
     expect(rows.every((row) => row.allowed && row.reported.length === 0)).toBe(true);
     expect(disagreements(rows)).toEqual([]);
   });
@@ -114,23 +115,27 @@ describe("where the chart and the checks disagree", () => {
   const reprice = { id: "rep-1", object_type: "TX_EQUITY_COMPENSATION_REPRICING", security_id: "opt-1", date: "2021-06-01" };
   const exercise = { id: "ex-1", object_type: "TX_EQUITY_COMPENSATION_EXERCISE", security_id: "opt-1", quantity: "10", resulting_security_ids: [], date: "2021-06-01" };
 
-  it("keeps checking the exercise after validation stops at repricing", () => {
+  it("reports both uses of the cancelled grant", () => {
     const context = validatePackage([grant, grantCancellation, reprice, exercise], [{ id: "sh-1" }]);
 
-    expect(context.findings.map((f) => [f.subject.id, f.check])).toEqual([[reprice.id, "issuance-exists"]]);
+    expect(context.findings.map((f) => [f.subject.id, f.check, f.outcome])).toEqual([
+      [reprice.id, "issuance-exists", "failed"], [exercise.id, "issuance-exists", "failed"],
+    ]);
     expect(disagreements(context.shadow).map(explain)).toEqual([
-      "removed, and neither check runs on it", "the validator stopped before checking the issuance",
+      "removed, and neither check runs on it", "removed, and neither check runs on it",
     ]);
   });
 
-  const invalid = { ...grant, id: "bad", security_id: "other", stakeholder_id: "missing" };
+  const invalid = { ...grant, object_type: "TX_STOCK_ISSUANCE", id: "bad", security_id: "other", stock_legend_ids: [], stakeholder_id: "missing" };
   const accept = { ...grant, id: "accept", object_type: "TX_EQUITY_COMPENSATION_ACCEPTANCE", date: "2020-02-01" };
   const retract = { ...grantCancellation, object_type: "TX_EQUITY_COMPENSATION_RETRACTION" };
 
   it.each([false, true])("keeps the grant when retraction fails (earlier error: %s)", (earlierError) => {
     const history = [grant, accept, retract, reprice];
     if (earlierError) history.unshift({ ...invalid, date: "2019-01-01" });
-    expect(() => validatePackage(history, [{ id: "sh-1" }])).toThrow(/REPRICING "rep-1"/);
+    const context = validatePackage(history, [{ id: "sh-1" }]);
+    expect(rowsOf(context.shadow, reprice.id)[0]).toMatchObject({ state: "removed", issuanceCheck: "blocked" });
+    if (!earlierError) expect(collection(context, "equityCompensation")).toEqual([grant]);
   });
 
   it("removes a retained grant when a later cancellation passes during replay", () => {
@@ -246,7 +251,7 @@ describe("a disagreement nothing explains", () => {
       ...original, checks: [exists, { ...history, run: () => ["The rule changed."] }],
     });
     try {
-      const invalid = { ...issuance, id: "bad", security_id: "other", stakeholder_id: "missing", date: "2020-01-01" };
+      const invalid = { ...issuance, object_type: "TX_STOCK_ISSUANCE", id: "bad", security_id: "other", stock_legend_ids: [], stakeholder_id: "missing", date: "2020-01-01" };
       expect(() => validatePackage([invalid, issuance, cancellation], [{ id: "sh-1" }])).toThrow(/the chart allows it, and no-other-transactions reported it/);
     } finally {
       TX_DESCRIPTORS.TX_CONVERTIBLE_CANCELLATION = original;

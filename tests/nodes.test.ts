@@ -174,7 +174,8 @@ describe("a run's node map", () => {
     };
     const context = validatePackage([first, duplicate], [{ id: "sh-1" }], [{ id: "class-1" }]);
 
-    expect(context.result).toContain("failed on duplicate");
+    const legacy = object_type === "TX_STOCK_ISSUANCE";
+    expect(context.result).toContain(legacy ? "failed on duplicate" : "complete and found 1 error");
     expect(context.findings).toEqual([{
       check: "unique-security-id", severity: "error", outcome: "failed",
       subject: { object_type, id: "duplicate" },
@@ -182,7 +183,9 @@ describe("a run's node map", () => {
     }]);
     expect(context.nodes.security.size).toBe(1);
     expect(collection(context, "equityCompensation")).toEqual([first]);
-    expect(context.snapshots.map((day) => [day.date, day.equityCompensation[0].quantity])).toEqual([["2021-01-01", "80"]]);
+    expect(context.snapshots.map((day) => day.date)).toEqual(legacy ? [first.date] : [first.date, duplicate.date]);
+    expect(context.snapshots.at(-1)?.equityCompensation).toMatchObject([{ quantity: "80" }]);
+    expect(context.nodes.security.get(first.security_id)?.lifecycle.defects).toEqual([]);
   });
 
   it("keeps the removed record when a different family reuses its ID on the day of removal", () => {
