@@ -183,7 +183,9 @@ export type Explanation = keyof typeof EXPLANATIONS;
 /** Identify a known difference so tests can report any new one. */
 export function explain(row: ShadowRow): Explanation | undefined {
   const refusedInSilence = !row.allowed && row.reported.length === 0;
-  if (refusedInSilence && row.blocked) return "an earlier failure blocked the check";
+  if (refusedInSilence && (row.blocked || (row.runs.length === 0 && row.issuanceCheck === "blocked"))) {
+    return "an earlier failure blocked the check";
+  }
   if (!refusedInSilence || row.state !== "removed" || row.removedBy === undefined) return undefined;
 
   if (!row.family) return undefined;
@@ -193,7 +195,6 @@ export function explain(row: ShadowRow): Explanation | undefined {
   }
   if (!lifecycleStep(row.family, "outstanding", row.object_type).allowed) return undefined;
   if (row.runs.length === 0 && row.indexedRemoval === row.removedBy) {
-    if (row.issuanceCheck === "blocked") return "an earlier failure blocked the check";
     if (row.issuanceCheck === "failed") return "removed, and neither check runs on it";
     if (row.issuanceCheck === "replayed") return "the validator stopped before checking the issuance";
   }

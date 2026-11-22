@@ -26,9 +26,17 @@ export type SecurityState<C extends CollectionKey> = {
   removal?: { id: string; date: string };
 };
 
+/** An issuance withheld in another family has no known values or writers. */
+type WithheldIssuance = { readonly lifecycle: Field<never>; readonly issuance: Field<never> };
+type WithheldByFamily = Readonly<Partial<Record<CollectionKey, WithheldIssuance>>>;
+
 /** The family determines the type of the stored issuance. */
 type SecuritiesByFamily = {
-  [F in CollectionKey]: NodeBase<"security", SecurityState<F>> & { readonly family: F };
+  [F in CollectionKey]: NodeBase<"security", SecurityState<F>> & {
+    readonly family: F;
+    /** Other families that attempted issuance while this ID was uncertain. Snapshots list the ID once. */
+    readonly withheldByFamily?: WithheldByFamily;
+  };
 };
 export type SecurityNode<C extends CollectionKey = CollectionKey> = SecuritiesByFamily[C];
 
@@ -110,14 +118,18 @@ function markDefects<F extends Field<unknown>>(field: F, roots: readonly Subject
 }
 
 /** A failed issuance makes both its details and lifecycle uncertain. */
-const markIssuanceDefects = <N extends SecurityNode>(node: N, roots: readonly Subject[]): N => ({
+const markIssuanceDefects = <N extends Pick<SecurityNode, "lifecycle" | "issuance">>(node: N, roots: readonly Subject[]): N => ({
   ...node,
   lifecycle: markDefects(node.lifecycle, roots),
   issuance: markDefects(node.issuance, roots),
 });
 
-/** Start with an unknown value and no recorded failure. */
-const unknown = <T>(): Field<T> => ({ value: undefined, writer: undefined, defects: [] });
+const unknown = (defects: readonly Subject[] = []): Field<never> => ({ value: undefined, writer: undefined, defects });
+
+const withheldFields = (node?: SecurityNode): WithheldIssuance => ({
+  lifecycle: unknown(node?.lifecycle.defects),
+  issuance: unknown(node?.issuance.defects),
+});
 
 /** Each write shares the unchanged branches of both ordered indexes. */
 const withSecurity = (index: SecurityIndex, node: SecurityNode): NodeMap => fromIndex({
@@ -148,14 +160,23 @@ export function applyTransaction(
     const index = indexOf(nodes);
     const held = index.history.get(transaction.security_id);
     if (held?.issuance.value !== undefined) return nodes;
+    const family = descriptor.collection;
+    const previous = held?.family === family ? held : held?.withheldByFamily?.[family];
+    let withheldByFamily = held?.withheldByFamily;
+    if (held && held.family !== family) {
+      // The applied family now owns the record. Keep the former family's unknown fields for its readers.
+      const { [family]: _applied, ...others } = withheldByFamily ?? {};
+      withheldByFamily = { ...others, [held.family]: withheldFields(held) };
+    }
     // The descriptor selects the family for the parsed issuance. TypeScript needs that relationship
     // stated here.
     const node = {
       kind: "security",
       id: transaction.security_id,
-      family: descriptor.collection,
-      lifecycle: written<LifecycleState>("outstanding", writer, held?.lifecycle),
-      issuance: written(transaction as unknown as Issuance, writer, held?.issuance),
+      family,
+      lifecycle: written<LifecycleState>("outstanding", writer, previous?.lifecycle),
+      issuance: written(transaction as unknown as Issuance, writer, previous?.issuance),
+      ...(withheldByFamily && { withheldByFamily }),
     } as SecurityNode;
     return withSecurity(index, node);
   }
@@ -180,20 +201,40 @@ function withheld(nodes: NodeMap, descriptor: Descriptor, transaction: Applied, 
   if (descriptor.effect === "append") {
     // A duplicate cannot change an already issued security.
     if (held?.issuance.value !== undefined) return nodes;
+    const family = descriptor.collection;
+    if (held && held.family !== family) {
+      const fields = held.withheldByFamily?.[family] ?? withheldFields();
+      return withSecurity(indexOf(nodes), {
+        ...held,
+        withheldByFamily: { ...held.withheldByFamily, [family]: markIssuanceDefects(fields, roots) },
+      });
+    }
     const node: SecurityNode = held ?? {
       kind: "security",
       id: transaction.security_id,
-      family: descriptor.collection,
-      lifecycle: unknown<LifecycleState>(),
-      issuance: unknown<never>(),
+      family,
+      ...withheldFields(),
     };
     return withSecurity(indexOf(nodes), markIssuanceDefects(node, roots));
   }
 
   // Subsequent transactions cannot undo an applied removal.
-  if (!held || held.lifecycle.value === "removed" || !familiesOf(descriptor).includes(held.family)) return nodes;
-  const lifecycle = markDefects(held.lifecycle, roots);
-  return lifecycle === held.lifecycle ? nodes : withSecurity(indexOf(nodes), { ...held, lifecycle });
+  if (!held || held.lifecycle.value === "removed") return nodes;
+  let updated = held;
+  for (const family of familiesOf(descriptor)) {
+    if (family === held.family) {
+      const lifecycle = markDefects(held.lifecycle, roots);
+      if (lifecycle !== held.lifecycle) updated = { ...updated, lifecycle };
+    } else {
+      const fields = held.withheldByFamily?.[family];
+      if (!fields) continue;
+      const lifecycle = markDefects(fields.lifecycle, roots);
+      if (lifecycle !== fields.lifecycle) {
+        updated = { ...updated, withheldByFamily: { ...updated.withheldByFamily, [family]: { ...fields, lifecycle } } };
+      }
+    }
+  }
+  return updated === held ? nodes : withSecurity(indexOf(nodes), updated);
 }
 
 // Reading tracked fields
@@ -218,7 +259,16 @@ export function securityField<C extends CollectionKey | undefined, P extends Fie
 
 export function fieldAt<R extends FieldRef>(nodes: NodeMap, ref: R, removals?: OcfMachineContext["removals"]): Field<FieldRefValue<R>> | undefined {
   const node = securityById(nodes, ref.id);
-  if (!node || (ref.family !== undefined && node.family !== ref.family)) return;
+  if (!node) return;
+  if (ref.family !== undefined && node.family !== ref.family) {
+    return ref.field === "removal" ? undefined : node.withheldByFamily?.[ref.family]?.[ref.field];
+  }
+  // A check on the ID alone depends on every family that tried to issue it.
+  if (ref.family === undefined && node.withheldByFamily && ref.field !== "removal") {
+    let field = node[ref.field] as Field<FieldRefValue<R>>;
+    for (const fields of Object.values(node.withheldByFamily)) field = markDefects(field, fields[ref.field].defects);
+    return field;
+  }
   // Older saved records identify the applied removal by its lifecycle writer.
   if (ref.field === "removal" && !node.removal && node.lifecycle.value === "removed") {
     const tx = removals?.get(ref.id);

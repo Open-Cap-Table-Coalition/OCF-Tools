@@ -1,5 +1,5 @@
 import { afterEach, describe, it, expect, vi } from "vitest";
-import { applyTransaction, emptyNodes, outstandingSecurity, securityField, type NodeMap } from "../ocf_validator/nodes";
+import { applyTransaction, emptyNodes, fieldAt, outstandingSecurity, securityField, type NodeMap } from "../ocf_validator/nodes";
 import { completedResult, TX_DESCRIPTORS, verdictOf, type TxKey } from "../ocf_validator/ocfMachine";
 import { uniqueSecurityId } from "../ocf_validator/validators/checks";
 import { defineValidator, toValidate, type CheckObject } from "../ocf_validator/validators/checkKit";
@@ -98,6 +98,31 @@ describe("a transaction whose writes are withheld", () => {
     );
 
     expect(nodes.security.get("war-1")?.lifecycle.defects).toEqual([first, second]);
+  });
+
+  it("keeps later lifecycle failures on the family they affect when two issuances share an ID", () => {
+    const convertible = on("TX_CONVERTIBLE_ISSUANCE", "ci-1", "2021-02-01");
+    const cancellation = on("TX_CONVERTIBLE_CANCELLATION", "cc-1", "2021-03-01");
+    const issuanceRoot = subject(convertible.object_type, convertible.id);
+    const removalRoot = subject(cancellation.object_type, cancellation.id);
+    const nodes = reduce(
+      [warrant(), [WARRANT_ISSUANCE]],
+      [convertible, [issuanceRoot, WARRANT_ISSUANCE]],
+      [cancellation, [removalRoot, issuanceRoot]],
+    );
+    const lifecycle = securityField("convertibleIssuances", "war-1", "lifecycle");
+    const issuance = securityField("convertibleIssuances", "war-1", "issuance");
+
+    expect(fieldAt(nodes, lifecycle)?.defects).toEqual([issuanceRoot, WARRANT_ISSUANCE, removalRoot]);
+    expect(fieldAt(nodes, issuance)?.defects).toEqual([issuanceRoot, WARRANT_ISSUANCE]);
+    expect(fieldAt(nodes, securityField("warrantIssuances", "war-1", "lifecycle"))?.defects).toEqual([WARRANT_ISSUANCE]);
+    expect(fieldAt(nodes, securityField(undefined, "war-1", "lifecycle"))?.defects).toEqual([WARRANT_ISSUANCE, issuanceRoot, removalRoot]);
+
+    const applied = applyTransaction(nodes, TX_DESCRIPTORS.TX_CONVERTIBLE_ISSUANCE, convertible);
+    expect(fieldAt(applied, issuance)).toMatchObject({ value: convertible, defects: [issuanceRoot, WARRANT_ISSUANCE] });
+    expect(fieldAt(applied, securityField("warrantIssuances", "war-1", "issuance"))).toEqual({
+      value: undefined, writer: undefined, defects: [WARRANT_ISSUANCE],
+    });
   });
 
   it("is still marked after a valid transaction that writes the field", () => {
@@ -311,6 +336,30 @@ const stakeholders = [{ id: "sh-1" }];
 const outcomes = (findings: Finding[]) => findings.map((finding) => [finding.subject.id, finding.check, finding.outcome]);
 
 describe("a failed issuance followed by transactions on its security", () => {
+  it("blocks an acceptance in a second family whose issuance was withheld for the same ID", () => {
+    const context = validatePackage([
+      warrant({ stakeholder_id: "nobody" }),
+      on("TX_CONVERTIBLE_ISSUANCE", "ci-1", "2021-02-01", { stakeholder_id: "sh-1" }),
+      on("TX_CONVERTIBLE_ACCEPTANCE", "ca-1", "2021-03-01"),
+    ], stakeholders);
+
+    expect(outcomes(context.findings)).toEqual([
+      ["wi-1", "stakeholder-exists", "failed"],
+      ["ci-1", "no-earlier-removal", "blocked"],
+      ["ci-1", "unique-security-id", "blocked"],
+      ["ca-1", "issuance-exists", "blocked"],
+    ]);
+    for (const finding of context.findings.slice(1)) expect(finding).toMatchObject({ roots: [WARRANT_ISSUANCE] });
+
+    const nodes = structuredClone(context.nodes);
+    expect(nodes.security.get("war-1")?.family).toBe("warrantIssuances");
+    expect(context.snapshots.at(-1)?.convertibles).toEqual([]);
+    expect(fieldAt(nodes, securityField("convertibleIssuances", "war-1", "issuance"))).toEqual({
+      value: undefined, writer: undefined, defects: [WARRANT_ISSUANCE],
+    });
+    expect(fieldAt(nodes, securityField("equityCompensation", "war-1", "lifecycle"))).toBeUndefined();
+  });
+
   it("blocks each of them at the check that reads the security, and reports one root", () => {
     const context = validatePackage(
       [
