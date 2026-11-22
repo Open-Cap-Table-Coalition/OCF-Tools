@@ -9,7 +9,8 @@ import * as os from "os";
 import * as path from "path";
 import { expect } from "vitest";
 import { createActor } from "xstate";
-import { ocfValidator } from "../ocf_validator";
+import { validateOcfPackage } from "../ocf_validator";
+import { readOcfPackage } from "../read_ocf_package";
 import { earliestRemovals, ocfMachine, TX_DESCRIPTORS, type OcfMachineEvent } from "../ocf_validator/ocfMachine";
 import type { Finding } from "../types/finding";
 import { expectShadowExplained } from "./lifecycleShadow";
@@ -49,17 +50,19 @@ export const baseContext = (overrides: Partial<OcfMachineContext> = {}): OcfMach
   };
 };
 
-/**
- * Write a temporary OCF package and call the public validator so tests use the real reader and
- * same-day order. Compare the charts with the two existing checks on that order, then remove the
- * package.
- */
-export const validatePackage = (
+export const validateWithShadow = (dir: string) => {
+  const visits: Finding[][] = [];
+  const context = validateOcfPackage(readOcfPackage(dir), (findings) => visits.push(findings));
+  return { ...context, shadow: expectShadowExplained(context.ocfPackageContent.transactions, { context, visits }) };
+};
+
+/** Run a validator on a temporary OCF package written to disk. */
+export const validatePackageWith = <T>(validate: (dir: string) => T) => (
   transactions: Record<string, unknown>[],
   stakeholders: { id: string }[] = [],
   stockClasses: { id: string }[] = [],
   stockPlans: Record<string, unknown>[] = [],
-): OcfMachineContext => {
+) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ocf-tools-test-"));
   try {
     const write = (name: string, content: unknown) =>
@@ -78,15 +81,13 @@ export const validatePackage = (
       stock_legend_templates_files: [],
       valuations_files: [],
     });
-    const context = ocfValidator(dir);
-    // The validator sorts the input in place. Compare the charts and the two checks in that same
-    // order.
-    expectShadowExplained(context.ocfPackageContent.transactions);
-    return context;
+    return validate(dir);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
 };
+
+export const validatePackage = validatePackageWith(validateWithShadow);
 
 /** Start an actor seeded into `capTable` with the given context. */
 export const startSeeded = (context: OcfMachineContext) =>
