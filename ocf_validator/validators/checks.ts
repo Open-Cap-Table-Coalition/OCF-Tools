@@ -3,28 +3,11 @@ import type { OcfTransaction, TransactionFor } from "../../types/ocf-input";
 import type { DeepReadonly, OcfMachineContext } from "../../types/validator";
 import { outstandingSecurity } from "../nodes";
 import type { CollectionElement, CollectionKey, TxKey } from "../ocfMachine";
+import { currentName, type CurrentTxKey } from "../constants/constants";
 import { text, type CheckObject } from "./checkKit";
 
-/**
- * Match the seven older plan security names to their equity compensation equivalents. Repricing has
- * only its current name.
- */
-export const OLDER_NAMES = {
-  TX_PLAN_SECURITY_ISSUANCE: "TX_EQUITY_COMPENSATION_ISSUANCE",
-  TX_PLAN_SECURITY_ACCEPTANCE: "TX_EQUITY_COMPENSATION_ACCEPTANCE",
-  TX_PLAN_SECURITY_EXERCISE: "TX_EQUITY_COMPENSATION_EXERCISE",
-  TX_PLAN_SECURITY_RELEASE: "TX_EQUITY_COMPENSATION_RELEASE",
-  TX_PLAN_SECURITY_RETRACTION: "TX_EQUITY_COMPENSATION_RETRACTION",
-  TX_PLAN_SECURITY_CANCELLATION: "TX_EQUITY_COMPENSATION_CANCELLATION",
-  TX_PLAN_SECURITY_TRANSFER: "TX_EQUITY_COMPENSATION_TRANSFER",
-} as const satisfies Partial<Record<TxKey, TxKey>>;
-
-/** Convert a known older transaction name to its current name. Preserve other input values. */
-export const currentName = (type: unknown): unknown =>
-  typeof type === "string" && Object.hasOwn(OLDER_NAMES, type) ? OLDER_NAMES[type as keyof typeof OLDER_NAMES] : type;
-
 /** Include older names when checking the type of a transaction in the package history. */
-export const isOfType = <K extends TxKey>(
+export const isOfType = <K extends CurrentTxKey>(
   ele: DeepReadonly<OcfTransaction>,
   type: K,
 ): ele is Extract<DeepReadonly<OcfTransaction>, DeepReadonly<TransactionFor<K>>> => currentName(ele.object_type) === type;
@@ -96,11 +79,11 @@ type Family = {
   [C in CollectionKey]: {
     name: string;
     collection: C;
-    issuance: CollectionElement[C]["object_type"];
-    acceptance: Extract<TxKey, `TX_${string}_ACCEPTANCE`>;
+    issuance: Extract<CollectionElement[C]["object_type"], CurrentTxKey>;
+    acceptance: Extract<CurrentTxKey, `TX_${string}_ACCEPTANCE`>;
     vests: HasKey<CollectionElement[C], "vesting_terms_id" | "vesting_template_id">;
     returnsToPool: HasKey<CollectionElement[C], "stock_plan_id">;
-    leavesOutstanding?: readonly TxKey[];
+    leavesOutstanding?: readonly CurrentTxKey[];
   };
 }[CollectionKey];
 
@@ -249,15 +232,16 @@ export function familyChecksFor({
       // type and ID to exclude the transaction itself. Apply family exemptions under current and
       // older names, including vesting where the family supports it.
       transactions.forEach((ele) => {
+        const type = currentName(ele.object_type);
         if (
           "security_id" in ele &&
           ele.security_id === data.security_id &&
           ele.date <= data.date &&
-          currentName(ele.object_type) !== issuance &&
-          currentName(ele.object_type) !== acceptance &&
-          !(vests && (VESTING_TRANSACTIONS as readonly string[]).includes(ele.object_type)) &&
-          !(leavesOutstanding as readonly unknown[]).includes(currentName(ele.object_type)) &&
-          !(returnsToPool && ele.object_type === RETURN_TO_POOL) &&
+          type !== issuance &&
+          type !== acceptance &&
+          !(vests && (VESTING_TRANSACTIONS as readonly string[]).includes(type)) &&
+          !(leavesOutstanding as readonly string[]).includes(type) &&
+          !(returnsToPool && type === RETURN_TO_POOL) &&
           !(ele.object_type === data.object_type && ele.id === data.id)
         ) {
           messages.push(

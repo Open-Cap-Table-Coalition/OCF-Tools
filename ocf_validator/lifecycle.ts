@@ -1,6 +1,7 @@
 import { getNextSnapshot, setup } from "xstate";
 import type { LifecycleWord } from "../types/validator";
 import { lifecycleFamilies, TX_DESCRIPTORS, type CollectionKey, type Descriptor } from "./ocfMachine";
+import { hasStockPlan } from "./validators/stock/tx_stock_cancellation";
 
 // Build one chart per family from the descriptors. Exercise removes a warrant but leaves an equity
 // grant outstanding. The caller keeps each security's state. Tests compare transitions with the
@@ -20,11 +21,11 @@ const ARROWS = {
   "after removal": { from: "removed", to: "removed" },
 } as const satisfies Record<LifecycleWord, { from: LifecycleState; to: LifecycleState }>;
 
-/** Fields available to chart guards. The current transitions have no guards. */
+/** Fields from the security's issuance. */
 export type LifecycleContext = Readonly<Record<string, unknown>>;
 
 /** Allowed transactions and their destinations, grouped by starting state. */
-type Arrows = Record<LifecycleState, Record<string, { target: LifecycleState }>>;
+type Arrows = Record<LifecycleState, Record<string, { target: LifecycleState; guard?: "issuedFromPlan" }>>;
 
 /**
  * Include only the transactions that apply to this family. Give every transition a target because
@@ -36,6 +37,7 @@ const arrowsFor = (family: CollectionKey, descriptors: Readonly<Record<string, D
     if (!lifecycleFamilies(descriptor).includes(family)) continue;
     const { from, to } = ARROWS[descriptor.lifecycle];
     arrows[from][type] = { target: to };
+    if (family === "stockIssuances" && type === "TX_STOCK_PLAN_RETURN_TO_POOL") arrows[from][type].guard = "issuedFromPlan";
   }
   return arrows;
 };
@@ -51,6 +53,7 @@ export function buildLifecycleChart(
 ) {
   const arrows = arrowsFor(family, descriptors);
   return setup({
+    guards: { issuedFromPlan: ({ context }) => hasStockPlan(context.stock_plan_id) },
     types: {} as {
       context: LifecycleContext;
       events: { type: string };

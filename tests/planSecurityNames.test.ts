@@ -1,14 +1,17 @@
 import { describe, it, expect } from "vitest";
-import constants from "../ocf_validator/constants/constants";
 import { lifecycleFamilies, TX_DESCRIPTORS, type TxKey } from "../ocf_validator/ocfMachine";
-import { currentName, OLDER_NAMES } from "../ocf_validator/validators/checks";
-import { validatePackage, collection } from "./helpers";
+import { currentName, OLDER_NAMES } from "../ocf_validator/constants/constants";
+import { ocfValidator } from "../index";
+import { collection, validatePackage, validatePackageWith } from "./helpers";
 
 // Check that the seven older names share validation and state changes with the corresponding current
 // names.
 
 const PAIRS = Object.entries(OLDER_NAMES) as [TxKey, TxKey][];
 const VALID = "The validation of the OCF package for Test Co is complete and the package appears valid.";
+
+const grant = (object_type: string) => ({ id: "g-1", object_type, security_id: "opt-1", stakeholder_id: "sh-1", quantity: "100", date: "2021-01-01" });
+const on = (object_type: string, id: string, date: string, fields: Record<string, unknown> = {}) => ({ id, object_type, security_id: "opt-1", date, ...fields });
 
 describe("each plan security type is its equity compensation type under an older name", () => {
   it("covers the seven plan security types and nothing else", () => {
@@ -60,9 +63,6 @@ describe("each plan security type is its equity compensation type under an older
 });
 
 describe("a history under the older names runs as the same history under the current ones", () => {
-  const grant = (object_type: string) => ({ id: "g-1", object_type, security_id: "opt-1", stakeholder_id: "sh-1", quantity: "100", date: "2021-01-01" });
-  const on = (object_type: string, id: string, date: string, fields: Record<string, unknown> = {}) => ({ id, object_type, security_id: "opt-1", date, ...fields });
-
   it("issues, accepts, exercises, releases, and cancels a grant", () => {
     const transactions = [
       grant("TX_PLAN_SECURITY_ISSUANCE"),
@@ -169,20 +169,68 @@ describe("a history under the older names runs as the same history under the cur
   });
 });
 
-describe("same-day order still ranks the older names apart from their equivalents", () => {
-  // Older names have different same-day sort positions. Record the order because changing only the
-  // name can change validation (#232).
-  const rank = (type: string) => (constants.transaction_types as readonly string[]).indexOf(type);
+const validate = validatePackageWith(ocfValidator);
+const current = "TX_EQUITY_COMPENSATION";
+const older = "TX_PLAN_SECURITY";
 
-  it("puts every older name after every equity compensation type", () => {
-    const lastCurrent = Math.max(...PAIRS.map(([, name]) => rank(name)), rank("TX_EQUITY_COMPENSATION_REPRICING"));
-    for (const [olderName] of PAIRS) expect(rank(olderName)).toBeGreaterThan(lastCurrent);
+describe.each([
+  [current, current],
+  [older, older],
+  [older, current],
+  [current, older],
+])("same-day order with %s followed by %s", (first, second) => {
+  const day = "2021-06-01";
+
+  it("accepts a grant issued that day, even when acceptance is first in the file", () => {
+    const issuance = { ...grant(`${first}_ISSUANCE`), date: day };
+    const acceptance = on(`${second}_ACCEPTANCE`, "a-1", day);
+    const context = validate([acceptance, issuance], [{ id: "sh-1" }]);
+
+    expect(context.findings).toEqual([]);
+    expect(context.result).toBe(VALID);
+    expect(collection(context, "equityCompensation")).toEqual([issuance]);
+    expect(context.snapshots).toMatchObject([{ date: day, equityCompensation: [{ quantity: "100" }] }]);
   });
 
-  it("orders a same-day exercise and cancellation differently under the two sets of names", () => {
-    // The current names put a partial exercise before cancellation of the rest. The older names
-    // reverse that order.
-    expect(rank("TX_EQUITY_COMPENSATION_EXERCISE")).toBeLessThan(rank("TX_EQUITY_COMPENSATION_CANCELLATION"));
-    expect(rank("TX_PLAN_SECURITY_EXERCISE")).toBeGreaterThan(rank("TX_PLAN_SECURITY_CANCELLATION"));
+  it("reports the same-day acceptance on the retraction using its submitted name", () => {
+    const retraction = on(`${first}_RETRACTION`, "retract", day);
+    const acceptance = on(`${second}_ACCEPTANCE`, "accept", day);
+    const context = validate([acceptance, retraction, grant(`${first}_ISSUANCE`)], [{ id: "sh-1" }]);
+
+    expect(context.findings).toEqual([{
+      severity: "error",
+      outcome: "failed",
+      check: "no-acceptance",
+      message: "An equity compensation acceptance (accept) references the transaction's security_id.",
+      subject: { object_type: retraction.object_type, id: "retract" },
+    }]);
   });
+
+  it.each(["CANCELLATION", "TRANSFER"])("releases, reprices and exercises shares before %s of the rest", (removal) => {
+    const context = validate([
+      on(`${second}_${removal}`, "remove", day, { quantity: "80", resulting_security_ids: [] }),
+      on(`${first}_EXERCISE`, "exercise", day, { quantity: "10", resulting_security_ids: [] }),
+      on("TX_EQUITY_COMPENSATION_REPRICING", "reprice", day),
+      on(`${first}_RELEASE`, "release", day, { quantity: "10", resulting_security_ids: [] }),
+      grant(`${first}_ISSUANCE`),
+    ], [{ id: "sh-1" }]);
+
+    expect(context.findings).toEqual([]);
+    expect(context.result).toBe(VALID);
+    expect(context.ocfPackageContent.transactions.map((tx) => tx.id)).toEqual(["g-1", "release", "reprice", "exercise", "remove"]);
+    expect(context.snapshots.map((snapshot) => snapshot.equityCompensation.length)).toEqual([1, 0]);
+  });
+});
+
+it.each(PAIRS)("%s and %s keep their file order when both name the same kind of transaction", (olderName, name) => {
+  const actions = [olderName, name, olderName].map((object_type, i) => ({
+    ...grant(object_type), id: `action-${i}`, security_id: `opt-${i}`, date: "2021-06-01", resulting_security_ids: [],
+  }));
+  const issuances = name === "TX_EQUITY_COMPENSATION_ISSUANCE" ? [] : actions.map(({ security_id }) => ({
+    ...grant("TX_EQUITY_COMPENSATION_ISSUANCE"), id: `grant-${security_id}`, security_id,
+  }));
+  const context = validate([...actions, ...issuances], [{ id: "sh-1" }]);
+
+  expect(context.result).toBe(VALID);
+  expect(context.ocfPackageContent.transactions.slice(issuances.length)).toEqual(actions);
 });
