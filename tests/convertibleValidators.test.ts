@@ -364,7 +364,7 @@ describe("convertible conversion validity", () => {
   });
   const subject = { object_type: "TX_CONVERTIBLE_CONVERSION", id: "conv-main" };
   // The whole finding the conversion records for a failed check.
-  const errorFinding = (check: string, message: string) => ({ severity: "error", check, message, subject });
+  const errorFinding = (check: string, message: string) => ({ severity: "error", outcome: "failed", check, message, subject });
 
   // A live convertible issuance carrying an explicit stakeholder_id — the reference
   // the stakeholder check reads. The shared issuanceRecord helper omits it.
@@ -590,7 +590,7 @@ describe("convertible conversion validity", () => {
       conversion({ resulting_security_ids: [] }),
     );
     expect(findings).toEqual([
-      { severity: "warning", check: "resulting-security-named", message: "The conversion names no resulting security.", subject },
+      { severity: "warning", outcome: "failed", check: "resulting-security-named", message: "The conversion names no resulting security.", subject },
     ]);
   });
 

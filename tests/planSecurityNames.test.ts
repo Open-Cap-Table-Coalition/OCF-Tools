@@ -44,6 +44,7 @@ describe("each plan security type is its equity compensation type under an older
     expect(context.findings).toEqual([
       {
         severity: "error",
+        outcome: "failed",
         check: "stakeholder-exists",
         message: "The stakeholder nobody referenced by the transaction was not found in the stakeholder file.",
         subject: { object_type: "TX_PLAN_SECURITY_ISSUANCE", id: "psi-1" },
@@ -198,6 +199,7 @@ describe.each([
 
     expect(context.findings).toEqual([{
       severity: "error",
+      outcome: "failed",
       check: "no-acceptance",
       message: "An equity compensation acceptance (accept) references the transaction's security_id.",
       subject: { object_type: retraction.object_type, id: "retract" },

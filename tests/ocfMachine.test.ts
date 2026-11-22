@@ -84,7 +84,7 @@ describe("passthrough transaction types are no-ops unless their security was rem
       equityCompensation: [{ id: "ec", security_id: "e" }] as any,
       report: [{ marker: "pre-existing report" }],
       findings: [
-        { severity: "error", check: "demo", message: "m", subject: { object_type: "TX_STOCK_ISSUANCE", id: "x" } },
+        { severity: "error", outcome: "failed", check: "demo", message: "m", subject: { object_type: "TX_STOCK_ISSUANCE", id: "x" } },
       ],
       snapshots: [{ date: "2020-01-01", stockIssuances: [], convertibles: [], warrants: [], equityCompensation: [] }],
       result: "PRESERVED",
@@ -406,6 +406,7 @@ const gradedDescriptor = (validate: GradedValidator<any>) =>
 /** A minimal finding; `check` doubles as the distinguishing label. */
 const finding = (severity: Finding["severity"], check: string): Finding => ({
   severity,
+  outcome: "failed",
   check,
   message: `${check} message`,
   subject: { object_type: "TX_STOCK_ISSUANCE", id: "si1" },

@@ -109,21 +109,8 @@ const toMetadata = (checks: readonly CheckObject<any>[]): readonly Check[] =>
   });
 
 /**
- * Builds the validator function from the checks. It runs each check that has a
- * `run`, in list order, and turns every message returned into a finding. The
- * finding's severity and check id come from the check; its subject (the
- * transaction's type and id) comes from the transaction being validated. The
- * only thing a check controls is the message text.
- *
- * A check that throws produces one error finding saying so, whatever the
- * check's severity: a check that couldn't finish has checked nothing, so the
- * transaction can't pass on it. The other checks still run. A package value
- * of the wrong type can make a check throw (#218), and a throw that left the
- * validator would stop the whole run.
- *
- * `data` is typed `any` here. `defineValidator` checks every check against the
- * transaction's type before building one; any other caller must make sure its
- * checks can read the transactions it gives them.
+ * Run the implemented checks in order. Make one failed finding per message and use the check's
+ * severity. If a check throws, record an error for that check.
  */
 export const toValidate =
   (checks: readonly CheckObject<any>[]): GradedValidator<any> =>
@@ -143,6 +130,7 @@ export const toValidate =
       for (const message of messages) {
         findings.push({
           severity,
+          outcome: "failed",
           check: check.id,
           message,
           subject,

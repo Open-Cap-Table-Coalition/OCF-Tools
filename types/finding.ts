@@ -1,17 +1,38 @@
 import type { ObjectTypeMap } from "@opencaptablecoalition/ocf-types";
 
+/** How serious a problem the check reports. */
 export type Severity = "error" | "warning";
 
-export interface Finding {
+/**
+ * A failed check found a problem. A blocked check could not evaluate its inputs because an earlier
+ * transaction failed.
+ */
+export type Outcome = "failed" | "blocked";
+
+/** Identify an OCF object by its schema type and ID. */
+export type Subject = { object_type: keyof ObjectTypeMap; id: string };
+
+interface FindingFields {
   severity: Severity;
   check: string;
   message: string;
-  /**
-   * The OCF object this finding is about — any object, not only a transaction.
-   * `object_type` is keyed to the generated schema map, so an unknown type is a
-   * compile error; `id` is that object's OCF id. A non-object-scoped check (e.g.
-   * package/file-level) would widen `object_type` here — deliberately a conscious
-   * change rather than a silently-bogus value.
-   */
-  subject: { object_type: keyof ObjectTypeMap; id: string };
+  /** The OCF object the check evaluated. Package-wide findings would need their own subject type. */
+  subject: Subject;
 }
+
+/** The check ran and found a problem. */
+export interface FailedFinding extends FindingFields {
+  outcome: "failed";
+}
+
+/** The check could not run. Each root identifies an earlier failed transaction to investigate. */
+export interface BlockedFinding extends FindingFields {
+  outcome: "blocked";
+  roots: Subject[];
+}
+
+/**
+ * A finding records the check, affected object, severity and outcome. A blocked finding also
+ * identifies the earlier failures.
+ */
+export type Finding = FailedFinding | BlockedFinding;

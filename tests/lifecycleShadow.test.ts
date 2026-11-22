@@ -233,7 +233,7 @@ describe("a disagreement nothing explains", () => {
   it("catches a change in what the validator reports under the same check ID", () => {
     vi.spyOn(TX_DESCRIPTORS.TX_CONVERTIBLE_CANCELLATION, "validate").mockReturnValue([{
       subject: { object_type: "TX_CONVERTIBLE_CANCELLATION", id: cancellation.id },
-      check: "no-other-transactions", severity: "error", message: "The rule changed.",
+      check: "no-other-transactions", severity: "error", outcome: "failed", message: "The rule changed.",
     }]);
 
     expect(() => validatePackage([issuance, cancellation], [{ id: "sh-1" }])).toThrow(/the chart allows it, and no-other-transactions reported it/);
