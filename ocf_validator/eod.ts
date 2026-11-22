@@ -1,7 +1,7 @@
 import type { OcfMachineContext } from "../types/validator";
-import type { DefectMark, Snapshot } from "../types/snapshot";
+import type { DefectMark, Snapshot, SnapshotStockPlan } from "../types/snapshot";
 import { isOnCapTable } from "./lifecycle";
-import { securityRecords, type SecurityNode } from "./nodes";
+import { securityRecords, type PlanNode, type SecurityNode } from "./nodes";
 import type { CollectionKey } from "./ocfMachine";
 
 const snapshotList = {
@@ -22,9 +22,27 @@ const defectMark = ({ lifecycle, issuance }: SecurityNode): DefectMark | undefin
   };
 };
 
+/** Show the plan totals and identify any failure that makes a total unreliable. */
+const planRow = ({ id, reserved, drawn }: PlanNode): SnapshotStockPlan => {
+  const hasDefects = reserved.defects.length > 0 || drawn.defects.length > 0;
+  return {
+    id: id as string,
+    ...(reserved.value === undefined ? {} : { reserved: reserved.value }),
+    drawn: drawn.value ?? "0",
+    ...(hasDefects
+      ? {
+          defects: {
+            ...(reserved.defects.length > 0 ? { reserved: [...reserved.defects] } : {}),
+            ...(drawn.defects.length > 0 ? { drawn: [...drawn.defects] } : {}),
+          },
+        }
+      : {}),
+  };
+};
+
 /** Build all four snapshot lists in issuance order. */
 const RUN_EOD = (context: OcfMachineContext, event: { date: string }): Snapshot => {
-  const snapshot: Snapshot = { date: event.date, stockIssuances: [], convertibles: [], warrants: [], equityCompensation: [] };
+  const snapshot: Snapshot = { date: event.date, stockIssuances: [], convertibles: [], warrants: [], equityCompensation: [], stockPlans: Array.from(context.nodes.plan?.values() ?? [], planRow) };
   // Today's charts show only outstanding securities. Honor any chart that also tags another state.
   const includeRemoved = families.some((family) => isOnCapTable(family, "removed") || isOnCapTable(family, "notIssued"));
   for (const node of securityRecords(context.nodes, includeRemoved ? "history" : "current")) {

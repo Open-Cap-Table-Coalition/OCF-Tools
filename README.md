@@ -24,15 +24,17 @@ This tool tests the logical and structural validity of an OCF package. We are co
 const ocfValidation = ocfValidator(ocfPackageFolderDir);
 ```
 
-Validation processes transactions in date order. Convertible, warrant, and equity compensation validators record errors and continue. A failed check withholds the transaction’s writes and marks affected fields as unreliable. Later checks that need those fields report a blocked finding. Independent checks still run. Legacy stock validation failures, unknown transaction types, and internal errors can stop validation early.
+Validation processes transactions in date order. Convertible, warrant, equity compensation, and stock plan pool validators record errors and continue. A failed check withholds the transaction’s writes and marks affected fields as unreliable. Later checks that need those fields report a blocked finding. Independent checks still run. Legacy stock validation failures, unknown transaction types, and internal errors can stop validation early.
 
 The output includes these fields.
 
 - `result` states whether the package appears valid. A completed run counts failed errors, blocked checks, and warnings separately. If validation stops early, the result identifies the failure.
 - `findings` lists each check’s `severity` (error or warning), `outcome`, `check` ID, `message`, and `subject` (the transaction’s `object_type` and `id`). A `failed` finding reports a problem the check found. A `blocked` finding lists the earlier failures in `roots`. Warnings allow the transaction’s writes. Use `check` and `subject` to group findings, keeping every message in each group.
 - `report` contains the legacy stock validators’ checks. A stock issuance that reuses a security ID produces a finding naming the original issuance or the earlier removal.
-- `snapshots` contains the cap table at the end of each transaction day the run completed. A row’s optional `defects` lists the causes of uncertainty under `lifecycle` or `issuance`. A failed first issuance appears as a row containing only its defects.
-- `nodes` holds each security’s issuance and lifecycle, including removed securities. Each field records its last writer and any defects. A security ID can be issued only once across all four families.
+- `snapshots` contains the cap table at the end of each transaction day the run completed. A row’s optional `defects` lists the causes of uncertainty under `lifecycle` or `issuance`. A failed first issuance appears as a row containing only its defects. Each snapshot also lists the plans under `stockPlans`, with decimal strings for `drawn` and, when known, `reserved`. Either total can have its own `defects` entry.
+- `nodes` holds each security’s issuance and lifecycle, including removed securities. Each field records its last writer and any defects. A security ID can be issued only once across all four families. `nodes.plan` holds the current pool totals by plan ID.
+
+A plan starts with its initial reserve and zero drawn shares. An adjustment replaces the reserve. A grant or stock issuance that names the plan draws shares once. For example, cancelling 40 of a 100-share grant and issuing a 60-share balance leaves 100 drawn. An explicit return of 40 brings that total to 60. The source allowance follows the security across all returns, even when a return credits a successor plan. A successor can therefore have a negative drawn balance. A transaction that names a plan absent from the package creates a plan row with an unknown reserve.
 
 To read one of the former issuance lists, use `outstanding` from the package entry point. It returns the family's outstanding issuances in their original order.
 

@@ -22,16 +22,45 @@ describe("returning cancelled stock to a plan", () => {
   }));
 
   it.each([
-    { date: cancellation.date, stock_plan_id: "original" },
-    { date: "2021-07-01", stock_plan_id: "successor" },
-  ])("returns the shares to $stock_plan_id on $date", (destination) => {
+    { date: cancellation.date, stock_plan_id: "original", totals: ["0", "125"] },
+    { date: "2021-07-01", stock_plan_id: "successor", totals: ["100", "25"] },
+  ])("returns the shares to $stock_plan_id on $date", ({ date, stock_plan_id, totals }) => {
+    const otherGrant = {
+      id: "other", object_type: "TX_EQUITY_COMPENSATION_ISSUANCE", security_id: "option", stakeholder_id: "holder",
+      stock_plan_id: "successor", quantity: "125", date: issuance.date,
+    };
     const context = validatePackage(
-      [issuance, cancellation, { ...poolReturn, ...destination }],
+      [otherGrant, issuance, cancellation, { ...poolReturn, date, stock_plan_id }],
       [{ id: "holder" }], [{ id: "common" }], plans,
     );
 
     expect(context.result).toBe("The validation of the OCF package for Test Co is complete and the package appears valid.");
-    expect(context.snapshots.at(-1)).toMatchObject({ date: destination.date, stockIssuances: [] });
+    expect(context.snapshots[0].stockPlans.map((p) => p.drawn)).toEqual(["100", "125"]);
+    expect(context.snapshots.at(-1)).toMatchObject({ date, stockIssuances: [] });
+    expect(context.snapshots.at(-1)?.stockPlans.map((p) => p.drawn)).toEqual(totals);
+  });
+
+  it.each(["TX_STOCK_CANCELLATION", "TX_STOCK_REPURCHASE"])("returns fractional shares retired by %s exactly once", (type) => {
+    const balance = { ...issuance, id: "issue-balance", security_id: "balance", quantity: "0.2", date: cancellation.date };
+    const context = validatePackage([
+      { ...issuance, quantity: "0.3" }, balance, { ...cancellation, object_type: type, quantity: "0.1", balance_security_id: "balance" },
+      { ...poolReturn, quantity: "0.1", stock_plan_id: "successor" },
+      { ...poolReturn, id: "repeat", quantity: "0.0000000001", date: "2021-07-01" },
+    ], [{ id: "holder" }], [{ id: "common" }], plans);
+    expect(context.findings).toMatchObject([{ check: "quantity-returnable", subject: { id: "repeat" } }]);
+    expect(context.snapshots.at(-1)?.stockPlans.map((p) => p.drawn)).toEqual(["0.3", "-0.1"]);
+  });
+
+  it("counts the balance shares once on a partial RSA cancellation", () => {
+    const balance = { ...issuance, id: "issue-balance", security_id: "balance", quantity: "60", date: cancellation.date };
+    const context = validatePackage([
+      issuance, balance, { ...cancellation, quantity: "40", balance_security_id: "balance" },
+      { ...poolReturn, quantity: "40", date: "2021-07-01" },
+    ], [{ id: "holder" }], [{ id: "common" }], plans);
+
+    expect(context.findings).toEqual([]);
+    expect(context.snapshots.map((s) => s.stockPlans[0].drawn)).toEqual(["100", "100", "60"]);
+    expect(context.snapshots.at(-1)?.stockIssuances).toMatchObject([{ quantity: "60" }]);
   });
 
   it.each([

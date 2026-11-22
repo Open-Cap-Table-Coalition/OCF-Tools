@@ -13,7 +13,7 @@ import { baseContext } from "./helpers";
 
 const NO_EARLIER_REMOVAL = "no-earlier-removal";
 const NO_OTHER_TRANSACTIONS = "no-other-transactions";
-const SHADOWED = [NO_EARLIER_REMOVAL, NO_OTHER_TRANSACTIONS, "unique-security-id"];
+const SHADOWED = [NO_EARLIER_REMOVAL, NO_OTHER_TRANSACTIONS, "unique-security-id", "security-removed"];
 
 /** Package fields used to compare a transaction with its chart. */
 type Transaction = { id?: unknown; object_type: string; date: string; security_id?: unknown; security_ids?: unknown; [field: string]: unknown };
@@ -146,6 +146,7 @@ export const disagreements = (rows: readonly ShadowRow[]): ShadowRow[] =>
 
 /** Use the transaction and its history to identify each known reason for a disagreement. */
 export const EXPLANATIONS = {
+  "never issued": "The issuance-exists check found that the security was never issued.",
   /**
    * The two checks omit this transaction type. The full validator still rejects it because
    * issuance-exists requires an outstanding security.
@@ -186,6 +187,7 @@ export function explain(row: ShadowRow): Explanation | undefined {
   if (refusedInSilence && (row.blocked || (row.runs.length === 0 && row.issuanceCheck === "blocked"))) {
     return "an earlier failure blocked the check";
   }
+  if (refusedInSilence && row.state === "notIssued" && row.issuanceCheck === "failed") return "never issued";
   if (!refusedInSilence || row.state !== "removed" || row.removedBy === undefined) return undefined;
 
   if (!row.family) return undefined;

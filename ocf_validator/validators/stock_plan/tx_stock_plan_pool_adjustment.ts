@@ -1,13 +1,12 @@
-const valid_tx_stock_plan_pool_adjustment = (context: any, event: any) => {
-  let valid = false;
-  valid = true;
-  // TBC: validation of tx_stock_plan_pool_adjustment
+import { defineValidator } from "../checkKit";
+import { countable, destinationPlan } from "../checks";
 
-  if (valid) {
-    return true;
-  } else {
-    return false;
-  }
-};
+// A pool adjustment sets reserved shares and names no security.
 
-export default valid_tx_stock_plan_pool_adjustment;
+export const TX_STOCK_PLAN_POOL_ADJUSTMENT = defineValidator({
+  transaction: "TX_STOCK_PLAN_POOL_ADJUSTMENT",
+  effect: "none",
+  families: [],
+  pool: "reserves",
+  checks: [destinationPlan, countable("shares_reserved")],
+});

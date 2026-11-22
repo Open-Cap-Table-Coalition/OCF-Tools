@@ -25,7 +25,7 @@ describe("removal checks after a failure", () => {
     const { removal, ...older } = security.get("sec1")!;
     security.set("sec1", older);
     const issuance = { ...older.issuance.value!, id: "again", date: "2022-01-01" };
-    const findings = runValidator("TX_WARRANT_ISSUANCE", { ...context, nodes: { security } }, issuance);
+    const findings = runValidator("TX_WARRANT_ISSUANCE", { ...context, nodes: { ...context.nodes, security } }, issuance);
     expect(findings).toMatchObject([{ check: "no-earlier-removal", message: "The security sec1 was removed from the cap table by cancel on 2020-06-01." }]);
   });
 

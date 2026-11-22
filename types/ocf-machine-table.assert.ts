@@ -285,3 +285,23 @@ const _underOlderName = underOlderName(_equityCompensationRetraction, "TX_PLAN_S
 type _FiledUnderOlderName = Expect<Equal<(typeof _underOlderName)["transaction"], "TX_PLAN_SECURITY_RETRACTION">>;
 // @ts-expect-error The warrant retraction payload differs from an equity compensation retraction.
 const _underUnrelatedName = underOlderName(_equityCompensationRetraction, "TX_WARRANT_RETRACTION");
+
+// Plan operations
+
+// The descriptor accepts the supported plan operations.
+const _draws = defineValidator({ transaction: "TX_EQUITY_COMPENSATION_ISSUANCE", effect: "append", collection: "equityCompensation", pool: "draws", checks: [] }) satisfies Descriptor;
+// @ts-expect-error "spends" is not a supported pool operation.
+const _spends = defineValidator({ transaction: "TX_EQUITY_COMPENSATION_ISSUANCE", effect: "append", collection: "equityCompensation", pool: "spends", checks: [] });
+
+// Check the pool operation declared for each relevant transaction type.
+type _GrantDraws = Expect<Equal<(typeof TX_DESCRIPTORS)["TX_EQUITY_COMPENSATION_ISSUANCE"]["pool"], "draws">>;
+type _OlderNameDraws = Expect<Equal<(typeof TX_DESCRIPTORS)["TX_PLAN_SECURITY_ISSUANCE"]["pool"], "draws">>;
+type _CancellationCarries = Expect<Equal<(typeof TX_DESCRIPTORS)["TX_EQUITY_COMPENSATION_CANCELLATION"]["pool"], "carries">>;
+type _TransferCarries = Expect<Equal<(typeof TX_DESCRIPTORS)["TX_PLAN_SECURITY_TRANSFER"]["pool"], "carries">>;
+type _ReturnReturns = Expect<Equal<(typeof TX_DESCRIPTORS)["TX_STOCK_PLAN_RETURN_TO_POOL"]["pool"], "returns">>;
+type _AdjustmentReserves = Expect<Equal<(typeof TX_DESCRIPTORS)["TX_STOCK_PLAN_POOL_ADJUSTMENT"]["pool"], "reserves">>;
+
+// An effect of "none" normally keeps a security outstanding. A return to pool explicitly requires a
+// removed security.
+type _ReturnIsAfterRemoval = Expect<Equal<(typeof TX_DESCRIPTORS)["TX_STOCK_PLAN_RETURN_TO_POOL"]["lifecycle"], "after removal">>;
+type _AdjustmentStays = Expect<Equal<(typeof TX_DESCRIPTORS)["TX_STOCK_PLAN_POOL_ADJUSTMENT"]["lifecycle"], "stays">>;

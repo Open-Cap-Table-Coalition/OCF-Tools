@@ -751,9 +751,9 @@ describe("convertible conversion through ocfValidator", () => {
     const stock = { date: "2021-06-01", custom_id: "CS-1", stakeholder: "holder-a", stock_class: "common", quantity: "100" };
     const option = { date: "2021-07-01", custom_id: "EC-1", stakeholder: "holder-a", quantity: "50" };
     expect(context.snapshots).toEqual([
-      { date: "2021-01-01", stockIssuances: [], convertibles: [safe], warrants: [], equityCompensation: [] },
-      { date: "2021-06-01", stockIssuances: [stock], convertibles: [], warrants: [], equityCompensation: [] },
-      { date: "2021-07-01", stockIssuances: [stock], convertibles: [], warrants: [], equityCompensation: [option] },
+      { date: "2021-01-01", stockIssuances: [], convertibles: [safe], warrants: [], equityCompensation: [], stockPlans: [] },
+      { date: "2021-06-01", stockIssuances: [stock], convertibles: [], warrants: [], equityCompensation: [], stockPlans: [] },
+      { date: "2021-07-01", stockIssuances: [stock], convertibles: [], warrants: [], equityCompensation: [option], stockPlans: [] },
     ]);
   });
 });

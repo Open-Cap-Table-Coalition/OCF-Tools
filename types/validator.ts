@@ -10,7 +10,7 @@ import type { Finding, Severity } from "./finding";
  */
 export type OcfMachineContext = {
   /**
-   * Current security records. Applying a transaction returns an updated map. Use outstanding to list
+   * Current security and stock plan records. Applying a transaction returns an updated map. Use outstanding to list
    * a family's current issuances.
    */
   nodes: NodeMap;
@@ -89,3 +89,9 @@ export type Check = {
  * security.
  */
 export type LifecycleWord = "issue" | "stays" | "removes" | "after removal";
+
+/**
+ * The pool operation tells the reducer whether to charge a grant, carry shares already charged,
+ * credit a return or replace the reserve.
+ */
+export type PoolEffect = "draws" | "carries" | "carriesStock" | "returns" | "reserves";

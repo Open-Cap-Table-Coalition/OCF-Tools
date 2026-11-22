@@ -2,6 +2,8 @@ import type { OCFStockIssuance } from "@opencaptablecoalition/ocf-types";
 import type { OcfTransaction, TransactionFor } from "../../types/ocf-input";
 import type { DeepReadonly } from "../../types/validator";
 import { securityField } from "../nodes";
+import { isStockPlanId } from "../stockPlan";
+import { isNegative, isNumeric } from "../numeric";
 import type { CollectionElement, CollectionKey, TxKey } from "../ocfMachine";
 import { currentName, type CurrentTxKey } from "../constants/constants";
 import { text, type CheckContext, type CheckObject, type ReadField } from "./checkKit";
@@ -40,6 +42,30 @@ export const stakeholderExists = {
     return messages;
   },
 } satisfies CheckObject<{ stakeholder_id: string }>;
+
+/**
+ * Check for a nonnegative OCF quantity before changing a pool. The optional condition limits the
+ * check to transactions that affect a plan.
+ */
+export const countable = <F extends string>(field: F, applies: (data: any) => boolean = () => true) =>
+  ({
+    id: `${field.replace(/_/g, "-")}-countable`,
+    severity: "error",
+    description: `The transaction's ${field} is a number, and not negative, so it can be counted against the stock plan's pool.`,
+    run: (_context, data) => {
+      if (!applies(data)) return [];
+      const value = (data as Record<string, unknown>)[field];
+      if (!isNumeric(value)) return [text`The transaction's ${field} (${value}) is not a number written the way OCF writes one.`];
+      return isNegative(value) ? [text`The transaction's ${field} (${value}) is negative.`] : [];
+    },
+  }) satisfies CheckObject<Record<F, string>>;
+
+export const destinationPlan = {
+  id: "destination-plan",
+  severity: "error",
+  description: "The transaction identifies the stock plan whose pool it changes.",
+  run: (_context, data) => isStockPlanId(data.stock_plan_id) ? [] : ["The stock_plan_id must be a nonempty string."],
+} satisfies CheckObject<{ stock_plan_id: string }>;
 
 type DatedSecurity = { security_id: string; date: string };
 

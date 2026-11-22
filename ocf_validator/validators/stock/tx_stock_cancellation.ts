@@ -12,9 +12,9 @@
     9. Only issuance, acceptance, this cancellation, and a subsequent return of plan-issued shares may reference the security.
 */
 
+import { retirementQuantities } from "./retirement";
+import { isStockPlanId } from "../../stockPlan";
 import {LegacyContext} from '../../ocfMachine';
-
-export const hasStockPlan = (id: unknown): boolean => typeof id === "string" && id.length > 0;
 
 const valid_tx_stock_cancellation = (
   context: LegacyContext,
@@ -32,7 +32,7 @@ const valid_tx_stock_cancellation = (
   context.stockIssuances.forEach((ele) => {
     if (ele.security_id === event.data.security_id) {
       incoming_stockClass = ele.stock_class_id;
-      issuedFromPlan = hasStockPlan(ele.stock_plan_id);
+      issuedFromPlan = isStockPlanId(ele.stock_plan_id);
       incoming_stockIssuance_validity = true;
       report.incoming_stockIssuance_validity = true;
     }
@@ -107,54 +107,15 @@ const valid_tx_stock_cancellation = (
     report.balance_quantity_validity = false;
   }
   // 7. Check that the sum of the quantities of the cancellation (and the balance issuance if it exists) is equal to the quantity of the incoming security.
-  let cancel_and_balance_sum_validity = false;
-  let cancel_and_balance_quantity = parseFloat(event.data.quantity);
-  if (event.data.balance_security_id) {
-    context.stockIssuances.forEach((ele: any) => {
-      if (
-        ele.security_id === event.data.balance_security_id &&
-        ele.object_type === 'TX_STOCK_ISSUANCE'
-      ) {
-        cancel_and_balance_quantity += parseFloat(ele.quantity);
-      }
-    });
-  }
-  context.stockIssuances.forEach((ele: any) => {
-    if (
-      ele.security_id === event.data.security_id &&
-      ele.object_type === 'TX_STOCK_ISSUANCE'
-    ) {
-      if (cancel_and_balance_quantity === parseFloat(ele.quantity)) {
-        cancel_and_balance_sum_validity = true;
-        report.cancel_and_balance_sum_validity = true;
-      }
-    }
-  });
+  const incoming = context.stockIssuances.find((stock) => stock.security_id === event.data.security_id);
+  const balance = context.stockIssuances.find((stock) => stock.security_id === event.data.balance_security_id);
+  const amounts = retirementQuantities(incoming, event.data.quantity, event.data.balance_security_id ? balance?.quantity : "0");
+  const cancel_quantity_validity = amounts.quantity;
+  const cancel_and_balance_sum_validity = amounts.reconciles;
+  report.cancel_quantity_validity = cancel_quantity_validity;
+  report.cancel_and_balance_sum_validity = cancel_and_balance_sum_validity;
 
-  if (!cancel_and_balance_sum_validity) {
-    report.cancel_and_balance_sum_validity = false;
-  }
-  //8. Check cancellation amount is greater than 0 and less than or equal to the incoming security quantity
-  let cancel_quantity_validity = false;
-  transactions.map((ele: any) => {
-    if (
-      ele.security_id === event.data.security_id &&
-      ele.object_type === 'TX_STOCK_ISSUANCE'
-    ) {
-      if (
-        parseFloat(ele.quantity) >= parseFloat(event.data.quantity) &&
-        parseFloat(event.data.quantity) > 0
-      ) {
-        cancel_quantity_validity = true;
-        report.cancel_quantity_validity = true;
-      }
-    }
-  });
-  if (!cancel_quantity_validity) {
-    report.cancel_quantity_validity = false;
-  }
-
-  // A return on or after cancellation may name a successor plan.
+  // A return on or after retirement can name a successor plan.
   let only_transaction_validity = true;
   transactions.map((ele: any) => {
     if (

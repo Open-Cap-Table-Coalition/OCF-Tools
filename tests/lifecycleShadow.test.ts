@@ -94,14 +94,14 @@ describe("where the chart and the checks agree", () => {
     expect(explain({ ...vesting, indexedRemoval: undefined, reported: [] })).toBeUndefined();
   });
 
-  it("both allow a return to pool on a retracted grant, which neither check runs on", () => {
+  it("both allow a return to pool on a retracted grant", () => {
     const rows = shadow([
       { id: "eci-1", object_type: "TX_EQUITY_COMPENSATION_ISSUANCE", security_id: "option-1", stakeholder_id: "sh-1", stock_plan_id: "plan-1", quantity: "100", date: "2021-01-01" },
       { id: "ecr-1", object_type: "TX_EQUITY_COMPENSATION_RETRACTION", security_id: "option-1", date: "2021-06-01" },
       { id: "rtp-1", object_type: "TX_STOCK_PLAN_RETURN_TO_POOL", security_id: "option-1", stock_plan_id: "plan-1", quantity: "100", date: "2021-07-01" },
     ]);
 
-    expect(rowsOf(rows, "rtp-1")).toMatchObject([{ state: "removed", allowed: true, runs: [], reported: [] }]);
+    expect(rowsOf(rows, "rtp-1")).toMatchObject([{ state: "removed", allowed: true, runs: ["security-removed"], reported: [] }]);
     expect(disagreements(rows)).toEqual([]);
   });
 });
@@ -172,6 +172,19 @@ describe("where the chart and the checks disagree", () => {
       { id: "ve-1", state: "removed", allowed: false, runs: ["no-earlier-removal"], reported: [], removedBy: { id: "wc-1", date: "2021-06-01" } },
     ]);
     expect(disagreements(rows).map(explain)).toEqual(["removed earlier the same day"]);
+  });
+
+  it("the chart refuses a cancellation of a grant that was never issued, which neither check is about", () => {
+    // The stock plan tests also cover cancellation of a missing grant.
+    const context = validatePackage(
+      [{ id: "can-1", object_type: "TX_EQUITY_COMPENSATION_CANCELLATION", security_id: "opt-missing", quantity: "40", date: "2021-01-01" }],
+      [{ id: "sh-1" }],
+    );
+    const rows = context.shadow;
+
+    expect(disagreements(rows)).toMatchObject([{ id: "can-1", state: "notIssued", allowed: false, runs: ["no-other-transactions"], reported: [] }]);
+    expect(disagreements(rows).map(explain)).toEqual(["never issued"]);
+    expect(context.findings.map((finding) => [finding.subject.id, finding.check])).toEqual([["can-1", "issuance-exists"]]);
   });
 
   // The index still misses consolidations.
@@ -268,7 +281,7 @@ describe("a disagreement nothing explains", () => {
   });
 
   it.each([
-    ["TX_WARRANT_ISSUANCE", "TX_WARRANT_CANCELLATION", "TX_STOCK_PLAN_RETURN_TO_POOL", "2021-07-01"],
+
     ["TX_CONVERTIBLE_ISSUANCE", "TX_CONVERTIBLE_TRANSFER", "TX_VESTING_EVENT", cancellation.date],
   ])("flags the last step in %s → %s → %s", (issue, remove, last, date) => {
     expect(() => validatePackage([
@@ -276,6 +289,15 @@ describe("a disagreement nothing explains", () => {
       { ...cancellation, object_type: remove },
       { ...cancellation, object_type: last, id: "last", date },
     ], [{ id: "sh-1" }])).toThrow(`${last} "last" on security "safe-1" (removed)`);
+  });
+
+  it("agrees that a removed warrant cannot return shares to a stock plan", () => {
+    const rows = shadow([
+      { ...issuance, object_type: "TX_WARRANT_ISSUANCE" },
+      { ...cancellation, object_type: "TX_WARRANT_CANCELLATION" },
+      { ...cancellation, object_type: "TX_STOCK_PLAN_RETURN_TO_POOL", stock_plan_id: "plan", quantity: "1", id: "last", date: "2021-07-01" },
+    ]);
+    expect(rowsOf(rows, "last")).toMatchObject([{ allowed: false, reported: ["security-removed"] }]);
   });
 
   it("recognizes repricing after a plan-security cancellation as an issuance failure", () => {

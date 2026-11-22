@@ -7,6 +7,7 @@ import type {
   GradedValidator,
   LifecycleWord,
   OcfMachineContext,
+  PoolEffect,
 } from "../../types/validator";
 import type { CollectionKey, TxKey } from "../ocfMachine";
 
@@ -70,12 +71,21 @@ export const asGap = ({ id, severity, description }: CheckObject<any>): CheckObj
 });
 
 /**
- * Declare the transaction, its checks and its effect. Issuances add to a collection, removals take a
- * security out, and other checked transactions list the families they can affect.
+ * Declare the transaction, its checks, its security change and any pool operation. Issuances and
+ * removals name a collection. Other checked transactions list their families and can require a
+ * previously removed security.
  */
-type Spec =
-  | { transaction: TxKey; effect: "none"; collection?: never; families: readonly CollectionKey[]; checks: readonly CheckObject<any>[] }
-  | { transaction: TxKey; effect: "append" | "remove"; collection: CollectionKey; checks: readonly CheckObject<any>[] };
+type Spec = { pool?: PoolEffect } & (
+  | {
+      transaction: TxKey;
+      effect: "none";
+      collection?: never;
+      lifecycle?: "after removal";
+      families: readonly CollectionKey[];
+      checks: readonly CheckObject<any>[];
+    }
+  | { transaction: TxKey; effect: "append" | "remove"; collection: CollectionKey; checks: readonly CheckObject<any>[] }
+);
 
 /** Derive the usual lifecycle change from the effect so authors only specify it once. */
 const LIFECYCLE_OF_EFFECT = {
@@ -100,10 +110,11 @@ const toMetadata = (checks: readonly CheckObject<any>[]): readonly Check[] =>
     return metadata;
   });
 
-const describeField = (ref: FieldRef) => text`the ${ref.field} of security ${ref.id}`;
+const describeField = (ref: FieldRef) => text`the ${ref.field} of ${ref.kind === "plan" ? "stock plan" : "security"} ${ref.id}`;
 
 const sameField = (a: FieldRef, b: FieldRef): boolean =>
-  a.kind === b.kind && a.family === b.family && a.id === b.id && a.field === b.field;
+  a.kind === b.kind && a.id === b.id && a.field === b.field &&
+  (a.kind !== "security" || (b.kind === "security" && a.family === b.family));
 
 /** Collect the distinct failures affecting these fields and the first affected field for the message. */
 const defectsOn = (nodes: NodeMap, refs: readonly FieldRef[]): { roots: Subject[]; ref?: FieldRef } => {
@@ -179,17 +190,17 @@ export const toValidate =
   };
 
 /**
- * Generate validation and the check list from the same declaration. TypeScript checks that the
- * transaction supplies each field a check needs. The descriptor table checks issuance families, and
- * the collection tests check removal families.
+ * Build the validator and coverage metadata from the same checks. Keep the transaction type so the
+ * table can check the validator's input and issuance family. Use the lifecycle implied by the effect
+ * unless the declaration requires an already removed security.
  */
 export function defineValidator<const S extends Spec>(
   spec: S & { checks: readonly CheckObject<TransactionFor<S["transaction"]>>[] },
 ): Defined<S> {
   const { checks, ...rest } = spec;
   return {
-    ...rest,
     lifecycle: LIFECYCLE_OF_EFFECT[spec.effect],
+    ...rest,
     rules: checks,
     validate: toValidate(checks),
     checks: toMetadata(checks),
@@ -197,9 +208,9 @@ export function defineValidator<const S extends Spec>(
 }
 
 /** Preserve the transaction and family types when adding validation and check metadata. */
-type Defined<S extends Spec> = Omit<S, "checks"> & {
+type Defined<S extends Spec> = Omit<S, "checks" | "lifecycle"> & {
   rules: S["checks"];
-  lifecycle: (typeof LIFECYCLE_OF_EFFECT)[S["effect"]];
+  lifecycle: S extends { lifecycle: infer Declared extends LifecycleWord } ? Declared : (typeof LIFECYCLE_OF_EFFECT)[S["effect"]];
   validate: GradedValidator<TransactionFor<S["transaction"]>>;
   checks: readonly Check[];
 };

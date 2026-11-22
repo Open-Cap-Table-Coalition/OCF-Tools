@@ -1,7 +1,7 @@
 import { getNextSnapshot, setup } from "xstate";
 import type { LifecycleWord } from "../types/validator";
 import { lifecycleFamilies, TX_DESCRIPTORS, type CollectionKey, type Descriptor } from "./ocfMachine";
-import { hasStockPlan } from "./validators/stock/tx_stock_cancellation";
+import { isStockPlanId } from "./stockPlan";
 
 // Build one chart per family from the descriptors. Exercise removes a warrant but leaves an equity
 // grant outstanding. The caller keeps each security's state. Tests compare transitions with the
@@ -53,7 +53,7 @@ export function buildLifecycleChart(
 ) {
   const arrows = arrowsFor(family, descriptors);
   return setup({
-    guards: { issuedFromPlan: ({ context }) => hasStockPlan(context.stock_plan_id) },
+    guards: { issuedFromPlan: ({ context }) => isStockPlanId(context.stock_plan_id) },
     types: {} as {
       context: LifecycleContext;
       events: { type: string };
