@@ -34,7 +34,7 @@ The output includes these fields.
 - `snapshots` contains the cap table at the end of each transaction day the run completed. A row’s optional `defects` lists the causes of uncertainty under `lifecycle` or `issuance`. A failed first issuance appears as a row containing only its defects. Each snapshot also lists the plans under `stockPlans`, with decimal strings for `drawn` and, when known, `reserved`. Either total can have its own `defects` entry.
 - `nodes` holds each security’s issuance and lifecycle, including removed securities. Each field records its last writer and any defects. A security ID can be issued only once across all four families. `nodes.plan` holds the current pool totals by plan ID.
 
-A plan starts with its initial reserve and zero drawn shares. An adjustment replaces the reserve. A grant or stock issuance that names the plan draws shares once. For example, cancelling 40 of a 100-share grant and issuing a 60-share balance leaves 100 drawn. An explicit return of 40 brings that total to 60. The source allowance follows the security across all returns, even when a return credits a successor plan. A successor can therefore have a negative drawn balance. A transaction that names a plan absent from the package creates a plan row with an unknown reserve.
+For a worked example of a grant, a partial cancellation, and a return to the pool, see [How the validator counts stock plan shares](docs/stock-plans.md).
 
 To read one of the former issuance lists, use `outstanding` from the package entry point. It returns the family's outstanding issuances in their original order.
 
