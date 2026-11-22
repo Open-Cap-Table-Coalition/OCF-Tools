@@ -73,7 +73,7 @@ const packageIndexes = new WeakMap<object, PackageIndex>();
 /**
  * List the package's transactions on one security, in package order. Index the package once per run
  * so a check does not scan every transaction. Each run builds its own removals index, which
- * identifies the run here.
+ * identifies the run here. An OCF package is immutable, so the index stays right for the whole run.
  */
 export function transactionsOn(context: DeepReadonly<CheckContext>, securityId: unknown): readonly DeepReadonly<OcfTransaction>[] {
   const { transactions } = context.ocfPackageContent;

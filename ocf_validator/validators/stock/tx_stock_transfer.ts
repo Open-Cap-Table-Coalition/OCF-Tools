@@ -1,4 +1,5 @@
 import {LegacyContext} from '../../ocfMachine';
+import { addsUpTo } from "../../numeric";
 import { namedStock } from "./outputs";
 // Reference for tx_stock_transfer transaction: https://open-cap-table-coalition.github.io/Open-Cap-Format-OCF/schema_markdown/schema/objects/transactions/transfer/StockTransfer/
 
@@ -151,18 +152,19 @@ const valid_tx_stock_transfer = (context: LegacyContext, event: any, isGuard: Bo
   }
 
   // Check that the sum of the quantities of the resulting issuance (and the balance issuance if it exists) equal to the quantity of the transfer.
-  let outgoing_resulting_sum = 0;
+  // Add the quantities exactly, so fractional shares do not round.
+  const outgoing_quantities: unknown[] = [];
   for (let i = 0; i < event.data.resulting_security_ids.length; i++) {
     const res = event.data.resulting_security_ids[i];
     namedStock(context, res, event.data.date).map((ele: any) => {
       if (ele.security_id === res && ele.object_type === 'TX_STOCK_ISSUANCE') {
-        outgoing_resulting_sum += parseFloat(ele.quantity);
+        outgoing_quantities.push(ele.quantity);
       }
     });
   }
 
   let outgoing_resulting_sum_validity = false;
-  if (outgoing_resulting_sum === parseFloat(event.data.quantity)) {
+  if (addsUpTo(outgoing_quantities, event.data.quantity)) {
     outgoing_resulting_sum_validity = true;
     report.outgoing_resulting_sum_validity = true;
   }
@@ -172,14 +174,13 @@ const valid_tx_stock_transfer = (context: LegacyContext, event: any, isGuard: Bo
   }
 
   // Check that the sum of the quantities of the resulting issuance (and the balance issuance if it exists) is equal to the quantity of the incoming issuance.
-  let outgoing_total_sum = outgoing_resulting_sum;
   if (event.data.balance_security_id) {
     namedStock(context, event.data.balance_security_id, event.data.date).map((ele: any) => {
       if (
         ele.security_id === event.data.balance_security_id &&
         ele.object_type === 'TX_STOCK_ISSUANCE'
       ) {
-        outgoing_total_sum += parseFloat(ele.quantity);
+        outgoing_quantities.push(ele.quantity);
       }
     });
   }
@@ -190,7 +191,7 @@ const valid_tx_stock_transfer = (context: LegacyContext, event: any, isGuard: Bo
       ele.security_id === event.data.security_id &&
       ele.object_type === 'TX_STOCK_ISSUANCE'
     ) {
-      if (outgoing_total_sum === parseFloat(ele.quantity)) {
+      if (addsUpTo(outgoing_quantities, ele.quantity)) {
         outgoing_total_sum_validity = true;
         report.outgoing_total_sum_validity = true;
       }

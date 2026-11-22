@@ -1,11 +1,13 @@
 import { LegacyContext } from "../../ocfMachine";
+import { addsUpTo } from "../../numeric";
+import { namedStock } from "./outputs";
 
 /*
 CURRENT CHECKS:
 1. Check that stock issuance in incoming security_id referenced by transaction exists in current state.
 2. The date of the stock issuance referred to in the security_id must have a date equal to or earlier than the date of the stock conversion
 3. Any stock issuances with corresponding security IDs referred to in the resulting_security_ids array must exist
-4. If applicable, a stock issuance with a corresponding security ID must exist for the balance_security_id variable
+4. If applicable, a stock issuance with a corresponding security ID must exist for the balance_security_id variable. It can be removed earlier the same day.
 5. The stock_class_id of the stock issance in the balance_security_id must be the same as the stock_class_id of the stock issuance reffered to in the security_id variable
 6. The quantity of the stock issuance referred to in the balance_security_id variable must be equal to the quantity of the stock issuance referred to in the security_id variable minus the quantity_converted variable
 7. Check to ensure that the date of conversion is the same day as the date of the balance stock issuance.
@@ -82,7 +84,8 @@ const valid_tx_stock_conversion = (context: LegacyContext, event: any, isGuard: 
   let balance_security_outgoing_validity = true;
   if (event.data.balance_security_id) {
     balance_stockIssuance_validity = false;
-    context.stockIssuances.forEach((ele: any) => {
+    // The balance can be removed earlier the same day and still count.
+    namedStock(context, event.data.balance_security_id, event.data.date).forEach((ele: any) => {
       // 4. If applicable, a stock issuance with a corresponding security ID must exist for the balance_security_id variable"
       if (ele.security_id === event.data.balance_security_id && ele.object_type === "TX_STOCK_ISSUANCE") {
         balance_stockIssuance_validity = true;
@@ -97,7 +100,7 @@ const valid_tx_stock_conversion = (context: LegacyContext, event: any, isGuard: 
           report.balance_stockClass_validity = true;
         }
         // 6. The quantity of the stock issuance referred to in the balance_security_id variable must be equal to the quantity of the stock issuance referred to in the security_id variable minus the quantity_converted variable
-        if (parseFloat(ele.quantity) === incoming_quantity - parseFloat(event.data.quantity_converted)) {
+        if (addsUpTo([ele.quantity, event.data.quantity_converted], incoming_quantity)) {
           balance_quantity_validity = true;
           report.balance_quantity_validity = true;
         }

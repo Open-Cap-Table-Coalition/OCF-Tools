@@ -1,6 +1,9 @@
 import type { OCFStockIssuance } from "@opencaptablecoalition/ocf-types";
 import { describe, expect, it } from "vitest";
 import { contextWith, ev, startSeeded, validatePackage } from "./helpers";
+import { securityById, withSecurity } from "../ocf_validator/nodes";
+import type { LegacyContext } from "../ocf_validator/ocfMachine";
+import { namedStock } from "../ocf_validator/validators/stock/outputs";
 
 describe("returning cancelled stock to a plan", () => {
   const issuance = {
@@ -89,7 +92,7 @@ describe("stock removed the same day another transaction names it", () => {
   });
   const source = { id: "source", security_id: "held", date: "2021-06-01" };
   const run = (transactions: Record<string, unknown>[], plans: Record<string, unknown>[] = []) =>
-    validatePackage(transactions, [{ id: "holder" }], [{ id: "common" }], plans);
+    validatePackage(transactions, [{ id: "holder" }], [{ id: "common" }, { id: "preferred" }], plans);
   const VALID = "The validation of the OCF package for Test Co is complete and the package appears valid.";
 
   it.each([
@@ -101,11 +104,66 @@ describe("stock removed the same day another transaction names it", () => {
       tx: { ...source, object_type: "TX_STOCK_CANCELLATION", quantity: "6", reason_text: "Cancelled", balance_security_id: "balance" } },
     { name: "a repurchase's balance stock", outputs: [stock("balance", "4")], removed: ["balance", "4"],
       tx: { ...source, object_type: "TX_STOCK_REPURCHASE", quantity: "6", price: { amount: "1", currency: "USD" }, balance_security_id: "balance" } },
+    { name: "a conversion's balance stock", outputs: [stock("result", "6", "2021-06-01", { stock_class_id: "preferred" }), stock("balance", "4")], removed: ["balance", "4"],
+      tx: { ...source, object_type: "TX_STOCK_CONVERSION", quantity_converted: "6", resulting_security_ids: ["result"], balance_security_id: "balance" } },
+    { name: "a reissuance's resulting stock", outputs: [stock("result", "10")], removed: ["result", "10"],
+      tx: { ...source, object_type: "TX_STOCK_REISSUANCE", resulting_security_ids: ["result"] } },
   ])("accepts $name cancelled earlier that day", ({ outputs, removed, tx }) => {
     const context = run([stock("held", "10", "2021-01-01"), ...outputs, cancelled(removed[0], removed[1]), tx]);
 
     expect(context.result).toBe(VALID);
     expect(context.snapshots.at(-1)?.stockIssuances.map((row) => row.quantity)).toEqual(outputs.slice(0, -1).map((issue) => issue.quantity));
+  });
+
+  it.each([
+    { name: "a transfer's resulting stock", output: stock("result", "10"), failed: "outgoing_resulting_sum_validity",
+      tx: { ...source, object_type: "TX_STOCK_TRANSFER", quantity: "10", resulting_security_ids: ["result"] } },
+    { name: "a cancellation's balance stock", output: stock("balance", "4"), failed: "balance_stockIssuance_validity",
+      tx: { ...source, object_type: "TX_STOCK_CANCELLATION", quantity: "6", reason_text: "Cancelled", balance_security_id: "balance" } },
+  ])("rejects $name retracted earlier that day", ({ output, failed, tx }) => {
+    const retraction = { id: "retract", object_type: "TX_STOCK_RETRACTION", security_id: output.security_id, date: "2021-06-01", reason_text: "Issued in error" };
+    const context = run([stock("held", "10", "2021-01-01"), output, retraction, tx]);
+
+    expect(context.report.at(-1)).toMatchObject({ transaction_id: "source", [failed]: false });
+    expect(context.result).toMatch(/failed on source/);
+  });
+
+  it("counts stock removed that day on a record saved without its removal", () => {
+    const context = run([stock("balance", "4"), cancelled("balance", "4")]);
+    const { removal: _removal, ...saved } = securityById(context.nodes, "balance")!;
+    const older: LegacyContext = { ...context, stockIssuances: [], nodes: withSecurity(context.nodes, saved as typeof saved & { removal?: never }) };
+
+    expect(namedStock(older, "balance", "2021-06-01")).toMatchObject([{ security_id: "balance" }]);
+    expect(namedStock(older, "balance", "2021-06-02")).toEqual([]);
+  });
+
+  it.each([{ split_transaction_id: null }, {}])("checks the resulting quantities of a reissuance with %o", (fields) => {
+    const reissue = (last: string) => run([
+      stock("held", "40", "2021-01-01"), stock("first", "15"), stock("last", last),
+      { ...source, object_type: "TX_STOCK_REISSUANCE", resulting_security_ids: ["first", "last"], ...fields },
+    ]);
+
+    expect(reissue("25").result).toBe(VALID);
+    const short = reissue("1");
+    expect(short.report.at(-1)).toMatchObject({ transaction_id: "source", outgoing_resulting_sum_validity: false });
+    expect(short.result).toMatch(/failed on source/);
+  });
+
+  it.each([
+    { type: "TX_STOCK_TRANSFER", fields: { quantity: "0.3", resulting_security_ids: ["first", "last"] }, stock_class_id: "common", failed: "outgoing_resulting_sum_validity" },
+    { type: "TX_STOCK_REISSUANCE", fields: { resulting_security_ids: ["first", "last"] }, stock_class_id: "common", failed: "outgoing_resulting_sum_validity" },
+    { type: "TX_STOCK_CONVERSION", fields: { quantity_converted: "0.1", resulting_security_ids: ["first"], balance_security_id: "last" }, stock_class_id: "preferred", failed: "balance_quantity_validity" },
+    { type: "TX_STOCK_CANCELLATION", fields: { quantity: "0.1", reason_text: "Cancelled", balance_security_id: "last" }, failed: "cancel_and_balance_sum_validity" },
+    { type: "TX_STOCK_REPURCHASE", fields: { quantity: "0.1", price: { amount: "1", currency: "USD" }, balance_security_id: "last" }, failed: "repurchase_and_balance_sum_validity" },
+  ])("adds the fractional quantities of a $type exactly", ({ type, fields, stock_class_id, failed }) => {
+    const first = stock_class_id ? [stock("first", "0.1", "2021-06-01", { stock_class_id })] : [];
+    const check = (last: string) =>
+      run([stock("held", "0.3", "2021-01-01"), ...first, stock("last", last), { ...source, object_type: type, ...fields }]);
+
+    expect(check("0.2").result).toBe(VALID);
+    const over = check("0.2000000001");
+    expect(over.report.at(-1)).toMatchObject({ transaction_id: "source", [failed]: false });
+    expect(over.result).toMatch(/failed on source/);
   });
 
   it("still rejects balance stock issued on another day", () => {
