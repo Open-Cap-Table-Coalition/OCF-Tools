@@ -73,6 +73,9 @@ withNodeField({} as PlanNode, "drawn", { value: false, writer: undefined, defect
 
 declare const read: ReadField;
 const readWarrant = read(securityField("warrantIssuances", "w", "issuance"));
-type _ReadWarrant = Expect<Equal<typeof readWarrant, CollectionElement["warrantIssuances"] | undefined>>;
+if (readWarrant) {
+  // @ts-expect-error — the issuance supplied to a check is read-only.
+  readWarrant.id = "changed";
+}
 const readDraw = read(securityField("equityCompensation", "g", "draw"));
 type _ReadDraw = Expect<Equal<typeof readDraw, Draw | undefined>>;

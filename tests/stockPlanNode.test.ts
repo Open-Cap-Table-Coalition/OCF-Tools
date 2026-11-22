@@ -154,7 +154,7 @@ describe("drawn", () => {
   });
 
   it("doesn't count a security_id a second time when it's issued again", () => {
-    // The date check allows removal and reissuance on the same day.
+    // Even an explicit reducer call cannot reassign an issued ID.
     const nodes = reduce(
       withPlan(),
       [grant("g-1", "opt-1", "100")],
@@ -207,6 +207,83 @@ describe("drawn", () => {
   });
 });
 
+describe("accounting for returns and replacements", () => {
+  const source = grant("source", "option", "100");
+  const cancel = cancellation("cancel", "option", "40");
+  const successor = { ...PLAN, id: "successor" };
+
+  it("rejects a return larger than the partial cancellation and keeps the full allowance", () => {
+    const context = run([source, cancel, returnToPool("excess", "option", "200"), returnToPool("valid", "option", "40", { date: "2022-03-02" })]);
+    expect(context.findings).toMatchObject([{ check: "quantity-returnable", subject: { id: "excess" }, outcome: "failed" }]);
+    expect(drawnByDay(context).map(([, drawn]) => drawn)).toEqual(["100", "100", "100", "60"]);
+  });
+
+  it("shares one exact return allowance across dates, destinations, and transaction IDs", () => {
+    const context = run([
+      source, cancel, returnToPool("first", "option", "39.9999999999", { stock_plan_id: "successor" }),
+      returnToPool("excess", "option", "0.0000000002", { date: "2022-03-02" }),
+      returnToPool("last", "option", "0.0000000001", { date: "2022-03-03" }),
+    ], [PLAN, successor]);
+    expect(context.findings).toMatchObject([{ check: "quantity-returnable", subject: { id: "excess" } }]);
+    expect(context.snapshots.at(-1)?.stockPlans.map((plan) => plan.drawn)).toEqual(["99.9999999999", "-39.9999999999"]);
+    expect(securityAt(context.nodes, "equityCompensation", "option")?.returnable?.value).toBe("0");
+  });
+
+  it.each([undefined, null, "", "  ", 42])("rejects a return and an adjustment with destination %j", (stock_plan_id) => {
+    const context = run([source, cancel, returnToPool("return", "option", "40", { stock_plan_id }), adjustment("adjust", "25", { stock_plan_id })]);
+    expect(context.findings.map((finding) => [finding.subject.id, finding.check])).toEqual([["return", "destination-plan"], ["adjust", "destination-plan"]]);
+    expect(context.snapshots.at(-1)?.stockPlans).toEqual([{ id: PLAN.id, reserved: "1000", drawn: "100" }]);
+    expect(securityAt(context.nodes, "equityCompensation", "option")?.returnable?.value).toBe("40");
+  });
+
+  it.each([
+    { stock_plan_id: "other", quantity: "70", date: "2022-02-01" },
+    { stock_plan_id: PLAN.id, quantity: "600", date: "2022-02-01" },
+    { stock_plan_id: PLAN.id, quantity: "70", date: "2022-01-15" },
+    { stock_plan_id: PLAN.id, quantity: "70", date: "2022-03-01" },
+  ])("keeps an unrelated grant's original draw (%j)", (fields) => {
+    const context = run([grant("source", "option", "80"), grant("unrelated", "other-grant", fields.quantity, fields),
+      cancellation("cancel", "option", "10", { balance_security_id: "other-grant" })]);
+    expect(context.findings).toMatchObject([{ check: "plan-replacement", outcome: "failed", subject: { id: "cancel" } }]);
+    expect(securityAt(context.nodes, "equityCompensation", "other-grant")?.draw).toMatchObject({
+      value: { plan: fields.stock_plan_id, quantity: fields.quantity }, defects: [],
+    });
+    const total = fields.stock_plan_id !== PLAN.id ? "80" : fields.quantity === "600" ? "680" : "150";
+    expect(context.nodes.plan.get(PLAN.id)?.drawn).toMatchObject({ value: total, defects: [] });
+  });
+
+  it("rejects a duplicate issuance on another plan without changing either draw", () => {
+    const context = run([source, { ...source, id: "duplicate", stock_plan_id: successor.id, date: "2022-03-01" }], [PLAN, successor]);
+    expect(context.findings).toMatchObject([{ check: "unique-security-id", subject: { id: "duplicate" } }]);
+    expect(context.snapshots.at(-1)?.stockPlans).toEqual([
+      { id: PLAN.id, reserved: "1000", drawn: "100" },
+      { id: successor.id, reserved: "1000", drawn: "0" },
+    ]);
+  });
+
+  it("requires the balance quantity left after earlier exercises", () => {
+    const exercise = { ...cancel, id: "exercise", object_type: "TX_EQUITY_COMPENSATION_EXERCISE", date: "2022-01-15", quantity: "20", resulting_security_ids: [] };
+    const context = run([source, exercise, { ...cancel, balance_security_id: "balance" },
+      grant("balance", "balance", "40", { date: cancel.date }), returnToPool("return", "option", "40")]);
+    expect(context.findings).toEqual([]);
+    expect(context.snapshots.at(-1)?.stockPlans[0].drawn).toBe("60");
+  });
+
+  it("does not return shares that were transferred into a new grant", () => {
+    const transfer = { ...cancel, object_type: "TX_EQUITY_COMPENSATION_TRANSFER", quantity: "100", resulting_security_ids: ["replacement"] };
+    const context = run([source, transfer, grant("new", "replacement", "100", { date: cancel.date }), returnToPool("return", "option", "1")]);
+    expect(context.findings).toMatchObject([{ check: "quantity-returnable", outcome: "failed" }]);
+    expect(context.snapshots.at(-1)?.stockPlans[0].drawn).toBe("100");
+  });
+
+  it("clears reserve failures on an absolute write and retains drawn failures", () => {
+    const context = run([grant("bad", "bad", "x"), adjustment("bad-reserve", "-1"), adjustment("new-reserve", "200", { date: "2022-04-02" })]);
+    expect(context.snapshots.at(-1)?.stockPlans[0]).toEqual({
+      id: PLAN.id, reserved: "200", drawn: "0", defects: { drawn: [subject("TX_EQUITY_COMPENSATION_ISSUANCE", "bad")] },
+    });
+  });
+});
+
 // Balance and resulting grants
 
 describe("a grant another transaction names as its balance or resulting security", () => {
@@ -239,8 +316,7 @@ describe("a grant another transaction names as its balance or resulting security
   });
 
   it("draws nothing when the transaction that names it comes first, and ends in the same place", () => {
-    // The older issuance name sorts after a current-name cancellation. Remember the balance ID so
-    // the later issuance can skip the charge.
+    // Apply the source first to exercise the reducer with an issuance still to come.
     const named = reduce(withPlan(), [grant("g-1", "opt-1", "100")], [partial]);
     expect(named.security.get("opt-1-balance")).toEqual({
       kind: "security",
@@ -263,7 +339,7 @@ describe("a grant another transaction names as its balance or resulting security
   });
 
   it("isn't outstanding, or shown, while it has been named and not yet issued", () => {
-    // Use the older name to exercise this order through the public validator.
+    // Both transaction names use the same priority in the public validator.
     const context = run([grant("g-1", "opt-1", "100"), partial, { ...balance, object_type: "TX_PLAN_SECURITY_ISSUANCE", custom_id: "BAL" }]);
 
     expect(context.findings).toEqual([]);
@@ -501,6 +577,34 @@ describe("stock issued from a plan", () => {
     expect(context.snapshots.map((s) => s.stockPlans[0].drawn)).toEqual(context.snapshots.map(() => "100"));
   });
 
+  it.each([
+    { date: "2022-02-10", quantity: "50" },
+    { date: "2022-02-15", quantity: "500" },
+  ])("preserves the draw of mismatched settlement stock (%j)", (fields) => {
+    const context = runStock([
+      grant("g-1", "option", "100"), { ...stock, ...fields },
+      { id: "release", object_type: "TX_PLAN_SECURITY_RELEASE", security_id: "option", quantity: "50", date: "2022-02-01",
+        settlement_date: "2022-02-15", resulting_security_ids: [stock.security_id] },
+    ]);
+    expect(context.findings).toMatchObject([{ check: "plan-replacement", outcome: "failed" }]);
+    expect(securityAt(context.nodes, "stockIssuances", stock.security_id)?.draw).toMatchObject({ value: { quantity: fields.quantity }, defects: [] });
+  });
+
+  it.each([
+    { secondPlan: "plan-1", sum: "100", expected: "100" },
+    { secondPlan: "plan-1", sum: "101", expected: "201" },
+    { secondPlan: "plan-2", sum: "100", expected: "150" },
+  ])("carries only an exact same-plan stock consolidation (%j)", ({ secondPlan, sum, expected }) => {
+    const second = { ...stock, id: "issue-b", security_id: "b", stock_plan_id: secondPlan };
+    const output = { ...stock, id: "combined", security_id: "combined", date: "2022-03-01", quantity: sum };
+    const context = runStock([stock, second, output, {
+      id: "merge", object_type: "TX_STOCK_CONSOLIDATION", security_ids: [stock.security_id, second.security_id],
+      resulting_security_id: output.security_id, date: output.date,
+    }]);
+    expect(context.result).toMatch(/appears valid/);
+    expect(context.snapshots.at(-1)?.stockPlans[0].drawn).toBe(expected);
+  });
+
   it("keeps an independent stock draw when cancellation names it outside the balance field", () => {
     const another = { ...stock, id: "second", security_id: "other", date: "2022-03-01" };
     const context = runStock([stock, another, {
@@ -531,7 +635,7 @@ describe("equity compensation field reads", () => {
     const failed = subject("TX_EQUITY_COMPENSATION_CANCELLATION", "c-1");
     const nodes = reduce(withPlan(),
       [grant("g-1", "opt-1", "100")],
-      [grant("g-balance", "opt-balance", "60")],
+      [grant("g-balance", "opt-balance", "60", { date: "2022-02-01" })],
       [cancellation("c-1", "opt-1", "40", { balance_security_id: "opt-balance" }), [failed]],
     );
     const ref = securityField("equityCompensation", "opt-balance", field);

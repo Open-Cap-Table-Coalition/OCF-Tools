@@ -1,22 +1,24 @@
-// Compare each chart's decisions with no-earlier-removal and no-other-transactions (#233). Follow
+// Compare each chart with the issuance and removal checks (#233). Follow
 // transaction order even when validation fails. Whole-package tests use this comparison to catch new
 // differences.
 
+import { getNextSnapshot } from "xstate";
 import { lifecycleStep, type LifecycleState } from "../ocf_validator/lifecycle";
-import { lifecycleFamilies, TX_DESCRIPTORS, type CollectionKey, type Descriptor } from "../ocf_validator/ocfMachine";
-import { noEarlierRemoval } from "../ocf_validator/validators/checks";
-import { noOtherTransactions as convertibleNoOtherTransactions } from "../ocf_validator/validators/convertible/checks";
-import { noOtherTransactions as equityCompensationNoOtherTransactions } from "../ocf_validator/validators/equity_compensation/checks";
-import { noOtherTransactions as warrantNoOtherTransactions } from "../ocf_validator/validators/warrant/checks";
-import type { Check, OcfMachineContext } from "../types/validator";
+import { checksBeforeValidation, lifecycleFamilies, ocfMachine, TX_DESCRIPTORS, type CollectionKey, type OcfMachineEvent } from "../ocf_validator/ocfMachine";
+import { applyTransaction } from "../ocf_validator/nodes";
+import { toValidate, type CheckObject } from "../ocf_validator/validators/checkKit";
+import type { Finding } from "../types/finding";
+import type { OcfMachineContext } from "../types/validator";
 import { baseContext } from "./helpers";
 
 const NO_EARLIER_REMOVAL = "no-earlier-removal";
 const NO_OTHER_TRANSACTIONS = "no-other-transactions";
-const SHADOWED = [NO_EARLIER_REMOVAL, NO_OTHER_TRANSACTIONS];
+const SHADOWED = [NO_EARLIER_REMOVAL, NO_OTHER_TRANSACTIONS, "unique-security-id", "security-removed"];
 
 /** Package fields used to compare a transaction with its chart. */
 type Transaction = { id?: unknown; object_type: string; date: string; security_id?: unknown; security_ids?: unknown; [field: string]: unknown };
+
+type Run = { context: OcfMachineContext; visits: readonly Finding[][] };
 
 /** One comparison for each security named by a transaction. */
 export type ShadowRow = {
@@ -34,8 +36,13 @@ export type ShadowRow = {
   runs: string[];
   /** Checks that reported a problem. */
   reported: string[];
+  blocked: boolean;
+  /** Whether the validator or the replay found the issuance missing. */
+  issuanceCheck?: "failed" | "replayed" | "blocked";
   /** Earlier transaction that removed this security, if known. */
   removedBy: Transaction | undefined;
+  /** The first removal the validator indexed for this security. */
+  indexedRemoval?: Pick<Transaction, "date" | "object_type">;
 };
 
 /**
@@ -50,65 +57,49 @@ const securitiesOf = (transaction: Transaction): unknown[] => {
   return [];
 };
 
-/**
- * Compare the checks implemented for this transaction type. The machine adds the earlier-removal
- * check for passthrough types and legacy issuances.
- */
-const checksRunOn = (descriptor: Descriptor): string[] => {
-  if ("validate" in descriptor) {
-    return (descriptor.checks as readonly Check[])
-      .filter((check) => check.implemented !== false && SHADOWED.includes(check.id))
-      .map((check) => check.id);
+/** Resume from the holdings the validator kept. A failed transaction leaves those holdings alone. */
+function replay(context: OcfMachineContext, transaction: Transaction, checks: readonly CheckObject<any>[]) {
+  const from = ocfMachine.resolveState({ value: "capTable", context });
+  const event = { type: transaction.object_type, data: transaction } as OcfMachineEvent;
+  try {
+    const next = getNextSnapshot(ocfMachine, from, event).context;
+    return { context: next, findings: next.findings.slice(context.findings.length) };
+  } catch {
+    // If the full validator throws, the individual checks can still tell us what they found.
+    return { context, findings: toValidate(checks)(context, transaction) };
   }
-  return descriptor.effect === "passthrough" || descriptor.effect === "append" ? [NO_EARLIER_REMOVAL] : [];
-};
-
-/** Run a check on a transaction read from the test package. */
-type ShadowedCheck = { run: (context: any, data: any, read: any) => string[] };
-
-/**
- * Compare the rules on the recorded transactions before checking whether earlier failures make their
- * inputs unreliable.
- */
-const noReads = () => {
-  throw new Error("A shadowed check read the node map.");
-};
-
-/** Look up the transaction history check for each family that implements it. */
-const NO_OTHER_TRANSACTIONS_OF: Partial<Record<CollectionKey, ShadowedCheck>> = {
-  convertibleIssuances: convertibleNoOtherTransactions,
-  warrantIssuances: warrantNoOtherTransactions,
-  equityCompensation: equityCompensationNoOtherTransactions,
-};
-
-/**
- * Run each rule directly to compare lifecycle decisions. This comparison includes transactions that
- * failed in the validator.
- */
-const checksReportedOn = (context: OcfMachineContext, transaction: Transaction, descriptor: Descriptor, runs: string[]): string[] =>
-  runs.filter((id) => {
-    const check: ShadowedCheck | undefined =
-      id === NO_EARLIER_REMOVAL ? noEarlierRemoval : NO_OTHER_TRANSACTIONS_OF[lifecycleFamilies(descriptor)[0]];
-    if (check === undefined) throw new Error(`No ${id} to run for ${transaction.object_type}.`);
-    return check.run(context, transaction, noReads).length > 0;
-  });
+}
 
 /**
  * Compare each named security in processing order. Skip unknown transaction types because there is
  * no chart entry for them.
  */
-export function shadowRows(transactions: readonly Transaction[]): ShadowRow[] {
-  const context = baseContext({
+export function shadowRows(transactions: readonly Transaction[], run?: Run): ShadowRow[] {
+  let context = run?.context ?? baseContext({
     ocfPackageContent: { ...baseContext().ocfPackageContent, transactions } as unknown as OcfMachineContext["ocfPackageContent"],
   });
-  const securities = new Map<unknown, { family: CollectionKey; state: LifecycleState; removedBy?: Transaction }>();
+  const securities = new Map<unknown, { family: CollectionKey; state: LifecycleState; issuance: Transaction; removedBy?: Transaction }>();
   const rows: ShadowRow[] = [];
 
-  for (const transaction of transactions) {
-    const descriptor = (TX_DESCRIPTORS as Record<string, Descriptor>)[transaction.object_type];
-    if (descriptor === undefined) continue;
-    const runs = checksRunOn(descriptor);
-    const reported = checksReportedOn(context, transaction, descriptor, runs);
+  for (const [index, transaction] of transactions.entries()) {
+    if (!Object.hasOwn(TX_DESCRIPTORS, transaction.object_type)) continue;
+    const descriptor = TX_DESCRIPTORS[transaction.object_type as keyof typeof TX_DESCRIPTORS];
+    const actual = run?.visits[index];
+    const skipped = run !== undefined && actual === undefined;
+    const rules: readonly CheckObject<any>[] = "rules" in descriptor ? descriptor.rules : [];
+    const checks = rules.filter((rule) => rule.run && (SHADOWED.includes(rule.id) || (skipped && rule.id === "issuance-exists")));
+    checks.unshift(...(checksBeforeValidation(transaction.object_type, descriptor)?.checks ?? []));
+    const runs = checks.map((check) => check.id).filter((id) => SHADOWED.includes(id));
+    const replayed = skipped ? replay(context, transaction, checks) : undefined;
+    if (replayed) context = replayed.context;
+    const findings = actual ?? replayed?.findings ?? toValidate(checks)(context, transaction);
+    // Without a package run, keep the prior issuances available to the ID check.
+    if (!run && findings.length === 0 && typeof transaction.id === "string") {
+      context = { ...context, nodes: applyTransaction(context.nodes, descriptor, { ...transaction, id: transaction.id }) };
+    }
+    const failed = findings.filter((f) => f.outcome === "failed");
+    const reported = [...new Set(failed.map((f) => f.check).filter((id) => SHADOWED.includes(id)))];
+    const issuance = findings.find((f) => f.check === "issuance-exists" && f.severity === "error");
 
     for (const security of securitiesOf(transaction)) {
       let known = securities.get(security);
@@ -116,11 +107,11 @@ export function shadowRows(transactions: readonly Transaction[]): ShadowRow[] {
 
       // Issuance establishes the family. Before then, try the family named by the transaction.
       const family = known?.family ?? lifecycleFamilies(descriptor)[0];
-      const step = family === undefined ? { allowed: false as const } : lifecycleStep(family, state, transaction.object_type);
+      const step = family === undefined ? { allowed: false as const } : lifecycleStep(family, state, transaction.object_type, known?.issuance);
 
       if (step.allowed) {
         if (known === undefined) {
-          known = { family, state };
+          known = { family, state, issuance: transaction };
           securities.set(security, known);
         }
         if (step.next === "removed" && state !== "removed") known.removedBy = transaction;
@@ -137,6 +128,9 @@ export function shadowRows(transactions: readonly Transaction[]): ShadowRow[] {
         allowed: step.allowed,
         runs,
         reported,
+        blocked: findings.some((f) => f.outcome === "blocked" && SHADOWED.includes(f.check)),
+        issuanceCheck: issuance?.outcome === "failed" && skipped ? "replayed" : issuance?.outcome,
+        indexedRemoval: context.removals.get(security),
         removedBy: state === "removed" ? known?.removedBy : undefined,
       });
     }
@@ -152,22 +146,22 @@ export const disagreements = (rows: readonly ShadowRow[]): ShadowRow[] =>
 
 /** Use the transaction and its history to identify each known reason for a disagreement. */
 export const EXPLANATIONS = {
-  "return before removal":
-    "The run fails it through security-removed; neither of the two shadowed checks requires a removal before a return to pool.",
-  /**
-   * The chart rejects a transaction on a never-issued security. The full validator detects the
-   * missing security through issuance-exists.
-   */
-  "never issued":
-    "The run fails it through issuance-exists; neither of the two checks asks whether the security was ever issued.",
-
-
+  "never issued": "The issuance-exists check found that the security was never issued.",
   /**
    * The two checks omit this transaction type. The full validator still rejects it because
    * issuance-exists requires an outstanding security.
    */
   "removed, and neither check runs on it":
     "The run fails it through issuance-exists; neither of the two checks runs on this transaction type.",
+
+  "the validator stopped before checking the issuance":
+    "The validator stopped earlier. When we check the removed security, its issuance is missing.",
+
+  "an earlier failure blocked the check":
+    "The validator could not determine the security’s state after an earlier failure.",
+
+  "wrong security family":
+    "The transaction's family does not match the security's issuance, so its issuance check rejects it.",
 
   /**
    * The date check allows vesting on the day of removal (#214). The chart follows processing order,
@@ -187,30 +181,32 @@ export const EXPLANATIONS = {
 
 export type Explanation = keyof typeof EXPLANATIONS;
 
-/** The removal index requires a removal effect and one security_id. */
-const isIndexedRemoval = (transaction: Transaction): boolean =>
-  "security_id" in transaction &&
-  (TX_DESCRIPTORS as Record<string, Descriptor>)[transaction.object_type]?.effect === "remove";
-
 /** Identify a known difference so tests can report any new one. */
 export function explain(row: ShadowRow): Explanation | undefined {
   const refusedInSilence = !row.allowed && row.reported.length === 0;
-  if (!refusedInSilence) return undefined;
-
-  const descriptor = (TX_DESCRIPTORS as Record<string, Descriptor>)[row.object_type];
-  if (descriptor?.lifecycle === "after removal" && row.state !== "removed") return "return before removal";
-  if (row.state === "notIssued") {
-    // The issuance-exists check requires an outstanding security.
-    return descriptor !== undefined && "validate" in descriptor && descriptor.lifecycle !== "issue" && row.family === undefined
-      ? "never issued"
-      : undefined;
+  if (refusedInSilence && (row.blocked || (row.runs.length === 0 && row.issuanceCheck === "blocked"))) {
+    return "an earlier failure blocked the check";
   }
-  if (row.state !== "removed" || row.removedBy === undefined) return undefined;
+  if (refusedInSilence && row.state === "notIssued" && row.issuanceCheck === "failed") return "never issued";
+  if (!refusedInSilence || row.state !== "removed" || row.removedBy === undefined) return undefined;
 
-  if (row.runs.length === 0) return "removed, and neither check runs on it";
+  if (!row.family) return undefined;
+  const descriptor = TX_DESCRIPTORS[row.object_type as keyof typeof TX_DESCRIPTORS];
+  if (!lifecycleFamilies(descriptor).includes(row.family)) {
+    return row.issuanceCheck === undefined ? undefined : "wrong security family";
+  }
+  if (!lifecycleStep(row.family, "outstanding", row.object_type).allowed) return undefined;
+  if (row.runs.length === 0 && row.indexedRemoval === row.removedBy) {
+    if (row.issuanceCheck === "failed") return "removed, and neither check runs on it";
+    if (row.issuanceCheck === "replayed") return "the validator stopped before checking the issuance";
+  }
   if (row.runs.length === 1 && row.runs[0] === NO_EARLIER_REMOVAL) {
-    if (!isIndexedRemoval(row.removedBy)) return "removed by a transaction the removals index doesn't hold";
-    if (row.removedBy.date === row.date) return "removed earlier the same day";
+    const indexedDate = row.indexedRemoval?.date;
+    if (indexedDate !== undefined && indexedDate < row.date) return undefined;
+    if (indexedDate === row.date && row.removedBy.date === row.date) return "removed earlier the same day";
+    if (row.removedBy.object_type === "TX_STOCK_CONSOLIDATION") {
+      return "removed by a transaction the removals index doesn't hold";
+    }
   }
   return undefined;
 }
@@ -224,17 +220,19 @@ const show = (row: ShadowRow): string =>
  * Fail on unexplained differences. Skip packages with unusable dates or transaction types because
  * the driver cannot order them.
  */
-export function expectShadowExplained(transactions: readonly unknown[]): void {
+export function expectShadowExplained(transactions: readonly unknown[], run?: Run): ShadowRow[] {
   const runnable = transactions.every(
     (ele: any) => typeof ele?.date === "string" && typeof ele?.object_type === "string",
   );
-  if (!runnable) return;
+  if (!runnable) return [];
 
-  const unexplained = disagreements(shadowRows(transactions as Transaction[])).filter((row) => explain(row) === undefined);
+  const rows = shadowRows(transactions as Transaction[], run);
+  const unexplained = disagreements(rows).filter((row) => explain(row) === undefined);
   if (unexplained.length > 0) {
     throw new Error(
       `The lifecycle chart and the checks it shadows disagree, and tests/lifecycleShadow.ts has no explanation for it:\n` +
         unexplained.map((row) => `  ${show(row)}`).join("\n"),
     );
   }
+  return rows;
 }

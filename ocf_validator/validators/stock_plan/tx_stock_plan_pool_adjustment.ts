@@ -1,5 +1,5 @@
 import { defineValidator } from "../checkKit";
-import { countable } from "../checks";
+import { countable, destinationPlan } from "../checks";
 
 // A pool adjustment sets reserved shares and names no security.
 
@@ -8,5 +8,5 @@ export const TX_STOCK_PLAN_POOL_ADJUSTMENT = defineValidator({
   effect: "none",
   families: [],
   pool: "reserves",
-  checks: [countable("shares_reserved")],
+  checks: [destinationPlan, countable("shares_reserved")],
 });

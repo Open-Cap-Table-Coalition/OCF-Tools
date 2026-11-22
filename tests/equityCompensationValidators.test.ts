@@ -7,6 +7,7 @@ import {
   startSeeded,
   ev,
   contextWith,
+  contextAfterCancellation,
   validatePackage,
   withStakeholder,
   txRecord,
@@ -911,20 +912,28 @@ describe("the validator accepts cancelling what's left of a grant after part of 
 // emit; a module's declared gaps (transfer's no-other-transactions, and the
 // exercise's resulting-security checks and no-other-transactions) have no
 // failing scenario because no code path emits them.
+const fundedContext = validatePackage([
+    { ...issuanceRecord("sec1"), stock_plan_id: "plan", quantity: "10", stakeholder_id: "sh1" },
+    { ...txRecord("TX_STOCK_ISSUANCE", "stock", "output"), stakeholder_id: "sh1", stock_plan_id: "plan", stock_class_id: "common", stock_legend_ids: [], quantity: "5" },
+  ], [{ id: "sh1" }], [{ id: "common" }]);
+const invalidPlanMovements = (type: string) => ["11", "3"].map((quantity) => ({
+  context: fundedContext,
+  data: { ...txRecord(type, "move"), quantity, balance_security_id: "output", resulting_security_ids: ["output"] },
+}));
+
 const failingScenarios: FailingScenarios<MigratedKey> = {
   TX_EQUITY_COMPENSATION_ISSUANCE: [
+    { context: withStakeholder("sh1"), data: { ...issuanceRecord("sec1"), stakeholder_id: "sh1", stock_plan_id: "", quantity: "10" } },
+    {
+      context: contextWith({ stakeholders: [{ id: "sh1" }], equityCompensation: [issuanceRecord("sec1")] }),
+      data: { ...txRecord("TX_EQUITY_COMPENSATION_ISSUANCE", "duplicate"), stakeholder_id: "sh1" },
+    },
     {
       context: baseContext(),
       data: { id: "i1", object_type: "TX_EQUITY_COMPENSATION_ISSUANCE", security_id: "sec1", stakeholder_id: "nobody", date: "2021-01-01" },
     },
     {
-      context: contextWith({
-        stakeholders: [{ id: "sh1" }],
-        transactions: [
-          issuanceRecord("sec1"),
-          txRecord("TX_EQUITY_COMPENSATION_RETRACTION", "r1", "sec1", "2020-06-01"),
-        ],
-      }),
+      context: contextAfterCancellation("EQUITY_COMPENSATION"),
       data: { id: "i1", object_type: "TX_EQUITY_COMPENSATION_ISSUANCE", security_id: "sec1", stakeholder_id: "sh1", date: "2021-01-01" },
     },
     {
@@ -942,16 +951,20 @@ const failingScenarios: FailingScenarios<MigratedKey> = {
     { context: contextWith({ equityCompensation: [issuanceRecord("sec1")] as any, transactions: [issuanceRecord("sec1"), txRecord("TX_EQUITY_COMPENSATION_ACCEPTANCE", "a1", "sec1", "2020-06-01")] }), data: txRecord("TX_EQUITY_COMPENSATION_RETRACTION", "r1", "sec1", "2021-01-01") },
   ],
   TX_EQUITY_COMPENSATION_CANCELLATION: [
+    ...invalidPlanMovements("TX_EQUITY_COMPENSATION_CANCELLATION"),
     { context: contextWith({ transactions: [issuanceRecord("sec1")] }), data: txRecord("TX_EQUITY_COMPENSATION_CANCELLATION", "c1", "sec1", "2021-01-01") },
     { context: contextWith({ equityCompensation: [issuanceRecord("sec1")] as any, transactions: [issuanceRecord("sec1"), txRecord("TX_EQUITY_COMPENSATION_TRANSFER", "x1", "sec1", "2020-06-01")] }), data: txRecord("TX_EQUITY_COMPENSATION_CANCELLATION", "c1", "sec1", "2021-01-01") },
   ],
   TX_EQUITY_COMPENSATION_TRANSFER: [
+    ...invalidPlanMovements("TX_EQUITY_COMPENSATION_TRANSFER"),
     { context: contextWith({ transactions: [issuanceRecord("sec1")] }), data: txRecord("TX_EQUITY_COMPENSATION_TRANSFER", "x1", "sec1", "2021-01-01") },
   ],
   TX_EQUITY_COMPENSATION_EXERCISE: [
+    ...invalidPlanMovements("TX_EQUITY_COMPENSATION_EXERCISE"),
     { context: contextWith({ transactions: [issuanceRecord("sec1")] }), data: { id: "ex1", object_type: "TX_EQUITY_COMPENSATION_EXERCISE", security_id: "sec1", resulting_security_ids: [], date: "2021-01-01" } },
   ],
   TX_EQUITY_COMPENSATION_RELEASE: [
+    ...invalidPlanMovements("TX_EQUITY_COMPENSATION_RELEASE"),
     { context: contextWith({ transactions: [issuanceRecord("sec1")] }), data: txRecord("TX_EQUITY_COMPENSATION_RELEASE", "rel1", "sec1", "2021-01-01") },
   ],
   TX_EQUITY_COMPENSATION_REPRICING: [

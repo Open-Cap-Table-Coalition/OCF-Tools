@@ -1,3 +1,5 @@
+import { retirementQuantities } from "./retirement";
+import { isStockPlanId } from "../../stockPlan";
 // Reference for tx_stock_cancellation: https://open-cap-table-coalition.github.io/Open-Cap-Format-OCF/schema_markdown/schema/objects/transactions/cancellation/StockCancellation/
 /*
   LOGIC CHECKS:
@@ -33,12 +35,14 @@ const valid_tx_stock_repurchase = (context: LegacyContext, event: any, isGuard: 
   // TBC: validation of tx_stock_repurchase
   const {transactions} = context.ocfPackageContent;
   let incoming_stockClass = '';
+  let issuedFromPlan = false;
   // 1. Check that stock issuance in incoming security_id referenced by transaction exists in current state.
   let incoming_stockIssuance_validity = false;
   context.stockIssuances.forEach((ele: any) => {
     if (ele.security_id === event.data.security_id) {
       incoming_stockIssuance_validity = true;
       incoming_stockClass = ele.stock_class_id;
+      issuedFromPlan = isStockPlanId(ele.stock_plan_id);
       report.incoming_stockIssuance_validity = true;
     }
   });
@@ -111,61 +115,22 @@ const valid_tx_stock_repurchase = (context: LegacyContext, event: any, isGuard: 
   }
 
   //7. Check that the sum of the quantities of the repurchase (and the balance issuance if it exists) is equal to the quantity of the incoming security.
-  let repurchase_and_balance_sum_validity = false;
-  let repurchase_and_balance_quantity = parseFloat(event.data.quantity);
-  if (event.data.balance_security_id) {
-    context.stockIssuances.forEach((ele: any) => {
-      if (
-        ele.security_id === event.data.balance_security_id &&
-        ele.object_type === 'TX_STOCK_ISSUANCE'
-      ) {
-        repurchase_and_balance_quantity += parseFloat(ele.quantity);
-      }
-    });
-  }
-  context.stockIssuances.forEach((ele: any) => {
-    if (
-      ele.security_id === event.data.security_id &&
-      ele.object_type === 'TX_STOCK_ISSUANCE'
-    ) {
-      if (repurchase_and_balance_quantity === parseFloat(ele.quantity)) {
-        repurchase_and_balance_sum_validity = true;
-        report.repurchase_and_balance_sum_validity = true;
-      }
-    }
-  });
+  const incoming = context.stockIssuances.find((stock) => stock.security_id === event.data.security_id);
+  const balance = context.stockIssuances.find((stock) => stock.security_id === event.data.balance_security_id);
+  const amounts = retirementQuantities(incoming, event.data.quantity, event.data.balance_security_id ? balance?.quantity : "0");
+  const repurchase_quantity_validity = amounts.quantity;
+  const repurchase_and_balance_sum_validity = amounts.reconciles;
+  report.repurchase_quantity_validity = repurchase_quantity_validity;
+  report.repurchase_and_balance_sum_validity = repurchase_and_balance_sum_validity;
 
-  if (!repurchase_and_balance_sum_validity) {
-    report.repurchase_and_balance_sum_validity = false;
-  }
-
-  // 8. Check repurchase amount is greater than 0 and less than or equal to the incoming security quantity
-  let repurchase_quantity_validity = false;
-  transactions.map((ele: any) => {
-    if (
-      ele.security_id === event.data.security_id &&
-      ele.object_type === 'TX_STOCK_ISSUANCE'
-    ) {
-      if (
-        parseFloat(ele.quantity) >= parseFloat(event.data.quantity) &&
-        parseFloat(event.data.quantity) > 0
-      ) {
-        repurchase_quantity_validity = true;
-        report.repurchase_quantity_validity = true;
-      }
-    }
-  });
-  if (!repurchase_quantity_validity) {
-    report.repurchase_quantity_validity = false;
-  }
-
-  //9. Check that the security_id of the stock issuance referred to in the security_id variable must not be the security_id related to any other transactions with the exception of a stock acceptance transaction.
+  // A return on or after retirement can name a successor plan.
   let only_transaction_validity = true;
   transactions.map((ele: any) => {
     if (
       ele.security_id === event.data.security_id &&
       ele.object_type !== 'TX_STOCK_ISSUANCE' &&
       ele.object_type !== 'TX_STOCK_ACCEPTANCE' &&
+      !(issuedFromPlan && ele.object_type === 'TX_STOCK_PLAN_RETURN_TO_POOL' && ele.date >= event.data.date) &&
       !(ele.object_type === 'TX_STOCK_REPURCHASE' && ele.id === event.data.id)
     ) {
       only_transaction_validity = false;

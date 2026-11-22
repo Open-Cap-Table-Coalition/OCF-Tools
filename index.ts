@@ -1,5 +1,6 @@
 export { readOcfPackage } from "./read_ocf_package";
 export { ocfValidator } from "./ocf_validator";
+export { outstanding } from "./ocf_validator/nodes";
 export { ocfSnapshot } from "./ocf_snapshot";
 
 // Return types of the public entry points, so the surface is nameable by consumers.

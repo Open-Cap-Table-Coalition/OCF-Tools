@@ -1,6 +1,6 @@
 import type { TransactionFor } from "../../types/ocf-input";
 import type { Finding, Subject } from "../../types/finding";
-import { describeField, fieldAt, type FieldRef, type FieldRefValue, type NodeMap } from "../nodes";
+import { addRoot, fieldAt, type FieldRef, type FieldRefValue, type NodeMap } from "../nodes";
 import type {
   Check,
   DeepReadonly,
@@ -28,10 +28,10 @@ export type CheckObject<P = unknown> = Pick<Check, "id" | "severity" | "descript
 };
 
 /** Checks use the supplied reader for current security records. */
-export type CheckContext = Omit<OcfMachineContext, "nodes">;
+export type CheckContext = Pick<OcfMachineContext, "ocfPackageContent" | "removals">;
 
 /** Read a declared field. A missing or unknown value produces undefined. An undeclared read throws. */
-export type ReadField = <R extends FieldRef>(ref: R) => FieldRefValue<R> | undefined;
+export type ReadField = <R extends FieldRef>(ref: R) => DeepReadonly<FieldRefValue<R>> | undefined;
 
 const show = (value: unknown): string => {
   try {
@@ -110,6 +110,8 @@ const toMetadata = (checks: readonly CheckObject<any>[]): readonly Check[] =>
     return metadata;
   });
 
+const describeField = (ref: FieldRef) => text`the ${ref.field} of ${ref.kind === "plan" ? "stock plan" : "security"} ${ref.id}`;
+
 const sameField = (a: FieldRef, b: FieldRef): boolean =>
   a.kind === b.kind && a.id === b.id && a.field === b.field &&
   (a.kind !== "security" || (b.kind === "security" && a.family === b.family));
@@ -121,9 +123,7 @@ const defectsOn = (nodes: NodeMap, refs: readonly FieldRef[]): { roots: Subject[
   for (const ref of refs) {
     const defects = fieldAt(nodes, ref)?.defects ?? [];
     if (defects.length > 0) first ??= ref;
-    for (const root of defects) {
-      if (!roots.some((held) => held.object_type === root.object_type && held.id === root.id)) roots.push(root);
-    }
+    for (const root of defects) addRoot(roots, root);
   }
   return { roots, ref: first };
 };
@@ -144,7 +144,8 @@ export const toValidate =
   (checks: readonly CheckObject<any>[]): GradedValidator<any> =>
   (context, data: any) => {
     const subject = { object_type: data.object_type, id: data.id };
-    const { nodes, ...checkContext } = context;
+    const { nodes, ocfPackageContent, removals } = context;
+    const checkContext = { ocfPackageContent, removals };
     const findings: Finding[] = [];
     for (const check of checks) {
       if (!check.run) continue;
@@ -168,7 +169,7 @@ export const toValidate =
           if (!refs.some((declared) => sameField(declared, wanted))) {
             throw new Error(`It read ${describeField(wanted)}, which it doesn't declare in its reads.`);
           }
-          return fieldAt(nodes, wanted)?.value;
+          return fieldAt(nodes, wanted, removals)?.value as DeepReadonly<FieldRefValue<typeof wanted>> | undefined;
         };
         messages = check.run(checkContext, data, read);
       } catch (error) {
@@ -200,6 +201,7 @@ export function defineValidator<const S extends Spec>(
   return {
     lifecycle: LIFECYCLE_OF_EFFECT[spec.effect],
     ...rest,
+    rules: checks,
     validate: toValidate(checks),
     checks: toMetadata(checks),
   } as Defined<S>;
@@ -207,6 +209,7 @@ export function defineValidator<const S extends Spec>(
 
 /** Preserve the transaction and family types when adding validation and check metadata. */
 type Defined<S extends Spec> = Omit<S, "checks" | "lifecycle"> & {
+  rules: S["checks"];
   lifecycle: S extends { lifecycle: infer Declared extends LifecycleWord } ? Declared : (typeof LIFECYCLE_OF_EFFECT)[S["effect"]];
   validate: GradedValidator<TransactionFor<S["transaction"]>>;
   checks: readonly Check[];

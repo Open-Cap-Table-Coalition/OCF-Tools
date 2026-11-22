@@ -38,3 +38,6 @@ export const exceeds = (a: string, b: string): boolean => toScaled(a) > toScaled
 
 /** Check the sign of a validated quantity. */
 export const isNegative = (value: string): boolean => toScaled(value) < 0n;
+
+/** Validate quantities before adding them to a pool or a return allowance. */
+export const isQuantity = (value: unknown): value is string => isNumeric(value) && !isNegative(value);
