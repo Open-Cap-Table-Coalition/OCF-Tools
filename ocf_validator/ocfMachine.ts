@@ -23,8 +23,8 @@ import { TX_WARRANT_RETRACTION } from "./validators/warrant/tx_warrant_retractio
 import { TX_WARRANT_CANCELLATION } from "./validators/warrant/tx_warrant_cancellation";
 import { TX_WARRANT_TRANSFER } from "./validators/warrant/tx_warrant_transfer";
 import { TX_WARRANT_EXERCISE } from "./validators/warrant/tx_warrant_exercise";
-import { text, toValidate } from "./validators/checkKit";
-import { noEarlierRemoval } from "./validators/checks";
+import { text, toValidate, type CheckObject } from "./validators/checkKit";
+import { issuanceIdChecks, noEarlierRemoval } from "./validators/checks";
 import { applyTransaction, emptyNodes, outstanding } from "./nodes";
 import { TX_EQUITY_COMPENSATION_ISSUANCE, TX_PLAN_SECURITY_ISSUANCE } from "./validators/equity_compensation/tx_equity_compensation_issuance";
 import { TX_EQUITY_COMPENSATION_ACCEPTANCE, TX_PLAN_SECURITY_ACCEPTANCE } from "./validators/equity_compensation/tx_equity_compensation_acceptance";
@@ -414,28 +414,23 @@ export const earliestRemovals = (transactions: readonly OcfTransaction[]): OcfMa
   return removals;
 };
 
-/** Wrap the shared removal check so the machine can call it like a transaction validator. */
-const notRemoved = {
+/** Stock issuance and passthrough transactions run shared checks before their own handlers. */
+const sharedChecks = (checks: readonly CheckObject<any>[]) => ({
   effect: "none",
   lifecycle: "stays",
   families: [],
-  validate: toValidate([noEarlierRemoval]),
-  checks: [noEarlierRemoval],
-} satisfies ActiveDescriptor;
+  checks,
+  validate: toValidate(checks),
+} as const satisfies ActiveDescriptor);
 
-/** Some transactions need a separate check for an earlier removal. */
-export const checksRemovalFirst = (type: string, descriptor: Descriptor): boolean =>
-  (descriptor.effect === "passthrough" && type !== "TX_STOCK_PLAN_RETURN_TO_POOL") ||
-  (descriptor.effect === "append" && "legacyValidate" in descriptor);
+const stockIssuanceChecks = sharedChecks(issuanceIdChecks);
+const passthroughChecks = sharedChecks([noEarlierRemoval]);
 
-/**
- * Build the `on` map for every key in `TX_DESCRIPTORS`. Active keys share the
- * two-branch transition. Graded validators declare no-earlier-removal where it
- * applies; for the transactions that can't declare it, the machine runs it
- * first. A legacy issuance runs it before its own validator, and a
- * passthrough type runs only it and is otherwise a no-op. The return to pool
- * is exempt: it records where a removed security's shares went.
- */
+export function checksBeforeValidation(type: string, descriptor: Descriptor) {
+  if (descriptor.effect === "append" && "legacyValidate" in descriptor) return stockIssuanceChecks;
+  if (descriptor.effect === "passthrough" && type !== "TX_STOCK_PLAN_RETURN_TO_POOL") return passthroughChecks;
+}
+
 function buildTransactionHandlers() {
   const activeTransitions = [
     {
@@ -448,17 +443,21 @@ function buildTransactionHandlers() {
       actions: ["recordOutcome", "setValidationError"],
     },
   ] as const;
-  const afterRemoval = {
-    guard: "followsRemoval",
-    target: "validationError",
-    actions: ["recordRemoval", "setRemovalError"],
-  } as const;
 
   const handlerFor = (type: TxKey) => {
     const descriptor = TX_DESCRIPTORS[type];
-    const checkRemoval = checksRemovalFirst(type, descriptor);
-    if (descriptor.effect === "passthrough") return checkRemoval ? [afterRemoval] : {};
-    return checkRemoval ? [afterRemoval, ...activeTransitions] : activeTransitions;
+    const checks = checksBeforeValidation(type, descriptor);
+    const transitions = descriptor.effect === "passthrough" ? [] : activeTransitions;
+    if (!checks) return transitions;
+    const onFailure = {
+      guard: { type: "failsSharedChecks", params: checks },
+      target: "validationError",
+      actions: [
+        { type: "recordSharedChecks", params: checks },
+        { type: "setSharedError", params: checks },
+      ],
+    } as const;
+    return [onFailure, ...transitions];
   };
 
   return (Object.keys(TX_DESCRIPTORS) as TxKey[]).reduce(
@@ -485,10 +484,8 @@ export const ocfMachine = setup({
       const descriptor = activeDescriptorFor(event.type);
       return descriptor ? isValidOutcome(descriptor, context, event) : false;
     },
-    // A passthrough transaction or issuance on a removed security (see
-    // noEarlierRemoval and buildTransactionHandlers).
-    followsRemoval: ({ context, event }) =>
-      !isControlEvent(event) && !isValidOutcome(notRemoved, context, event),
+    failsSharedChecks: ({ context, event }, checks: ActiveDescriptor) =>
+      !isControlEvent(event) && !isValidOutcome(checks, context, event),
   },
   actions: {
     // Record the validator's outcome on its shape's channel — legacy report
@@ -510,12 +507,10 @@ export const ocfMachine = setup({
     // Update the security records after validation succeeds.
     applyToNodes: assign(({ context, event }) => nodesUpdate(context, event)),
 
-    // The followsRemoval branch's record and failure message, as for a
-    // graded validator's invalid branch.
-    recordRemoval: assign(({ context, event }) => outcomeUpdate(notRemoved, context, event)),
-    setRemovalError: assign({
-      result: ({ context, event }) => failureResult(notRemoved, context, event),
-    }),
+    recordSharedChecks: assign(({ context, event }, checks: ActiveDescriptor) => outcomeUpdate(checks, context, event)),
+    setSharedError: assign(({ context, event }, checks: ActiveDescriptor) => ({
+      result: failureResult(checks, context, event),
+    })),
   },
 }).createMachine({
   id: "OCF-xstate",

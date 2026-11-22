@@ -41,6 +41,13 @@ export const stakeholderExists = {
   },
 } satisfies CheckObject<{ stakeholder_id: string }>;
 
+type DatedSecurity = { security_id: string; date: string };
+
+const removalBefore = (context: DeepReadonly<OcfMachineContext>, data: DatedSecurity) => {
+  const removal = context.removals.get(data.security_id);
+  return removal && removal.date < data.date ? removal : undefined;
+};
+
 /**
  * No transaction dated before this one removed its security from the cap
  * table: no cancellation, conversion, warrant exercise, repurchase,
@@ -54,21 +61,35 @@ export const stakeholderExists = {
  * (#214).
  *
  * A removal dated the same day doesn't count, since a security can be issued,
- * vest, and be removed on one day. A same-day reuse of the security_id is left
- * to the removal's own checks, which catch it only in part.
+ * vest, and be removed on one day.
  */
 export const noEarlierRemoval = {
   id: "no-earlier-removal",
   severity: "error",
   description: "No transaction dated before this one removed its security from the cap table.",
   run: (context, data) => {
-    const removal = context.removals.get(data.security_id);
-    if (removal === undefined || !(removal.date < data.date)) return [];
+    const removal = removalBefore(context, data);
+    if (removal === undefined) return [];
     return [
       text`The security ${data.security_id} was removed from the cap table by ${removal.id} on ${removal.date}.`,
     ];
   },
-} satisfies CheckObject<{ security_id: string; date: string }>;
+} satisfies CheckObject<DatedSecurity>;
+
+/** An ID belongs to its first issuance across all security families. */
+export const uniqueSecurityId = {
+  id: "unique-security-id",
+  severity: "error",
+  description: "Each security ID is issued only once.",
+  run: (context, data) => {
+    const original = context.nodes.security.get(data.security_id);
+    // An earlier removal already has its own finding. Same-day reuse still needs this one.
+    if (original === undefined || removalBefore(context, data)) return [];
+    return [text`The security ID ${data.security_id} was already issued by ${original.issuance.writer?.id}.`];
+  },
+} satisfies CheckObject<DatedSecurity>;
+
+export const issuanceIdChecks = [noEarlierRemoval, uniqueSecurityId] as const;
 
 /**
  * Describe each family's issuance, acceptance, vesting, stock plan support and transactions that

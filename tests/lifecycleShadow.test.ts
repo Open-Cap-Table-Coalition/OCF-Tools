@@ -1,12 +1,12 @@
 import * as path from "path";
 import { afterEach, describe, it, expect, vi } from "vitest";
 import { TX_DESCRIPTORS } from "../ocf_validator/ocfMachine";
-import { noEarlierRemoval } from "../ocf_validator/validators/checks";
+import { noEarlierRemoval, uniqueSecurityId } from "../ocf_validator/validators/checks";
 import { defineValidator } from "../ocf_validator/validators/checkKit";
 import { collection, validatePackage, validateWithShadow } from "./helpers";
 import { disagreements, explain, expectShadowExplained, shadowRows, EXPLANATIONS, type ShadowRow } from "./lifecycleShadow";
 
-// Compare each family chart with no-earlier-removal and no-other-transactions. Check known
+// Compare each family chart with the issuance and removal checks. Check known
 // differences explicitly so a new disagreement fails the test.
 
 /** Compare a package's transactions in the order the validator processed them. */
@@ -253,8 +253,6 @@ describe("a disagreement nothing explains", () => {
     }
   });
 
-  // Issuing the same outstanding ID twice is rejected by the chart and accepted by the current
-  // validator. The comparison should flag that difference.
   const twice = [
     { id: "wi-1", object_type: "TX_WARRANT_ISSUANCE", security_id: "war-1", stakeholder_id: "sh-1", date: "2021-01-01" },
     { id: "wi-2", object_type: "TX_WARRANT_ISSUANCE", security_id: "war-1", stakeholder_id: "sh-1", date: "2021-02-01" },
@@ -286,17 +284,15 @@ describe("a disagreement nothing explains", () => {
     expect(collection(context, "equityCompensation")).toEqual([]);
   });
 
-  it("is left unexplained", () => {
-    const [row] = disagreements(shadowRows(twice));
-
-    expect(row).toMatchObject({ id: "wi-2", state: "outstanding", allowed: false, reported: [] });
-    expect(explain(row)).toBeUndefined();
+  it("agrees with the validator on a duplicate issuance", () => {
+    const rows = validatePackage(twice, [{ id: "sh-1" }]).shadow;
+    expect(rowsOf(rows, "wi-2")).toMatchObject([{ state: "outstanding", allowed: false, reported: ["unique-security-id"] }]);
+    expect(disagreements(shadowRows(twice))).toEqual([]);
   });
 
-  it("fails the test that validated the package", () => {
-    expect(() => expectShadowExplained(twice)).toThrow(
-      'TX_WARRANT_ISSUANCE "wi-2" on security "war-1" (outstanding): the chart refuses it, and the checks run on it (no-earlier-removal) reported nothing',
-    );
+  it("flags a duplicate issuance if the ID check misses it", () => {
+    vi.spyOn(uniqueSecurityId, "run").mockReturnValue([]);
+    expect(() => expectShadowExplained(twice)).toThrow(/the chart refuses it/);
     expect(() => validatePackage(twice, [{ id: "sh-1" }])).toThrow(/has no explanation for it/);
   });
 

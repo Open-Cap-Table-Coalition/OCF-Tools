@@ -113,23 +113,15 @@ describe("the order of the map", () => {
     expect(outstanding(nodes, "stockIssuances")).toEqual([]);
   });
 
-  it("puts a security_id issued again after its removal where the newer issuance belongs", () => {
-    // Reissuance puts the record at the end of the issuance order.
-    const again = { ...issuance("wi-3", "war-1"), date: "2021-06-01" };
+  it("preserves the first record and its position on a repeated issuance", () => {
+    const first = issuance("wi-1", "war-1");
     const second = issuance("wi-2", "war-2");
-    const nodes = apply(emptyNodes(), issuance("wi-1", "war-1"), second, on("TX_WARRANT_CANCELLATION", "wc-1", "war-1"), again);
+    const nodes = apply(emptyNodes(), first, second);
+    const duplicate = issuance("ci-1", "war-1", "TX_CONVERTIBLE_ISSUANCE");
+    expect(apply(nodes, duplicate)).toBe(nodes);
 
-    expect(outstanding(nodes, "warrantIssuances")).toEqual([second, again]);
-  });
-
-  it("holds one node per security_id, so a second issuance of an outstanding one replaces the first", () => {
-    // A second outstanding issuance replaces the first record. The old arrays retained both. Only
-    // the chart currently rejects the duplicate.
-    const again = { ...issuance("wi-2", "war-1"), stakeholder_id: "sh-2" };
-    const nodes = apply(emptyNodes(), issuance("wi-1", "war-1"), again);
-
-    expect(outstanding(nodes, "warrantIssuances")).toEqual([again]);
-    expect(nodes.security.size).toBe(1);
+    const removed = apply(nodes, on("TX_WARRANT_CANCELLATION", "wc-1", "war-1"));
+    expect(apply(removed, duplicate)).toBe(removed);
   });
 });
 
@@ -153,6 +145,41 @@ describe("a run's node map", () => {
       ["2021-01-01", ["SAFE-1", "SAFE-2"]],
       ["2021-06-01", ["SAFE-2"]],
     ]);
+  });
+
+  it.each([
+    "TX_EQUITY_COMPENSATION_ISSUANCE", "TX_PLAN_SECURITY_ISSUANCE", "TX_STOCK_ISSUANCE",
+    "TX_WARRANT_ISSUANCE", "TX_CONVERTIBLE_ISSUANCE",
+  ])("rejects a second issuance of the grant's ID by %s and preserves the first grant", (object_type) => {
+    const first = { ...issuance("grant-1", "sec-1", "TX_EQUITY_COMPENSATION_ISSUANCE"), quantity: "80" };
+    const duplicate = {
+      ...first, id: "duplicate", date: "2021-02-01", object_type, quantity: "500",
+      stock_class_id: "class-1", stock_legend_ids: [],
+    };
+    const context = validatePackage([first, duplicate], [{ id: "sh-1" }], [{ id: "class-1" }]);
+
+    expect(context.result).toContain("failed on duplicate");
+    expect(context.findings).toEqual([{
+      check: "unique-security-id", severity: "error", outcome: "failed",
+      subject: { object_type, id: "duplicate" },
+      message: "The security ID sec-1 was already issued by grant-1.",
+    }]);
+    expect(context.nodes.security.size).toBe(1);
+    expect(collection(context, "equityCompensation")).toEqual([first]);
+    expect(context.snapshots.map((day) => [day.date, day.equityCompensation[0].quantity])).toEqual([["2021-01-01", "80"]]);
+  });
+
+  it("keeps the removed record when a different family reuses its ID on the day of removal", () => {
+    const transfer = { ...cancellation, object_type: "TX_CONVERTIBLE_TRANSFER", id: "transfer" };
+    const duplicate = { ...grant, object_type: "TX_WARRANT_ISSUANCE", id: "duplicate", date: transfer.date };
+    const context = validatePackage([grant, transfer, duplicate], [{ id: "sh-1" }]);
+
+    expect(context.findings.map((finding) => [finding.subject.id, finding.check])).toEqual([["duplicate", "unique-security-id"]]);
+    expect(context.nodes.security.get(grant.security_id)).toMatchObject({
+      family: "convertibleIssuances",
+      issuance: { value: grant },
+      lifecycle: { value: "removed", writer: { id: transfer.id } },
+    });
   });
 
   it("starts each run from an empty map of its own", () => {

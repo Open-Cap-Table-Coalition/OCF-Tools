@@ -47,13 +47,9 @@ const subjectOf = (transaction: Applied): Subject => ({
   id: transaction.id,
 });
 
-/**
- * Copy the index and reuse other records. Move a reissued ID to the end so snapshots reflect
- * issuance order.
- */
-const withSecurity = (nodes: NodeMap, node: SecurityNode, { last = false } = {}): NodeMap => {
+/** Copy the index and reuse the other records. */
+const withSecurity = (nodes: NodeMap, node: SecurityNode): NodeMap => {
   const security = new Map(nodes.security);
-  if (last) security.delete(node.id);
   security.set(node.id, node);
   return { ...nodes, security };
 };
@@ -67,6 +63,7 @@ export function applyTransaction(nodes: NodeMap, descriptor: Descriptor, transac
   const writer = subjectOf(transaction);
 
   if (descriptor.effect === "append") {
+    if (nodes.security.has(transaction.security_id)) return nodes;
     // The descriptor selects the family for the parsed issuance. TypeScript needs that relationship
     // stated here.
     const node = {
@@ -76,7 +73,7 @@ export function applyTransaction(nodes: NodeMap, descriptor: Descriptor, transac
       lifecycle: written<LifecycleState>("outstanding", writer),
       issuance: written(transaction as unknown as Issuance, writer),
     } as SecurityNode;
-    return withSecurity(nodes, node, { last: true });
+    return withSecurity(nodes, node);
   }
 
   if (descriptor.effect === "remove") {
