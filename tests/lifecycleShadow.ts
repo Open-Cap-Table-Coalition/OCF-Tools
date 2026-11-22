@@ -149,6 +149,9 @@ export const EXPLANATIONS = {
   "the validator stopped before checking the issuance":
     "The validator stopped earlier. When we check the removed security, its issuance is missing.",
 
+  "wrong security family":
+    "The transaction's family does not match the security's issuance, so its issuance check rejects it.",
+
   /**
    * The date check allows vesting on the day of removal (#214). The chart follows processing order,
    * which puts cancellation first. Resolve this difference before using the chart to reject packages
@@ -158,11 +161,11 @@ export const EXPLANATIONS = {
     "no-earlier-removal ignores a removal dated the same day; the chart follows run order, which puts the removal first.",
 
   /**
-   * The removal index requires a single security_id and a removal effect. It misses consolidations
-   * and, at this point, removals under the older plan security names.
+   * A consolidation lists several security IDs and has no removal effect in the validator. The chart
+   * sees each removal, while the index misses them (#224).
    */
   "removed by a transaction the removals index doesn't hold":
-    "The chart removed the security on a consolidation or a plan security removal, which no-earlier-removal's index leaves out.",
+    "The chart removed the security on a consolidation, which no-earlier-removal's index leaves out.",
 } as const;
 
 export type Explanation = keyof typeof EXPLANATIONS;
@@ -172,7 +175,12 @@ export function explain(row: ShadowRow): Explanation | undefined {
   const refusedInSilence = !row.allowed && row.reported.length === 0;
   if (!refusedInSilence || row.state !== "removed" || row.removedBy === undefined) return undefined;
 
-  if (!row.family || !lifecycleStep(row.family, "outstanding", row.object_type).allowed) return undefined;
+  if (!row.family) return undefined;
+  const descriptor = TX_DESCRIPTORS[row.object_type as keyof typeof TX_DESCRIPTORS];
+  if (!lifecycleFamilies(descriptor).includes(row.family)) {
+    return row.issuanceCheck === undefined ? undefined : "wrong security family";
+  }
+  if (!lifecycleStep(row.family, "outstanding", row.object_type).allowed) return undefined;
   if (row.runs.length === 0 && row.indexedRemoval === row.removedBy) {
     if (row.issuanceCheck === "failed") return "removed, and neither check runs on it";
     if (row.issuanceCheck === "replayed") return "the validator stopped before checking the issuance";
@@ -181,8 +189,7 @@ export function explain(row: ShadowRow): Explanation | undefined {
     const indexedDate = row.indexedRemoval?.date;
     if (indexedDate !== undefined && indexedDate < row.date) return undefined;
     if (indexedDate === row.date && row.removedBy.date === row.date) return "removed earlier the same day";
-    const type = row.removedBy.object_type;
-    if (type === "TX_STOCK_CONSOLIDATION" || type.startsWith("TX_PLAN_SECURITY_")) {
+    if (row.removedBy.object_type === "TX_STOCK_CONSOLIDATION") {
       return "removed by a transaction the removals index doesn't hold";
     }
   }

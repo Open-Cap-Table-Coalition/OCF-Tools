@@ -15,8 +15,10 @@ import {
   type DescriptorTable,
   type VestingFamily,
 } from "../ocf_validator/ocfMachine";
-import { defineValidator, type CheckObject } from "../ocf_validator/validators/checkKit";
+import { defineValidator, underOlderName, type CheckObject } from "../ocf_validator/validators/checkKit";
+import type { OLDER_NAMES } from "../ocf_validator/constants/constants";
 import { familyChecksFor } from "../ocf_validator/validators/checks";
+import type { TransactionFor } from "./ocf-input";
 import type { Check, GradedValidator, LifecycleWord, OcfMachineContext } from "./validator";
 import type { Expect, Equal } from "./type-assert";
 
@@ -260,3 +262,36 @@ const _noneSpecNoFamilies = defineValidator({ transaction: "TX_CONVERTIBLE_ACCEP
 // The list of vesting families must match the issuance types that support vesting terms.
 type _VestingFamilies = Expect<Equal<(typeof VESTING_FAMILIES)[number], VestingFamily>>;
 type _ConvertiblesDontVest = Expect<Equal<Extract<VestingFamily, "convertibleIssuances">, never>>;
+
+// Older transaction names
+
+type OlderName = keyof typeof OLDER_NAMES;
+
+// Each older name must have a payload that the corresponding current validator accepts.
+type _OlderNamesCarryTheirTypesPayload = Expect<
+  Equal<
+    { [K in OlderName]: TransactionFor<K> extends TransactionFor<(typeof OLDER_NAMES)[K]> ? true : false }[OlderName],
+    true
+  >
+>;
+
+// Older names keep the current descriptor's effect and lifecycle.
+type _OlderNamesShareEffect = Expect<
+  Equal<
+    { [K in OlderName]: Equal<(typeof TX_DESCRIPTORS)[K]["effect"], (typeof TX_DESCRIPTORS)[(typeof OLDER_NAMES)[K]]["effect"]> }[OlderName],
+    true
+  >
+>;
+type _OlderNamesShareWord = Expect<
+  Equal<
+    { [K in OlderName]: Equal<(typeof TX_DESCRIPTORS)[K]["lifecycle"], (typeof TX_DESCRIPTORS)[(typeof OLDER_NAMES)[K]]["lifecycle"]> }[OlderName],
+    true
+  >
+>;
+
+// The older plan security name accepts the equity compensation retraction validator.
+const _equityCompensationRetraction = defineValidator({ transaction: "TX_EQUITY_COMPENSATION_RETRACTION", effect: "remove", collection: "equityCompensation", checks: [] });
+const _underOlderName = underOlderName(_equityCompensationRetraction, "TX_PLAN_SECURITY_RETRACTION");
+type _FiledUnderOlderName = Expect<Equal<(typeof _underOlderName)["transaction"], "TX_PLAN_SECURITY_RETRACTION">>;
+// @ts-expect-error The warrant retraction payload differs from an equity compensation retraction.
+const _underUnrelatedName = underOlderName(_equityCompensationRetraction, "TX_WARRANT_RETRACTION");

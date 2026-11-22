@@ -1,7 +1,15 @@
 import type { OCFStockIssuance } from "@opencaptablecoalition/ocf-types";
+import type { OcfTransaction, TransactionFor } from "../../types/ocf-input";
 import type { DeepReadonly, OcfMachineContext } from "../../types/validator";
 import type { CollectionKey, TxKey } from "../ocfMachine";
+import { currentName, type CurrentTxKey } from "../constants/constants";
 import { text, type CheckObject } from "./checkKit";
+
+/** Include older names when checking the type of a transaction in the package history. */
+export const isOfType = <K extends CurrentTxKey>(
+  ele: DeepReadonly<OcfTransaction>,
+  type: K,
+): ele is Extract<DeepReadonly<OcfTransaction>, DeepReadonly<TransactionFor<K>>> => currentName(ele.object_type) === type;
 
 /**
  * The stakeholder named by the transaction's `stakeholder_id` is in the
@@ -62,42 +70,19 @@ export const noEarlierRemoval = {
 } satisfies CheckObject<{ security_id: string; date: string }>;
 
 /**
- * What the shared checks need to know about a family: its name as used in
- * messages ("convertible"), its collection, its issuance and acceptance
- * transaction types, whether its securities can vest, whether they can be
- * granted from a stock plan, and which of its transactions leave a security
- * outstanding.
- *
- * The types catch mix-ups: `issuance` must be the transaction type that
- * `collection` actually holds, `acceptance` must be a real transaction type,
- * `vests` must be true exactly when that issuance type has vesting terms
- * (`vesting_terms_id`, or a v2 grant's `vesting_template_id`), and
- * `returnsToPool` must be true exactly when it can name a stock plan
- * (`stock_plan_id`), so a typo or a wrong flag won't compile.
- *
- * `leavesOutstanding` lists the family's transactions that act on a security
- * without retiring it, so that it's still outstanding under the same
- * `security_id` afterwards. An equity compensation exercise or release has a
- * quantity but no balance security, so after a partial one the rest stays on
- * the original security, and a repricing only changes the price. The other
- * families' exercises, conversions, and transfers retire the security, so
- * they leave this out.
- *
- * `deprecatedIssuance` is an older name OCF still accepts for the family's
- * issuance (equity compensation's TX_PLAN_SECURITY_ISSUANCE). The machine
- * doesn't process transactions under it, so a security issued that way is
- * never outstanding to the validator; issuance-exists says that's the reason.
+ * Describe each family's issuance, acceptance, vesting, stock plan support and transactions that
+ * keep it outstanding. The shared checks use these settings to apply the same rule to matching
+ * payloads under either transaction name.
  */
 type Family = {
   [C in CollectionKey]: {
     name: string;
     collection: C;
-    issuance: OcfMachineContext[C][number]["object_type"];
-    acceptance: Extract<TxKey, `TX_${string}_ACCEPTANCE`>;
+    issuance: Extract<OcfMachineContext[C][number]["object_type"], CurrentTxKey>;
+    acceptance: Extract<CurrentTxKey, `TX_${string}_ACCEPTANCE`>;
     vests: HasKey<OcfMachineContext[C][number], "vesting_terms_id" | "vesting_template_id">;
     returnsToPool: HasKey<OcfMachineContext[C][number], "stock_plan_id">;
-    leavesOutstanding?: readonly TxKey[];
-    deprecatedIssuance?: OcfMachineContext[C][number]["object_type"];
+    leavesOutstanding?: readonly CurrentTxKey[];
   };
 }[CollectionKey];
 
@@ -144,24 +129,11 @@ export function familyChecksFor({
   vests,
   returnsToPool,
   leavesOutstanding = [],
-  deprecatedIssuance,
 }: Family) {
   /**
-   * The issuance named by the transaction's `security_id` is outstanding as of
-   * the transaction's date. Passes if the family's collection holds a record
-   * with that `security_id`. Matching on `security_id` alone is enough because
-   * the collection only ever holds issuances, which tests/ocfMachine.test.ts
-   * checks.
-   *
-   * When there's no match, the message says why, worked out from the package's
-   * full transaction history: the security was never issued, it's only issued
-   * after this transaction, or it was issued on or before this date but is no
-   * longer outstanding. The reason and any date it shows come from one history
-   * record, preferring a match dated on or before the transaction over a later
-   * one. A security issued only under the family's deprecated issuance name
-   * gets its own message, since the machine never processes that issuance.
-   *
-   * A transaction with no date fails: there's no date to be outstanding on.
+   * Look for an outstanding issuance in this family. If it is missing, use the package history to
+   * distinguish a missing issuance, one dated later and one already removed. Prefer an issuance on
+   * or before the transaction date when reporting the reason.
    */
   const issuanceExists = {
     id: "issuance-exists",
@@ -188,29 +160,20 @@ export function familyChecksFor({
       });
       if (issuanceExists) return messages;
 
-      // The object_type comparison comes first because it tells TypeScript this
-      // is an issuance, which is what allows reading `security_id` and `date` next.
+      // Check the transaction type before accessing fields specific to an issuance.
       const { transactions } = context.ocfPackageContent;
       let firstIssuanceDate: string | undefined;
       let onOrBeforeDate: string | undefined;
-      let issuedUnderDeprecatedName = false;
       transactions.forEach((ele) => {
-        if (ele.object_type === issuance && ele.security_id === data.security_id) {
+        if (isOfType(ele, issuance) && ele.security_id === data.security_id) {
           if (firstIssuanceDate === undefined) firstIssuanceDate = ele.date;
           if (onOrBeforeDate === undefined && ele.date <= data.date) {
             onOrBeforeDate = ele.date;
           }
         }
-        if (ele.object_type === deprecatedIssuance && ele.security_id === data.security_id) {
-          issuedUnderDeprecatedName = true;
-        }
       });
 
-      if (firstIssuanceDate === undefined && issuedUnderDeprecatedName) {
-        messages.push(
-          text`The ${name} issuance referenced by security_id ${data.security_id} uses the deprecated type ${deprecatedIssuance}, which the validator doesn't process.`,
-        );
-      } else if (firstIssuanceDate === undefined) {
+      if (firstIssuanceDate === undefined) {
         messages.push(
           text`No ${name} issuance with security_id ${data.security_id} appears in the package.`,
         );
@@ -271,31 +234,20 @@ export function familyChecksFor({
       const messages: string[] = [];
       const { transactions } = context.ocfPackageContent;
 
-      // One finding for each other transaction on this security_id dated on or
-      // before this one. Many transaction types have no security_id field at
-      // all, so it checks for the field first; a transaction without one can't
-      // refer to this security. In a family whose securities can vest, vesting
-      // transactions are skipped too: they only record the security's vesting,
-      // and a security that vests before it's exercised or cancelled is the
-      // ordinary case. So are the family's transactions that leave the
-      // security outstanding: after a partial exercise, the rest can still be
-      // exercised, cancelled, or transferred. In a family whose securities can
-      // come from a stock plan, a return to pool is skipped as well: it records
-      // where a cancellation's shares went, usually on the same day. The
-      // transaction being validated is in the package history too, so it's
-      // skipped. It's matched on its type as well as its id: nothing makes ids
-      // unique across types, so matching on id alone would also skip another
-      // type's transaction that shares it.
+      // Report each earlier or same-day transaction that conflicts with this one. Use both object
+      // type and ID to exclude the transaction itself. Apply family exemptions under current and
+      // older names, including vesting where the family supports it.
       transactions.forEach((ele) => {
+        const type = currentName(ele.object_type);
         if (
           "security_id" in ele &&
           ele.security_id === data.security_id &&
           ele.date <= data.date &&
-          ele.object_type !== issuance &&
-          ele.object_type !== acceptance &&
-          !(vests && (VESTING_TRANSACTIONS as readonly string[]).includes(ele.object_type)) &&
-          !(leavesOutstanding as readonly string[]).includes(ele.object_type) &&
-          !(returnsToPool && ele.object_type === RETURN_TO_POOL) &&
+          type !== issuance &&
+          type !== acceptance &&
+          !(vests && (VESTING_TRANSACTIONS as readonly string[]).includes(type)) &&
+          !(leavesOutstanding as readonly string[]).includes(type) &&
+          !(returnsToPool && type === RETURN_TO_POOL) &&
           !(ele.object_type === data.object_type && ele.id === data.id)
         ) {
           messages.push(

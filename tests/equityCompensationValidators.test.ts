@@ -710,10 +710,11 @@ describe("issuance-exists reports why the referenced issuance is unavailable", (
     );
   });
 
-  it("names the deprecated type when the security was issued only as a TX_PLAN_SECURITY_ISSUANCE", () => {
+  it("counts an issuance under the older name TX_PLAN_SECURITY_ISSUANCE as the security's issuance", () => {
+    // The message should explain that this security was issued and is no longer outstanding.
     expectSoleCause(
-      contextWith({ transactions: [{ ...issuanceRecord("sec1"), object_type: "TX_PLAN_SECURITY_ISSUANCE" }] }),
-      "The equity compensation issuance referenced by security_id sec1 uses the deprecated type TX_PLAN_SECURITY_ISSUANCE, which the validator doesn't process.",
+      contextWith({ transactions: [{ ...issuanceRecord("sec1", "2020-01-01"), object_type: "TX_PLAN_SECURITY_ISSUANCE" }] }),
+      "The equity compensation issuance referenced by security_id sec1 (dated 2020-01-01) is not outstanding as of this transaction's date.",
     );
   });
 
@@ -731,16 +732,15 @@ describe("issuance-exists reports why the referenced issuance is unavailable", (
     );
   });
 
-  it("fails a whole-package run that releases a security issued as a TX_PLAN_SECURITY_ISSUANCE, saying why", () => {
-    const deprecatedIssuance = { id: "psi-1", object_type: "TX_PLAN_SECURITY_ISSUANCE", security_id: "rsu-1", stakeholder_id: "sh1", quantity: "1000", date: "2020-01-01" };
+  it("passes a whole-package run that releases a security issued as a TX_PLAN_SECURITY_ISSUANCE", () => {
+    // The older issuance makes the grant outstanding before the release.
+    const olderNameIssuance = { id: "psi-1", object_type: "TX_PLAN_SECURITY_ISSUANCE", security_id: "rsu-1", stakeholder_id: "sh1", quantity: "1000", date: "2020-01-01" };
     const release = { id: "rel-1", object_type: "TX_EQUITY_COMPENSATION_RELEASE", security_id: "rsu-1", quantity: "400", resulting_security_ids: [], date: "2021-01-01" };
 
-    const { result, findings } = validatePackage([deprecatedIssuance, release], [{ id: "sh1" }]);
-    expect(result).toContain("failed on rel-1");
-    expect(findings).toHaveLength(1);
-    expect(findings[0].message).toBe(
-      "The equity compensation issuance referenced by security_id rsu-1 uses the deprecated type TX_PLAN_SECURITY_ISSUANCE, which the validator doesn't process.",
-    );
+    const { result, findings, equityCompensation } = validatePackage([olderNameIssuance, release], [{ id: "sh1" }]);
+    expect(result).toBe("The validation of the OCF package for Test Co is complete and the package appears valid.");
+    expect(findings).toEqual([]);
+    expect(equityCompensation).toEqual([olderNameIssuance]);
   });
 });
 

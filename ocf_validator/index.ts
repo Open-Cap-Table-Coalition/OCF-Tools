@@ -1,7 +1,7 @@
 import { createActor, getInitialSnapshot } from "xstate";
 import { OcfPackageContent, readOcfPackage } from "../read_ocf_package";
 import type { Finding } from "../types/finding";
-import constants from "./constants/constants";
+import { transactionPriority } from "./constants/constants";
 import { errorResult, malformedResult, ocfMachine, type OcfMachineContext, type OcfMachineEvent } from "./ocfMachine";
 
 export const ocfValidator = (packagePath: string): OcfMachineContext => validateOcfPackage(readOcfPackage(packagePath));
@@ -26,17 +26,13 @@ export const validateOcfPackage = (
     };
   }
 
-  // Same-day sort tiebreaker. `transaction_types` is pinned to cover every
-  // transaction type (see types/transaction-types.assert.ts), so an added OCF
-  // type forces an explicit sort position rather than silently sorting to the
-  // front via `indexOf === -1`. Widened to `readonly string[]` so `indexOf`
-  // accepts the parsed `object_type`, which is a plain string.
-  const transactionTypes: readonly string[] = constants.transaction_types;
-
-  // Dates are compared the way the checks compare them, with < and <=, so a
-  // transaction a check sees as earlier has already run. localeCompare can
-  // order a noncanonical date differently: it puts 2021-06_01 before 2021-06-01.
-  const sortedTransactions = transactions.sort((a: { date: string; object_type: string }, b: { date: string; object_type: string }) => Number(a.date > b.date) - Number(a.date < b.date) || transactionTypes.indexOf(a.object_type) - transactionTypes.indexOf(b.object_type));
+  // Compare dates the same way as the history checks. On the same day, either spelling of a
+  // transaction has the same priority. Keep the original spelling when dispatching it.
+  const sortedTransactions = transactions.sort((a, b) => {
+    if (a.date < b.date) return -1;
+    if (a.date > b.date) return 1;
+    return transactionPriority(a.object_type) - transactionPriority(b.object_type);
+  });
 
   // `ocfMachine` is already a configured machine (built with setup()), so it is
   // passed straight to createActor — no createMachine() wrapping.
