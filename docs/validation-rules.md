@@ -14,7 +14,7 @@ To add an entry, put it under the section it belongs to. If we have not decided 
 
 ## Stock named as a balance or result
 
-These rules cover the stock a transfer, cancellation, repurchase, conversion or reissuance names in `balance_security_id` or `resulting_security_ids`. The code is in [`outputs.ts`](../ocf_validator/validators/stock/outputs.ts) and the tests are in [`stockCancellation.test.ts`](../tests/stockCancellation.test.ts).
+These rules cover the stock a transfer, cancellation, repurchase, conversion or reissuance names in `balance_security_id` or `resulting_security_ids`. The tests are in [`stockCancellation.test.ts`](../tests/stockCancellation.test.ts).
 
 - **It must be issued the same day** as the transaction that names it.
 - **It can be removed earlier that day.** Stock issued and cancelled on the transaction's date still counts, because removals run first. (#247)
