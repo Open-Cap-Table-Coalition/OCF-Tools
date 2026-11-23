@@ -1,4 +1,4 @@
-import {OcfMachineContext} from '../../ocfMachine';
+import { OcfMachineContext } from "../../../types/validator";
 
 /*
 CURRENT CHECKS:

@@ -29,7 +29,7 @@ describe("a package with two unrelated mistakes", () => {
         message: "No stock issuance with security_id stock-that-was-never-issued appears in the package.",
       },
     ]);
-    expect(context.report).toEqual([]);
+    expect(context).not.toHaveProperty("report");
   });
 
   it("counts the root errors and the blocked check separately in result", () => {

@@ -1,20 +1,19 @@
-import type { OCFStockIssuance } from "@opencaptablecoalition/ocf-types";
-import type { LegacyContext } from "../../ocfMachine";
-import { fieldAt, securityAt, securityField } from "../../nodes";
+import { securityField } from "../../nodes";
+import type { ReadField } from "../checkKit";
 
-/**
- * Find the stock a transaction names as its balance or result. Stock removals run before transfers
- * and repurchases on the same day, so stock issued and removed on the transaction's date still
- * counts. Stock removed after an earlier issuance does not. A retraction voids the issuance, so
- * retracted stock never counts. This lists one issuance or none.
- */
-export const namedStock = (context: LegacyContext, securityId: unknown, date: unknown): OCFStockIssuance[] => {
-  const stock = securityAt(context.nodes, "stockIssuances", securityId);
-  const issued = stock?.issuance.value;
-  if (!stock || !issued) return [];
-  if (stock.lifecycle.value === "outstanding") return [issued];
-  if (stock.lifecycle.value !== "removed" || stock.lifecycle.writer?.object_type === "TX_STOCK_RETRACTION") return [];
-  // Read the removal the way the checks do, so an older saved record still gives its date.
-  const removal = fieldAt(context.nodes, securityField("stockIssuances", securityId, "removal"), context.removals)?.value;
-  return removal?.date === date && issued.date === date ? [issued] : [];
-};
+export const stockField = (id: string) => securityField("stockIssuances", id, "issuance");
+const lifecycleField = (id: string) => securityField("stockIssuances", id, "lifecycle");
+const removalField = (id: string) => securityField("stockIssuances", id, "removal");
+
+export const outputReads = (id: string) => [stockField(id), lifecycleField(id), removalField(id)];
+
+/** An output issued and removed today still counts unless its issuance was retracted. */
+export function namedStock(read: ReadField, id: string, date: string) {
+  const issued = read(stockField(id));
+  if (!issued) return;
+  const lifecycle = lifecycleField(id);
+  const state = read(lifecycle);
+  if (state === "outstanding") return issued;
+  if (state === "removed" && issued.date === date && read(removalField(id))?.date === date &&
+      read.writer(lifecycle)?.object_type !== "TX_STOCK_RETRACTION") return issued;
+}

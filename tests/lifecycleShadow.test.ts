@@ -1,6 +1,6 @@
 import * as path from "path";
 import { afterEach, describe, it, expect, vi } from "vitest";
-import { TX_DESCRIPTORS } from "../ocf_validator/ocfMachine";
+import { TX_DESCRIPTORS } from "../ocf_validator/validators";
 import { noEarlierRemoval, uniqueSecurityId } from "../ocf_validator/validators/checks";
 import { defineValidator } from "../ocf_validator/validators/checkKit";
 import { collection, validatePackage, validateWithShadow } from "./helpers";
@@ -127,7 +127,7 @@ describe("where the chart and the checks disagree", () => {
     ]);
   });
 
-  const invalid = { ...grant, object_type: "TX_STOCK_ISSUANCE", id: "bad", security_id: "other", stock_legend_ids: [], stakeholder_id: "missing" };
+  const invalid = { ...grant, object_type: "TX_UNKNOWN", id: "bad", security_id: "other", stock_legend_ids: [], stakeholder_id: "missing" };
   const accept = { ...grant, id: "accept", object_type: "TX_EQUITY_COMPENSATION_ACCEPTANCE", date: "2020-02-01" };
   const retract = { ...grantCancellation, object_type: "TX_EQUITY_COMPENSATION_RETRACTION" };
 
@@ -265,7 +265,7 @@ describe("a disagreement nothing explains", () => {
       ...original, checks: [exists, { ...history, run: () => ["The rule changed."] }],
     });
     try {
-      const invalid = { ...issuance, object_type: "TX_STOCK_ISSUANCE", id: "bad", security_id: "other", stock_legend_ids: [], stakeholder_id: "missing", date: "2020-01-01" };
+      const invalid = { ...issuance, object_type: "TX_UNKNOWN", id: "bad", security_id: "other", stock_legend_ids: [], stakeholder_id: "missing", date: "2020-01-01" };
       expect(() => validatePackage([invalid, issuance, cancellation], [{ id: "sh-1" }])).toThrow(/the chart allows it, and no-other-transactions reported it/);
     } finally {
       TX_DESCRIPTORS.TX_CONVERTIBLE_CANCELLATION = original;

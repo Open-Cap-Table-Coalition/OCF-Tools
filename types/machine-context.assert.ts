@@ -1,5 +1,5 @@
 /** The build checks the public context and its security records. */
-import type { LegacyContext, OcfMachineContext } from "../ocf_validator/ocfMachine";
+import type { OcfMachineContext } from "./validator";
 import type { Field, NodeMap, PlanNode, SecurityNode } from "../ocf_validator/nodes";
 import type { outstanding } from "../index";
 import type { LifecycleState } from "../ocf_validator/lifecycle";
@@ -29,8 +29,6 @@ type _Convertible = Expect<Equal<Outstanding<"convertibleIssuances">, OCFConvert
 type _Warrant = Expect<Equal<Outstanding<"warrantIssuances">, OCFWarrantIssuance[]>>;
 type _EquityComp = Expect<Equal<Outstanding<"equityCompensation">, OCFEquityCompensationIssuance[]>>;
 
-// Legacy stock validators still receive the stock issuance array.
-type _LegacyStock = Expect<Equal<LegacyContext["stockIssuances"], OCFStockIssuance[]>>;
 
 // A caller can read a field's value, writer and failures. Only the reducer updates them.
 type _FieldKeys = Expect<Equal<keyof Field<unknown>, "value" | "writer" | "defects">>;

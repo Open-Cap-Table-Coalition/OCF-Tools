@@ -13,7 +13,7 @@ import { readOcfPackage } from "../read_ocf_package";
 import { ocfValidator } from "../ocf_validator";
 import { ocfSnapshot } from "../ocf_snapshot";
 import type { OcfPackageContent } from "../read_ocf_package";
-import type { OcfMachineContext } from "../ocf_validator/ocfMachine";
+import type { OcfMachineContext } from "./validator";
 import type { Snapshot } from "./snapshot";
 import type { Expect, Equal } from "./type-assert";
 

@@ -1,5 +1,6 @@
 import { afterEach, describe, it, expect, vi } from "vitest";
-import { errorResult, TX_DESCRIPTORS } from "../ocf_validator/ocfMachine";
+import { errorResult } from "../ocf_validator/ocfMachine";
+import { TX_DESCRIPTORS } from "../ocf_validator/validators";
 import { baseContext, validatePackage, collection } from "./helpers";
 
 // ---------------------------------------------------------------------------
@@ -107,16 +108,12 @@ describe("a transaction on a security an earlier transaction removed", () => {
     expect(context.snapshots.map((s) => s.date)).toEqual(["2021-01-01", "2021-06-01", "2021-07-01"]);
   });
 
-  it("still stops the run on a later TX_STOCK_ISSUANCE on it, which is a stock failure", () => {
-    // A legacy stock issuance stops the run if its earlier-removal check fails.
-    const transaction = { id: "si-1", object_type: "TX_STOCK_ISSUANCE", security_id: "safe-1", stakeholder_id: "sh-1", date: "2021-07-01" };
+  it("continues after a stock issuance tries to reuse a removed security", () => {
+    const transaction = { id: "si-1", object_type: "TX_STOCK_ISSUANCE", security_id: "safe-1", stakeholder_id: "sh-1", stock_legend_ids: [], date: "2021-07-01" };
     const context = validateAfter(transaction);
-
-    expect(context.findings).toEqual([removed(transaction)]);
-    expect(context.result).toBe(
-      `The validation of the OCF package for Test Co failed on ${transaction.id}: ${JSON.stringify([removed(transaction)], null, 2)}`,
-    );
-    expect(context.snapshots.map((s) => s.date)).toEqual(["2021-01-01", "2021-06-01"]);
+    expect(context.findings).toContainEqual(removed(transaction));
+    expect(context.snapshots.at(-1)?.date).toBe(transaction.date);
+    expect(context.result).toContain("is complete");
   });
 
   it("fails a later release under the older name TX_PLAN_SECURITY_RELEASE through the release's own checks", () => {

@@ -1,7 +1,7 @@
 /** The build checks record identity and the value types of fields. */
 import { readNodeField, withNodeField, type Field, type FieldKey, type FieldValue, type NodeBase, type NodeMaps } from "../ocf_validator/node";
 import { fieldAt, planField, securityField, isSecurityFamily, type Draw, type NodeMap, type PlanNode, type SecurityNode } from "../ocf_validator/nodes";
-import type { CollectionElement } from "../ocf_validator/ocfMachine";
+import type { CollectionElement } from "../ocf_validator/validators";
 import type { ReadField } from "../ocf_validator/validators/checkKit";
 import type { Equal, Expect } from "./type-assert";
 

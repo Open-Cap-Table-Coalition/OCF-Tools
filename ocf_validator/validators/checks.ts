@@ -4,7 +4,7 @@ import type { DeepReadonly } from "../../types/validator";
 import { securityField } from "../nodes";
 import { isStockPlanId } from "../stockPlan";
 import { isNegative, isNumeric } from "../numeric";
-import type { CollectionElement, CollectionKey, TxKey } from "../ocfMachine";
+import type { CollectionElement, CollectionKey, TxKey } from "../validators";
 import { currentName, type CurrentTxKey } from "../constants/constants";
 import { text, type CheckContext, type CheckObject, type ReadField } from "./checkKit";
 
@@ -67,22 +67,27 @@ export const destinationPlan = {
   run: (_context, data) => isStockPlanId(data.stock_plan_id) ? [] : ["The stock_plan_id must be a nonempty string."],
 } satisfies CheckObject<{ stock_plan_id: string }>;
 
-type PackageIndex = { transactions: object; bySecurity: Map<unknown, DeepReadonly<OcfTransaction>[]> };
+type PackageIndex = {
+  transactions: object;
+  bySecurity: Map<unknown, DeepReadonly<OcfTransaction>[]>;
+  splits: Map<string, DeepReadonly<TransactionFor<"TX_STOCK_CLASS_SPLIT">>>;
+};
 const packageIndexes = new WeakMap<object, PackageIndex>();
 
 /**
- * List the package's transactions on one security, in package order. Index the package once per run
+ * Index security histories and stock splits in package order once per run
  * so a check does not scan every transaction. The index lasts as long as the context's removals
  * index, which is built from the package when a run or test context starts. Like that index, it
  * does not see edits made to the package after that. Validate an edited package with a new context.
  * A context given a different transactions list indexes that list.
  */
-export function transactionsOn(context: DeepReadonly<CheckContext>, securityId: unknown): readonly DeepReadonly<OcfTransaction>[] {
+function packageIndex(context: DeepReadonly<CheckContext>): PackageIndex {
   const { transactions } = context.ocfPackageContent;
   let index = packageIndexes.get(context.removals);
   if (index?.transactions !== transactions) {
-    index = { transactions, bySecurity: new Map() };
+    index = { transactions, bySecurity: new Map(), splits: new Map() };
     for (const ele of transactions) {
+      if (ele?.object_type === "TX_STOCK_CLASS_SPLIT" && !index.splits.has(ele.id)) index.splits.set(ele.id, ele);
       const id = (ele as { security_id?: unknown } | null)?.security_id;
       const listed = index.bySecurity.get(id);
       if (listed) listed.push(ele);
@@ -90,8 +95,13 @@ export function transactionsOn(context: DeepReadonly<CheckContext>, securityId: 
     }
     packageIndexes.set(context.removals, index);
   }
-  return index.bySecurity.get(securityId) ?? [];
+  return index;
 }
+
+export const transactionsOn = (context: DeepReadonly<CheckContext>, securityId: unknown): readonly DeepReadonly<OcfTransaction>[] =>
+  packageIndex(context).bySecurity.get(securityId) ?? [];
+
+export const stockClassSplit = (context: DeepReadonly<CheckContext>, id: string) => packageIndex(context).splits.get(id);
 
 type DatedSecurity = { security_id: string; date: string };
 

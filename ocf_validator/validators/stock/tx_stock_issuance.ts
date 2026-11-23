@@ -1,83 +1,67 @@
-import { LegacyContext } from "../../ocfMachine";
+import type { OCFStockIssuance } from "@opencaptablecoalition/ocf-types";
 import { isStockPlanId } from "../../stockPlan";
-import { isQuantity } from "../../numeric";
+import { defineValidator, text, type CheckObject } from "../checkKit";
+import { countable, issuanceIdChecks, stakeholderExists } from "../checks";
 
-/*
-CURRENT CHECKS:
-A stakeholder with a corresponding stakeholder ID must exist
-A stock class with corresponding stock class ID must exist
-If a stock legend ID included, a stock legend with a corresponding stock legend ID must exist.
-Stock issued from a plan must have a countable, nonnegative share quantity.
+const stockClass = {
+  id: "stock-class-exists",
+  severity: "error",
+  description: "The stock class named by the issuance exists.",
+  run: (context, data) =>
+    context.ocfPackageContent.stockClasses.some((item: { id: string }) => item.id === data.stock_class_id)
+      ? []
+      : [text`Stock class ${data.stock_class_id} was not found.`],
+} satisfies CheckObject<OCFStockIssuance>;
 
-MISSING CHECKS:
-Is date of stock issuance on or after the date of incorporation and the date of stock class creation?
-The quantity of the Stock issuance is equal to or less than the current number of shares authorised at class level (If applicable) minus any outstanding Stock issuances
-*/
+const legends = {
+  id: "stock-legends-exist",
+  severity: "error",
+  description: "Every named stock legend exists.",
+  run: (context, data) => {
+    if (!Array.isArray(data.stock_legend_ids)) return ["Expected stock_legend_ids to be a list."];
+    return data.stock_legend_ids.flatMap((id) =>
+      context.ocfPackageContent.stockLegends.some((item: { id: string }) => item.id === id)
+        ? []
+        : [text`Stock legend ${id} was not found.`],
+    );
+  },
+} satisfies CheckObject<OCFStockIssuance>;
 
-// Refrence for tx_stock_issuance transaction: https://open-cap-table-coalition.github.io/Open-Cap-Format-OCF/schema_markdown/schema/objects/transactions/issuance/StockIssuance/
+const plan = {
+  id: "stock-plan-id",
+  severity: "error",
+  description: "A stock issuance that names a plan supplies a nonempty plan ID.",
+  run: (_context, data) =>
+    data.stock_plan_id == null || isStockPlanId(data.stock_plan_id)
+      ? []
+      : ["The stock_plan_id must be a nonempty string."],
+} satisfies CheckObject<OCFStockIssuance>;
 
-const valid_tx_stock_issuance = (context: LegacyContext, event: any, isGuard: Boolean = false) => {
-  let validity = false;
-  const { stakeholders, stockClasses, stockLegends } = context.ocfPackageContent;
-  let report: any = {transaction_type: "TX_STOCK_ISSUANCE", transaction_id: event.data.id, transaction_date: event.data.date};
-  
-  // Check if the stakeholder referenced by the transaction exists in the stakeholder file.
-  let stakeholder_validity = false;
-  stakeholders.forEach((ele: any) => {
-    if (ele.id === event.data.stakeholder_id) {
-      stakeholder_validity = true;
-      report.stakeholder_validity = true
-    }
-  });
-  if (!stakeholder_validity) {
-    report.stakeholder_validity = false
-  }
+const gaps = [
+  {
+    id: "issuance-date",
+    severity: "error",
+    description: "Issuance follows incorporation and stock class creation.",
+  },
+  {
+    id: "authorized-shares",
+    severity: "error",
+    description: "Outstanding stock stays within the authorized share count.",
+  },
+] as const;
 
-  // Check if the stock class referenced by the transaction exists in the stock class file.
-  let stockClass_validity = false;
-  stockClasses.forEach((ele: any) => {
-    if (ele.id === event.data.stock_class_id) {
-      stockClass_validity = true;
-      report.stockClass_validity = true
-    }
-  });
-  if (!stockClass_validity) {
-    report.stockClass_validity = false
-  }
-
-  // Check if the stock legend(s) referenced by the transaction exists in the stock legend file.
-  let stockLegend_validity = false;
-  if (event.data.stock_legend_ids?.length === 0) {
-    stockLegend_validity = true;
-    report.stockLegend_validity = true;
-  } else {
-    event.data.stock_legend_ids?.forEach((ele: any) => {
-      stockLegend_validity = false;
-      stockLegends.forEach((ele2: any) => {
-        if (ele2.id === ele) {
-          stockLegend_validity = true;
-          report.stockLegend_validity = true;
-        }
-      });
-    });
-  }
-  if (!stockLegend_validity) {
-    report.stockLegend_validity = false;
-  }
-
-  const chargesPlan = isStockPlanId(event.data.stock_plan_id);
-  const planIdValid = event.data.stock_plan_id == null || chargesPlan;
-  if (!planIdValid) report.plan_id_validity = false;
-  const quantityValid = !chargesPlan || isQuantity(event.data.quantity);
-  if (chargesPlan) report.plan_quantity_validity = quantityValid;
-
-  if (stockClass_validity && stakeholder_validity && stockLegend_validity && planIdValid && quantityValid) {
-    validity = true;
-  }
-
-  const result = isGuard ? validity : report;
-  
-  return result;
-};
-
-export default valid_tx_stock_issuance;
+export const TX_STOCK_ISSUANCE = defineValidator({
+  transaction: "TX_STOCK_ISSUANCE",
+  effect: "append",
+  collection: "stockIssuances",
+  pool: "draws",
+  checks: [
+    ...issuanceIdChecks,
+    stakeholderExists,
+    stockClass,
+    legends,
+    plan,
+    countable("quantity", (data) => isStockPlanId(data.stock_plan_id)),
+    ...gaps,
+  ],
+});
