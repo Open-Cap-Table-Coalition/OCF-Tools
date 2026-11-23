@@ -36,20 +36,22 @@ flowchart TD
     B --> C["Run the checks for this transaction type"]
     C -->|Pass or warning| D["Apply the transaction"]
     C -->|Error in a check that reports findings| E["Record the finding, withhold the transaction's changes and continue"]
-    C -->|Legacy stock check fails, unknown type or internal error| F["Stop and report the failure in result"]
+    C -->|Stock check fails, unknown type or internal error| F["Stop and report the failure in result"]
     D --> G["Check each changed stock plan, then save a snapshot at the end of the day"]
     E --> G
 ```
 
 The reader loads the package once per validation. For transactions on the same date, the validator uses a fixed order by type. The XState machine uses `TX_DESCRIPTORS` to choose the checks and update the outstanding securities. For example, issuing a warrant adds it to the cap table and cancelling it removes it. A transaction under one of the older `TX_PLAN_SECURITY_*` names is validated as the equity compensation transaction it stands for. [Package reader](read_ocf_package/index.ts) · [Transaction order](ocf_validator/index.ts) · [Transaction rules](ocf_validator/ocfMachine.ts) · [Snapshot fields](ocf_validator/eod.ts)
 
-Convertible, warrant, equity compensation and stock plan checks report findings. So does the earlier-removal check on other transactions, such as vesting, and the security ID check on every stock issuance. When one of these checks fails at error level, the validator withholds that transaction's changes and marks the fields it would have written as unreliable. A later check that needs one of those fields reports a blocked finding instead of guessing. Independent checks still run. The stock transactions' other checks use the older `report` format, and a failure there stops the run. A transaction with an unknown type, a date or type that isn't a string, or a check that throws also stops it.
+Convertible, warrant, equity compensation and stock plan checks report findings, as does the earlier-removal check on other transactions, such as vesting. When one of these checks fails at error level, the validator withholds that transaction's changes and marks the fields it would have written as unreliable. A later check that needs one of those fields reports a blocked finding instead of guessing. Independent checks still run.
+
+Stock transactions work differently. A failed stock check stops the run. The security ID and earlier-removal checks on a stock issuance report findings, and the other stock checks use the older `report` format. A transaction with an unknown type or a check that throws also stops the run. A transaction whose date or type isn't a string stops it before the first transaction is processed.
 
 ### What `ocfValidator` returns
 
 - `result` states whether the package appears valid. A completed run counts failed errors, blocked checks and warnings separately. If the run stops early, `result` identifies the transaction and the failure.
 - `findings` lists each check's `severity` (`error` or `warning`), `outcome`, `check` ID, `message` and `subject` (an `object_type` and `id`). A `failed` finding reports a problem the check found. A `blocked` finding lists the earlier failures that caused it in `roots`. Warnings allow the transaction's changes. To group findings, use `check` and `subject`, plus `date` for day-end checks, and keep every message in each group.
-- `report` holds the older stock checks and whether each passed. A stock issuance that reuses a security ID produces a finding that names the original issuance or the earlier removal.
+- `report` holds the older stock checks and whether each passed. A stock issuance that reuses a security ID produces a finding that names the original issuance or the earlier removal, and the run stops there.
 - `snapshots` holds the cap table at the end of each transaction day the run completed. A row's optional `defects` lists the causes of uncertainty under `lifecycle` or `issuance`. A failed first issuance appears as a row that contains only its defects. Each snapshot also lists the plans under `stockPlans`, with decimal strings for `drawn` and, when known, `reserved`. Either total can have its own `defects` entry.
 - `nodes` holds each security's issuance and lifecycle, including removed securities. Each field records its last writer and any defects. A security ID can be issued only once across all four families. `nodes.plan` holds the current pool totals by plan ID.
 
@@ -69,7 +71,7 @@ At the end of each day, the `pool-not-exceeded` check compares drawn shares with
 ## Limits on main
 
 - **Rule coverage varies.** Stock, warrant, convertible, equity compensation and stock plan pool transactions have checks. Vesting events and other transactions receive only a check for an earlier removal. Share limits for a stock class or the issuer, vesting terms and other reference records are not checked, and the validator does not check every file against the OCF schema. “Appears valid” means the package passed the implemented checks.
-- **Some failures still stop the run.** A failed legacy stock check, an unknown transaction type, a malformed date or type, or an internal error stops validation at that transaction. Other errors are recorded in `findings` and validation continues, so read `result` and `findings` together. After a stop, `ocfSnapshot` returns the last day completed before it, even for a later date, and does not say so.
+- **Some failures still stop the run.** A failed stock check, an unknown transaction type or an internal error stops validation at that transaction, and `result` names it. After that stop, `ocfSnapshot` returns the last day completed before it, even for a later date, and does not say so. A transaction whose date or type isn't a string stops the run before it starts, so there are no snapshots and `ocfSnapshot` returns `null`. Other errors are recorded in `findings` and validation continues, so read `result` and `findings` together.
 - **Snapshot quantities are the issued quantities.** `ocfSnapshot` and `snapshots` copy the quantity from each stock and equity compensation issuance. An exercise or release of an equity compensation grant does not reduce it, so a fully exercised grant still appears at its issued quantity until something removes it. Vesting does not change a row. Treat a snapshot as a list of the issuance records that are still outstanding, not as remaining holdings. Convertible and warrant rows show a purchase price and no quantity.
 - **Not published yet.** The package is not on npm. Run it from source as shown above, or link it as described below.
 
