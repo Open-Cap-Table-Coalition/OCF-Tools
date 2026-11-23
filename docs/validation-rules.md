@@ -4,27 +4,29 @@ A running list of the rules the validator applies and the corner cases we have s
 
 To add an entry, put it under the section it belongs to. If we have not decided the answer yet, put it under [Open questions](#open-questions) instead.
 
+An entry that cites a pull request that is still open (#247) says what the validator should do once that pull request merges. It also says what the validator does today.
+
 ## Ground rules
 
 - **A package is immutable.** Nothing in an OCF package is edited in place. Changing a record will need an edit event, and OCF has no such event today. The validator relies on this: it indexes the package once per run. (#247)
 - **Transactions run in date order.** On the same day they run by type, in the order listed in [`constants.ts`](../ocf_validator/constants/constants.ts). Two transactions of the same type keep their file order.
 - **Same-day stock order.** Issuance, retraction, acceptance, cancellation, conversion, reissuance, repurchase, transfer. So a cancellation always runs before a transfer dated the same day.
 - **A security ID is issued once.** The same ID cannot be issued again, in any of the four families.
-- **Quantities are decimal strings.** OCF allows up to ten fractional digits. Sums are added exactly, so `0.1` + `0.2` equals `0.3`. (#247)
+- **Quantities are decimal strings.** OCF allows up to ten fractional digits. [`numeric.ts`](../ocf_validator/numeric.ts) adds them exactly, so `0.1` + `0.2` equals `0.3`. Today only the stock plan checks add quantities with it: a plan's reserve and drawn shares, returns to the pool, plan-issued equity compensation grants, and cancellation or repurchase of plan-issued stock. The other stock checks, including transfer, conversion, reissuance, and cancellation or repurchase of stock not issued from a plan, add quantities as floats and compare them with `===`. A transfer of `0.3` whose results are `0.1` and `0.2` fails for that reason. (#247 moves the transfer, conversion and reissuance quantity checks to exact arithmetic.)
 
 ## Stock named as a balance or result
 
 These rules cover the stock a transfer, cancellation, repurchase, conversion or reissuance names in `balance_security_id` or `resulting_security_ids`. The tests are in [`stockCancellation.test.ts`](../tests/stockCancellation.test.ts).
 
 - **It must be issued the same day** as the transaction that names it.
-- **It can be removed earlier that day.** Stock issued and cancelled on the transaction's date still counts, because removals run first. (#247)
+- **It can be removed earlier that day.** Removals run before transfers and repurchases, so stock issued and cancelled on the transaction's date should still count. Today it does not. The balance and quantity-sum checks in cancellation, repurchase, conversion and transfer read only outstanding stock, so a balance issued and cancelled earlier that day can stop validation. (#247)
 - **Stock from an earlier day does not count once removed**, even if the removal is dated the same day as the transaction.
-- **Retracted stock never counts.** A retraction voids the issuance, so the stock was never validly issued. (#247)
-- **Every resulting security is checked**, not only the last one listed. (#247)
+- **Retracted stock should not count.** A retraction voids the issuance, so the stock was never validly issued. Today a retracted balance is rejected, because balances are read from outstanding stock. Conversion and reissuance look their results up in the whole package history and never check for a retraction, so a retracted result can pass their existence, date, class and stakeholder checks.
+- **Every resulting security should be checked**, not only the last one listed. Today transfer, conversion and reissuance reset their per-result flags on each pass through the list, so a valid last result can hide an earlier invalid one. For example, a transfer whose first result has the wrong issuance date passes the date check if its last result has the right date. (#247)
 
 ## Stock reissuance
 
-- **Without a split, the quantities must match.** The results must add up to the original quantity. This applies whether `split_transaction_id` is left out or set to null. (#247)
+- **Without a split, the quantities must match.** The results must add up to the original quantity, whether `split_transaction_id` is left out or set to null. Today the check runs only when the field is explicitly null. If it is left out, the comparison is skipped, so a reissuance whose results add up to less than the original is accepted. If it is null, the check adds the results as a number and compares that with the original's string quantity using `===`, so even matching quantities are rejected. (#247)
 - **With a split, the quantities are not compared.** The split changes the share count.
 - **The split must be real.** It must be a `TX_STOCK_CLASS_SPLIT` in the package, dated the same day as the reissuance, for the same stock class as the original stock.
 - **Results keep the class and the holder.** Each result has the same stock class and stakeholder as the original, and the reissuance date.
