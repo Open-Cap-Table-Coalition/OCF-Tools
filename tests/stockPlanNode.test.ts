@@ -887,6 +887,58 @@ describe("stock issued from a plan", () => {
     expect(securityAt(nodes, "stockIssuances", stock.security_id)?.carry?.defects).toEqual([failed]);
   });
 
+  // Run the second release before and after the stock it names is issued on its settlement date.
+  // Both runs should give that release the same findings and leave the plans with the same totals.
+  const aroundIssuance = (build: (date: string) => Record<string, unknown>[]) =>
+    ["2022-02-02", "2022-02-16"].map((date) => {
+      const context = runTwoPlans(build(date));
+      return {
+        findings: context.findings.filter((finding) => finding.subject.id === "release-b"),
+        drawn: [...context.nodes.plan.values()].map((plan) => [plan.id, plan.drawn.value, plan.drawn.defects]),
+      };
+    });
+  const issued = (security_id: string, stock_plan_id: string) =>
+    ({ ...stock, id: `issue-${security_id}`, security_id, stock_plan_id, date: "2022-02-15", quantity: "40" });
+  const naming = (id: string, security_id: string, date: string, results: string[]) =>
+    ({ ...releaseOf(id, security_id, date, "2022-02-15"), quantity: String(40 * results.length), resulting_security_ids: results });
+
+  it("rejects a release naming stock that another plan's valid release holds, before or after the stock is issued", () => {
+    const [before, after] = aroundIssuance((date) => [
+      grant("a", "option-a", "100"), grant("b", "option-b", "100", { stock_plan_id: "plan-2" }),
+      naming("release-a", "option-a", "2022-02-01", ["stock-a"]),
+      naming("release-b", "option-b", date, ["stock-a", "stock-b"]),
+      issued("stock-a", "plan-1"), issued("stock-b", "plan-2"),
+    ]);
+
+    expect(before.findings).toMatchObject([{ check: "plan-replacement", outcome: "failed", message: expect.stringContaining("stock-a") }]);
+    expect(after).toEqual(before);
+  });
+
+  it("counts stock from another plan toward a release, before or after the stock is issued", () => {
+    // Both grants are in plan 1 and stock A is in plan 2, so neither release carries a charge to it.
+    const [before, after] = aroundIssuance((date) => [
+      grant("a", "option-a", "100"), grant("b", "option-b", "100"),
+      naming("release-a", "option-a", "2022-02-01", ["stock-a"]),
+      naming("release-b", "option-b", date, ["stock-a", "stock-b"]),
+      issued("stock-a", "plan-2"), issued("stock-b", "plan-1"),
+    ]);
+
+    expect(before).toEqual({ findings: [], drawn: [["plan-1", "200", []], ["plan-2", "40", []]] });
+    expect(after).toEqual(before);
+  });
+
+  it("does not block a release on a failure that stock from another plan rules out, before or after the stock is issued", () => {
+    const [before, after] = aroundIssuance((date) => [
+      grant("a", "option-a", "100"), grant("b", "option-b", "100"), overdrawn,
+      naming("release-a", "option-a", "2022-02-01", ["stock-a"]),
+      naming("release-b", "option-b", date, ["stock-a"]),
+      issued("stock-a", "plan-2"),
+    ]);
+
+    expect(before).toEqual({ findings: [], drawn: [["plan-1", "200", []], ["plan-2", "40", []]] });
+    expect(after).toEqual(before);
+  });
+
   it("ignores a failed release from a grant known to have no plan", () => {
     const removed = cancellation("cancel", "option-a", "100", { date: "2022-01-20" });
     const context = runTwoPlans([
@@ -1087,6 +1139,24 @@ describe("equity compensation field reads", () => {
       { check: "reads-grant-state", outcome: "blocked", roots: [failed] },
     ]);
     expect(ran).toBe(false);
+  });
+
+  it.each([
+    { plan: "plan-1", defects: true },
+    { plan: "plan-2", defects: false },
+  ])("reads another source's failure on a balance grant the same way before and after its $plan issuance", ({ plan, defects }) => {
+    const failed = subject("TX_EQUITY_COMPENSATION_CANCELLATION", "c-1");
+    const named = reduce(withPlans(emptyNodes(), [PLAN, { ...PLAN, id: "plan-2" }]),
+      [grant("g-1", "opt-1", "100")], [grant("g-2", "opt-2", "100")],
+      [cancellation("c-1", "opt-1", "40", { balance_security_id: "opt-balance" }), [failed]],
+    );
+    const balance = grant("g-balance", "opt-balance", "60", { stock_plan_id: plan, date: "2022-02-01" });
+    // A plan-1 grant's claim, with the balance issuance the check found ahead in the package.
+    const claim = { source: "opt-2", date: "2022-02-01", issuance: { plan, date: balance.date } };
+    const ref = securityField("equityCompensation", "opt-balance", "provenance", claim);
+
+    expect(fieldAt(named, ref)?.defects).toEqual(defects ? [failed] : []);
+    expect(fieldAt(reduce(named, [balance]), ref)?.defects).toEqual(defects ? [failed] : []);
   });
 
   it("returns undefined for optional state that has not been written", () => {
