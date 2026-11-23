@@ -1,0 +1,27 @@
+{
+  "ocf_version": "1.1.1-alpha+main",
+  "file_type": "OCF_MANIFEST_FILE",
+  "issuer": {
+    "id": "defectDemoCo",
+    "comments": [],
+    "object_type": "ISSUER",
+    "legal_name": "Defect Demo Co",
+    "formation_date": "2020-01-01",
+    "country_of_formation": "US"
+  },
+  "as_of": "2021-12-31",
+  "generated_at": "2021-12-31T00:00:00.000Z",
+  "stock_plans_files": [],
+  "stock_legend_templates_files": [],
+  "stock_classes_files": [],
+  "transactions_files": [{ "filepath": "./Transactions.ocf.json", "md5": "00000000000000000000000000000000" }],
+  "stakeholders_files": [{ "filepath": "./Stakeholders.ocf.json", "md5": "00000000000000000000000000000000" }],
+  "vesting_terms_files": [],
+  "valuations_files": [],
+  "comments": [
+    "Check that validation reports two independent errors and continues through the last transaction (#225, #231).",
+    "Warrant issuance wi-1 names a missing stakeholder. Acceptance wa-1 depends on that issuance.",
+    "SAFE conversion cv-1 names a stock issuance missing from the package.",
+    "Warrant issuance wi-2 and acceptance wa-2 should both pass."
+  ]
+}

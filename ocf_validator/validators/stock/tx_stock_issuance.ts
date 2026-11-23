@@ -1,11 +1,13 @@
-import { OcfMachineContext } from "../../ocfMachine";
-import valid_tx_stock_reissuance from "./tx_stock_reissuance";
+import { LegacyContext } from "../../ocfMachine";
+import { isStockPlanId } from "../../stockPlan";
+import { isQuantity } from "../../numeric";
 
 /*
 CURRENT CHECKS:
 A stakeholder with a corresponding stakeholder ID must exist
 A stock class with corresponding stock class ID must exist
 If a stock legend ID included, a stock legend with a corresponding stock legend ID must exist.
+Stock issued from a plan must have a countable, nonnegative share quantity.
 
 MISSING CHECKS:
 Is date of stock issuance on or after the date of incorporation and the date of stock class creation?
@@ -14,7 +16,7 @@ The quantity of the Stock issuance is equal to or less than the current number o
 
 // Refrence for tx_stock_issuance transaction: https://open-cap-table-coalition.github.io/Open-Cap-Format-OCF/schema_markdown/schema/objects/transactions/issuance/StockIssuance/
 
-const valid_tx_stock_issuance = (context: OcfMachineContext, event: any, isGuard: Boolean = false) => {
+const valid_tx_stock_issuance = (context: LegacyContext, event: any, isGuard: Boolean = false) => {
   let validity = false;
   const { stakeholders, stockClasses, stockLegends } = context.ocfPackageContent;
   let report: any = {transaction_type: "TX_STOCK_ISSUANCE", transaction_id: event.data.id, transaction_date: event.data.date};
@@ -63,7 +65,13 @@ const valid_tx_stock_issuance = (context: OcfMachineContext, event: any, isGuard
     report.stockLegend_validity = false;
   }
 
-  if (stockClass_validity && stakeholder_validity && stockLegend_validity) {
+  const chargesPlan = isStockPlanId(event.data.stock_plan_id);
+  const planIdValid = event.data.stock_plan_id == null || chargesPlan;
+  if (!planIdValid) report.plan_id_validity = false;
+  const quantityValid = !chargesPlan || isQuantity(event.data.quantity);
+  if (chargesPlan) report.plan_quantity_validity = quantityValid;
+
+  if (stockClass_validity && stakeholder_validity && stockLegend_validity && planIdValid && quantityValid) {
     validity = true;
   }
 

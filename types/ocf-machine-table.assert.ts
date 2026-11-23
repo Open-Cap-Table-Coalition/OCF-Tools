@@ -1,45 +1,27 @@
 /**
- * Compile-time assertions for the per-transaction descriptors. No runtime — this
- * file is type-checked by `tsc` (the build), so a broken invariant fails the
- * build.
- *
- * Covers:
- *  - the descriptors are exhaustive over every `TxKey` (dropping any key fails);
- *  - `appendToCollection` rejects a wrong-family payload;
- *  - an `append` descriptor rejects a collection whose family does not match the
- *    payload its `legacyValidate` checks;
- *  - the same family match holds for graded `validate` descriptors;
- *  - a `Check` literal requires `id`, `severity`, and `description`, and admits
- *    `implemented` only when absent or literally `false`;
- *  - every graded descriptor arm carries its declared `checks`, and a graded
- *    descriptor missing `checks` is not a `Descriptor`;
- *  - `defineValidator` rejects a collection on a "none" declaration, a check
- *    that reads a field the transaction doesn't have, and (through
- *    `Descriptor`) an "append" to another family's collection;
- *  - a check can't modify the transaction it's given;
- *  - a descriptor listed under another transaction's key is rejected, and the
- *    real table is checked against `DescriptorTable` directly;
- *  - `familyChecksFor` rejects an issuance type that doesn't match the
- *    collection, a misspelled acceptance type, a `vests` flag that
- *    contradicts whether the issuance type has vesting terms, a
- *    `returnsToPool` flag that contradicts whether it can name a stock plan,
- *    and a misspelled type in `leavesOutstanding`.
+ * The build checks that every transaction has a descriptor, its validator accepts the correct
+ * payload, and each effect has the required family and lifecycle fields.
  */
 import type {
   OCFWarrantIssuance,
-  OCFConvertibleIssuance,
 } from "@opencaptablecoalition/ocf-types";
 import {
-  appendToCollection,
   TX_DESCRIPTORS,
+  type VESTING_FAMILIES,
   type TxKey,
   type Descriptor,
   type DescriptorTable,
+  type VestingFamily,
 } from "../ocf_validator/ocfMachine";
-import { defineValidator, type CheckObject } from "../ocf_validator/validators/checkKit";
+import { defineValidator, underOlderName, type CheckContext, type CheckObject } from "../ocf_validator/validators/checkKit";
+import type { OLDER_NAMES } from "../ocf_validator/constants/constants";
 import { familyChecksFor } from "../ocf_validator/validators/checks";
-import type { Check, GradedValidator, OcfMachineContext } from "./validator";
+import type { TransactionFor } from "./ocf-input";
+import type { Check, GradedValidator, LifecycleWord, OcfMachineContext } from "./validator";
 import type { Expect, Equal } from "./type-assert";
+
+// Checks must use declared reads even when the machine has older maps or snapshots available.
+type _CheckContextKeys = Expect<Equal<keyof CheckContext, "ocfPackageContent" | "removals">>;
 
 // --- Declared check metadata ------------------------------------------------
 
@@ -108,16 +90,8 @@ type _Exhaustive = Expect<Equal<keyof typeof TX_DESCRIPTORS, TxKey>>;
 // omitting all but one key from an annotated sample.
 // @ts-expect-error — Record<TxKey, Descriptor> requires every TxKey to be present.
 const _keyOmitted: Record<TxKey, Descriptor> = {
-  TX_VESTING_START: { effect: "passthrough" },
+  TX_VESTING_START: { effect: "passthrough", lifecycle: "stays", families: [] },
 };
-
-// --- Wrong-family payload is a compile error -------------------------------
-
-// The matching family compiles…
-appendToCollection("warrantIssuances", [] as OCFWarrantIssuance[], {} as OCFWarrantIssuance);
-// …but a warrant payload cannot be appended onto the convertible collection.
-// @ts-expect-error — OCFWarrantIssuance is not assignable to the convertible family.
-appendToCollection("convertibleIssuances", [] as OCFConvertibleIssuance[], {} as OCFWarrantIssuance);
 
 // --- Wrong-family legacy append descriptor is a compile error ---------------
 // (Deleted with the legacy convention when the last family migrates.)
@@ -130,10 +104,10 @@ const warrantLegacyValidate = (
 ): boolean => true;
 
 // The warrant validator pairs with the warrant collection…
-const _appendWarrant: Descriptor = { effect: "append", collection: "warrantIssuances", legacyValidate: warrantLegacyValidate };
+const _appendWarrant: Descriptor = { effect: "append", lifecycle: "issue", collection: "warrantIssuances", legacyValidate: warrantLegacyValidate };
 // …but the same validator cannot type the convertible collection (differs only in family).
 // @ts-expect-error — a warrant validator does not match the convertible collection's payload.
-const _appendWrongFamily: Descriptor = { effect: "append", collection: "convertibleIssuances", legacyValidate: warrantLegacyValidate };
+const _appendWrongFamily: Descriptor = { effect: "append", lifecycle: "issue", collection: "convertibleIssuances", legacyValidate: warrantLegacyValidate };
 
 // --- Wrong-family graded append descriptor is a compile error ---------------
 
@@ -143,35 +117,35 @@ const _appendWrongFamily: Descriptor = { effect: "append", collection: "converti
 declare const warrantValidate: GradedValidator<OCFWarrantIssuance>;
 
 // The graded warrant validator pairs with the warrant collection…
-const _appendGradedWarrant: Descriptor = { effect: "append", collection: "warrantIssuances", validate: warrantValidate, checks: _gradedChecks };
+const _appendGradedWarrant: Descriptor = { effect: "append", lifecycle: "issue", collection: "warrantIssuances", validate: warrantValidate, checks: _gradedChecks };
 // …but the same graded validator cannot type the convertible collection. The
 // checks array is well-formed, so the mismatched collection is the sole reason.
 // @ts-expect-error — a graded warrant validator does not match the convertible collection's payload.
-const _appendGradedWrongFamily: Descriptor = { effect: "append", collection: "convertibleIssuances", validate: warrantValidate, checks: _gradedChecks };
+const _appendGradedWrongFamily: Descriptor = { effect: "append", lifecycle: "issue", collection: "convertibleIssuances", validate: warrantValidate, checks: _gradedChecks };
 
 // --- Every graded arm carries its declared checks ---------------------------
 
 // The none and remove graded arms are assignable to Descriptor with checks;
 // together with `_appendGradedWarrant` above (which declares an `implemented:
 // false` entry) this covers all three graded effects.
-const _gradedNone: Descriptor = { effect: "none", validate: gradedValidate, checks: _gradedChecks };
-const _gradedRemove: Descriptor = { effect: "remove", collection: "stockIssuances", validate: gradedValidate, checks: _gradedChecks };
+const _gradedNone: Descriptor = { effect: "none", lifecycle: "stays", families: ["stockIssuances"], validate: gradedValidate, checks: _gradedChecks };
+const _gradedRemove: Descriptor = { effect: "remove", lifecycle: "removes", collection: "stockIssuances", validate: gradedValidate, checks: _gradedChecks };
 
 // --- A graded descriptor missing checks is not a Descriptor -----------------
 
 // The same none descriptor with an (empty, still valid) checks array is assignable…
-const _gradedWithChecks: Descriptor = { effect: "none", validate: gradedValidate, checks: [] };
+const _gradedWithChecks: Descriptor = { effect: "none", lifecycle: "stays", families: [], validate: gradedValidate, checks: [] };
 // …but dropping `checks` (the one-field delta) leaves it matching no arm.
 // @ts-expect-error — a graded descriptor must declare `checks`.
-const _gradedNoChecks: Descriptor = { effect: "none", validate: gradedValidate };
+const _gradedNoChecks: Descriptor = { effect: "none", lifecycle: "stays", families: [], validate: gradedValidate };
 
 // --- defineValidator: the spec shape ----------------------------------------
 
 // An effect-none spec without a collection compiles…
-const _noneSpec = defineValidator({ transaction: "TX_CONVERTIBLE_ACCEPTANCE", effect: "none", checks: [] });
+const _noneSpec = defineValidator({ transaction: "TX_CONVERTIBLE_ACCEPTANCE", effect: "none", families: ["convertibleIssuances"], checks: [] });
 // …but the same declaration plus a collection does not: a "none" transaction changes no collection.
 // @ts-expect-error — an effect-none spec carries no collection.
-const _noneSpecWithCollection = defineValidator({ transaction: "TX_CONVERTIBLE_ACCEPTANCE", effect: "none", collection: "convertibleIssuances", checks: [] });
+const _noneSpecWithCollection = defineValidator({ transaction: "TX_CONVERTIBLE_ACCEPTANCE", effect: "none", families: ["convertibleIssuances"], collection: "convertibleIssuances", checks: [] });
 
 // --- defineValidator: each check must accept the transaction's payload ------
 
@@ -181,10 +155,10 @@ declare const readsSecurityId: CheckObject<{ security_id: string }>;
 declare const readsStakeholderId: CheckObject<{ stakeholder_id: string }>;
 
 // An acceptance carries a security_id, so a check reading one compiles…
-const _payloadMatch = defineValidator({ transaction: "TX_CONVERTIBLE_ACCEPTANCE", effect: "none", checks: [readsSecurityId] });
+const _payloadMatch = defineValidator({ transaction: "TX_CONVERTIBLE_ACCEPTANCE", effect: "none", families: ["convertibleIssuances"], checks: [readsSecurityId] });
 // …but an acceptance carries no stakeholder_id, so the issuance check does not.
 // @ts-expect-error — the check reads a field the acceptance payload does not carry.
-const _payloadMismatch = defineValidator({ transaction: "TX_CONVERTIBLE_ACCEPTANCE", effect: "none", checks: [readsStakeholderId] });
+const _payloadMismatch = defineValidator({ transaction: "TX_CONVERTIBLE_ACCEPTANCE", effect: "none", families: ["convertibleIssuances"], checks: [readsStakeholderId] });
 
 // --- defineValidator: wrong-family append -----------------------------------
 
@@ -252,3 +226,85 @@ const _wrongPool = familyChecksFor({ name: "warrant", collection: "warrantIssuan
 // match and so would exempt nothing.
 // @ts-expect-error — TX_EQUITY_COMPENSATION_EXCERCISE is not a transaction key.
 const _mistypedLeavesOutstanding = familyChecksFor({ name: "equity compensation", collection: "equityCompensation", issuance: "TX_EQUITY_COMPENSATION_ISSUANCE", acceptance: "TX_EQUITY_COMPENSATION_ACCEPTANCE", vests: true, returnsToPool: true, leavesOutstanding: ["TX_EQUITY_COMPENSATION_EXCERCISE"] });
+
+// Lifecycle types
+
+// Each transaction must declare a supported lifecycle change.
+type _EveryDescriptorHasAWord = Expect<
+  Equal<(typeof TX_DESCRIPTORS)[TxKey]["lifecycle"] extends LifecycleWord ? true : false, true>
+>;
+
+// A transaction without a validator must specify its lifecycle change.
+const _passthroughWithWord: Descriptor = { effect: "passthrough", lifecycle: "after removal", families: ["equityCompensation"] };
+// @ts-expect-error A passthrough descriptor needs a lifecycle value.
+const _passthroughNoWord: Descriptor = { effect: "passthrough", families: ["equityCompensation"] };
+
+// Removing a security ends its outstanding state.
+const _removeRemoves: Descriptor = { effect: "remove", lifecycle: "removes", collection: "stockIssuances", validate: gradedValidate, checks: [] };
+// @ts-expect-error A removal must declare the lifecycle value "removes".
+const _removeStays: Descriptor = { effect: "remove", lifecycle: "stays", collection: "stockIssuances", validate: gradedValidate, checks: [] };
+
+// The validator declaration supplies the effect used to derive the lifecycle.
+type _NoneStays = Expect<Equal<(typeof _noneSpec)["lifecycle"], "stays">>;
+type _AppendIssues = Expect<Equal<(typeof _defineAppendWarrant)["lifecycle"], "issue">>;
+type _RemoveRemoves = Expect<Equal<(typeof _warrantRetraction)["lifecycle"], "removes">>;
+
+// @ts-expect-error An effect of "none" requires a list of security families.
+const _noneSpecNoFamilies = defineValidator({ transaction: "TX_CONVERTIBLE_ACCEPTANCE", effect: "none", checks: [] });
+
+// The list of vesting families must match the issuance types that support vesting terms.
+type _VestingFamilies = Expect<Equal<(typeof VESTING_FAMILIES)[number], VestingFamily>>;
+type _ConvertiblesDontVest = Expect<Equal<Extract<VestingFamily, "convertibleIssuances">, never>>;
+
+// Older transaction names
+
+type OlderName = keyof typeof OLDER_NAMES;
+
+// Each older name must have a payload that the corresponding current validator accepts.
+type _OlderNamesCarryTheirTypesPayload = Expect<
+  Equal<
+    { [K in OlderName]: TransactionFor<K> extends TransactionFor<(typeof OLDER_NAMES)[K]> ? true : false }[OlderName],
+    true
+  >
+>;
+
+// Older names keep the current descriptor's effect and lifecycle.
+type _OlderNamesShareEffect = Expect<
+  Equal<
+    { [K in OlderName]: Equal<(typeof TX_DESCRIPTORS)[K]["effect"], (typeof TX_DESCRIPTORS)[(typeof OLDER_NAMES)[K]]["effect"]> }[OlderName],
+    true
+  >
+>;
+type _OlderNamesShareWord = Expect<
+  Equal<
+    { [K in OlderName]: Equal<(typeof TX_DESCRIPTORS)[K]["lifecycle"], (typeof TX_DESCRIPTORS)[(typeof OLDER_NAMES)[K]]["lifecycle"]> }[OlderName],
+    true
+  >
+>;
+
+// The older plan security name accepts the equity compensation retraction validator.
+const _equityCompensationRetraction = defineValidator({ transaction: "TX_EQUITY_COMPENSATION_RETRACTION", effect: "remove", collection: "equityCompensation", checks: [] });
+const _underOlderName = underOlderName(_equityCompensationRetraction, "TX_PLAN_SECURITY_RETRACTION");
+type _FiledUnderOlderName = Expect<Equal<(typeof _underOlderName)["transaction"], "TX_PLAN_SECURITY_RETRACTION">>;
+// @ts-expect-error The warrant retraction payload differs from an equity compensation retraction.
+const _underUnrelatedName = underOlderName(_equityCompensationRetraction, "TX_WARRANT_RETRACTION");
+
+// Plan operations
+
+// The descriptor accepts the supported plan operations.
+const _draws = defineValidator({ transaction: "TX_EQUITY_COMPENSATION_ISSUANCE", effect: "append", collection: "equityCompensation", pool: "draws", checks: [] }) satisfies Descriptor;
+// @ts-expect-error "spends" is not a supported pool operation.
+const _spends = defineValidator({ transaction: "TX_EQUITY_COMPENSATION_ISSUANCE", effect: "append", collection: "equityCompensation", pool: "spends", checks: [] });
+
+// Check the pool operation declared for each relevant transaction type.
+type _GrantDraws = Expect<Equal<(typeof TX_DESCRIPTORS)["TX_EQUITY_COMPENSATION_ISSUANCE"]["pool"], "draws">>;
+type _OlderNameDraws = Expect<Equal<(typeof TX_DESCRIPTORS)["TX_PLAN_SECURITY_ISSUANCE"]["pool"], "draws">>;
+type _CancellationCarries = Expect<Equal<(typeof TX_DESCRIPTORS)["TX_EQUITY_COMPENSATION_CANCELLATION"]["pool"], "carries">>;
+type _TransferCarries = Expect<Equal<(typeof TX_DESCRIPTORS)["TX_PLAN_SECURITY_TRANSFER"]["pool"], "carries">>;
+type _ReturnReturns = Expect<Equal<(typeof TX_DESCRIPTORS)["TX_STOCK_PLAN_RETURN_TO_POOL"]["pool"], "returns">>;
+type _AdjustmentReserves = Expect<Equal<(typeof TX_DESCRIPTORS)["TX_STOCK_PLAN_POOL_ADJUSTMENT"]["pool"], "reserves">>;
+
+// An effect of "none" normally keeps a security outstanding. A return to pool explicitly requires a
+// removed security.
+type _ReturnIsAfterRemoval = Expect<Equal<(typeof TX_DESCRIPTORS)["TX_STOCK_PLAN_RETURN_TO_POOL"]["lifecycle"], "after removal">>;
+type _AdjustmentStays = Expect<Equal<(typeof TX_DESCRIPTORS)["TX_STOCK_PLAN_POOL_ADJUSTMENT"]["lifecycle"], "stays">>;

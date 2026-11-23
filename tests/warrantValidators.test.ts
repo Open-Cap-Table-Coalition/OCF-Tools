@@ -7,6 +7,7 @@ import {
   startSeeded,
   ev,
   contextWith,
+  contextAfterCancellation,
   withStakeholder,
   txRecord,
   runValidator,
@@ -15,6 +16,7 @@ import {
   emittedCheckIds,
   expectFindingShape,
   type FailingScenarios,
+  collection,
 } from "./helpers";
 
 const MIGRATED_KEYS = [
@@ -73,21 +75,28 @@ describe("warrant issuance validity", () => {
 
     const snapshot = actor.getSnapshot();
     expect(snapshot.value).toBe("capTable");
-    expect(snapshot.context.warrantIssuances).toHaveLength(1);
-    expect(snapshot.context.warrantIssuances[0]).toMatchObject({ id: "war1", security_id: "sec1" });
+    expect(collection(snapshot.context, "warrantIssuances")).toHaveLength(1);
+    expect(collection(snapshot.context, "warrantIssuances")[0]).toMatchObject({ id: "war1", security_id: "sec1" });
     expect(snapshot.context.findings).toEqual([]);
   });
 
-  it("halts an invalid issuance in validationError with the error finding recorded", () => {
+  it("records an invalid issuance's error finding and goes on, with the security withheld and marked", () => {
     const actor = startSeeded(withStakeholder("someone-else"));
     actor.send(ev("TX_WARRANT_ISSUANCE", issuance()));
 
     const snapshot = actor.getSnapshot();
-    expect(snapshot.value).toBe("validationError");
+    // A failing transaction no longer stops the run (#231).
+    expect(snapshot.value).toBe("capTable");
     expect(snapshot.context.findings).toHaveLength(1);
     expect(snapshot.context.findings[0].check).toBe("stakeholder-exists");
-    expect(snapshot.context.warrantIssuances).toEqual([]);
-    expect(snapshot.context.result).toContain("stakeholder-exists");
+    expect(collection(snapshot.context, "warrantIssuances")).toEqual([]);
+    // The security has a node all the same: nothing is known of it, and it's
+    // marked with the issuance that failed.
+    const root = snapshot.context.findings[0].subject;
+    expect(snapshot.context.nodes.security.get("sec1")).toMatchObject({
+      lifecycle: { value: undefined, defects: [root] },
+      issuance: { value: undefined, defects: [root] },
+    });
   });
 });
 
@@ -118,14 +127,14 @@ describe("warrant acceptance validity", () => {
       warrantIssuances: [issuanceRecord("sec1")] as any,
       transactions: [issuanceRecord("sec1")],
     });
-    const before = structuredClone(seeded.warrantIssuances);
+    const before = structuredClone(collection(seeded, "warrantIssuances"));
 
     const actor = startSeeded(seeded);
     actor.send(ev("TX_WARRANT_ACCEPTANCE", acceptance()));
 
     const snapshot = actor.getSnapshot();
     expect(snapshot.value).toBe("capTable");
-    expect(snapshot.context.warrantIssuances).toEqual(before);
+    expect(collection(snapshot.context, "warrantIssuances")).toEqual(before);
     expect(snapshot.context.findings).toEqual([]);
   });
 
@@ -178,8 +187,8 @@ describe("warrant retraction validity", () => {
 
     const snapshot = actor.getSnapshot();
     expect(snapshot.value).toBe("capTable");
-    expect(snapshot.context.warrantIssuances.some((w: any) => w.security_id === "sec1")).toBe(false);
-    expect(snapshot.context.warrantIssuances.some((w: any) => w.security_id === "sec2")).toBe(true);
+    expect(collection(snapshot.context, "warrantIssuances").some((w: any) => w.security_id === "sec1")).toBe(false);
+    expect(collection(snapshot.context, "warrantIssuances").some((w: any) => w.security_id === "sec2")).toBe(true);
     expect(snapshot.context.findings).toEqual([]);
   });
 
@@ -234,8 +243,8 @@ describe("warrant cancellation validity", () => {
 
     const snapshot = actor.getSnapshot();
     expect(snapshot.value).toBe("capTable");
-    expect(snapshot.context.warrantIssuances.some((w: any) => w.security_id === "sec1")).toBe(false);
-    expect(snapshot.context.warrantIssuances.some((w: any) => w.security_id === "sec2")).toBe(true);
+    expect(collection(snapshot.context, "warrantIssuances").some((w: any) => w.security_id === "sec1")).toBe(false);
+    expect(collection(snapshot.context, "warrantIssuances").some((w: any) => w.security_id === "sec2")).toBe(true);
   });
 
   it("emits one no-other-transactions finding per past offender, exempting acceptances and itself", () => {
@@ -306,8 +315,8 @@ describe("warrant transfer validity", () => {
 
     const snapshot = actor.getSnapshot();
     expect(snapshot.value).toBe("capTable");
-    expect(snapshot.context.warrantIssuances.some((w: any) => w.security_id === "sec1")).toBe(false);
-    expect(snapshot.context.warrantIssuances.some((w: any) => w.security_id === "sec2")).toBe(true);
+    expect(collection(snapshot.context, "warrantIssuances").some((w: any) => w.security_id === "sec1")).toBe(false);
+    expect(collection(snapshot.context, "warrantIssuances").some((w: any) => w.security_id === "sec2")).toBe(true);
   });
 
   it("never emits no-other-transactions, even when a past transaction references the security", () => {
@@ -634,7 +643,7 @@ describe("warrant exercise drives the machine to completion", () => {
     const snapshot = actor.getSnapshot();
     expect(snapshot.value).toBe("capTable");
     expect(snapshot.context.findings).toEqual([]);
-    expect(snapshot.context.warrantIssuances).toEqual([]);
+    expect(collection(snapshot.context, "warrantIssuances")).toEqual([]);
   });
 
   it("completes an empty-resulting exercise on its warning alone and still removes the exercised warrant", () => {
@@ -651,7 +660,7 @@ describe("warrant exercise drives the machine to completion", () => {
     expect(snapshot.context.findings).toHaveLength(1);
     expect(snapshot.context.findings[0].check).toBe("resulting-security-named");
     expect(snapshot.context.findings[0].severity).toBe("warning");
-    expect(snapshot.context.warrantIssuances).toEqual([]);
+    expect(collection(snapshot.context, "warrantIssuances")).toEqual([]);
   });
 
   it("clears an exercise of a warrant that started vesting first, removing the exercised warrant and recording no findings", () => {
@@ -668,7 +677,7 @@ describe("warrant exercise drives the machine to completion", () => {
     const snapshot = actor.getSnapshot();
     expect(snapshot.value).toBe("capTable");
     expect(snapshot.context.findings).toEqual([]);
-    expect(snapshot.context.warrantIssuances).toEqual([]);
+    expect(collection(snapshot.context, "warrantIssuances")).toEqual([]);
   });
 });
 
@@ -815,7 +824,8 @@ describe("a conflicting transaction pair flags the later transaction, not the ea
 
     actor.send(ev("TX_WARRANT_RETRACTION", retraction));
     const { context, value } = actor.getSnapshot();
-    expect(value).toBe("validationError");
+    // A failing transaction no longer stops the run (#231).
+    expect(value).toBe("capTable");
 
     const errors = context.findings.filter((f) => f.severity === "error");
     expect(errors).toHaveLength(1);
@@ -842,11 +852,12 @@ describe("a conflicting transaction pair flags the later transaction, not the ea
     expect(afterRetraction.value).toBe("capTable");
     expect(afterRetraction.context.findings).toEqual([]);
     // The retraction removed the issuance from the live collection.
-    expect(afterRetraction.context.warrantIssuances.some((w: any) => w.security_id === "sec1")).toBe(false);
+    expect(collection(afterRetraction.context, "warrantIssuances").some((w: any) => w.security_id === "sec1")).toBe(false);
 
     actor.send(ev("TX_WARRANT_ACCEPTANCE", acceptance));
     const { context, value } = actor.getSnapshot();
-    expect(value).toBe("validationError");
+    // A failing transaction no longer stops the run (#231).
+    expect(value).toBe("capTable");
 
     const errors = context.findings.filter((f) => f.severity === "error");
     expect(errors.map((f) => f.check).sort()).toEqual(["issuance-exists", "no-retraction"]);
@@ -872,18 +883,16 @@ describe("a conflicting transaction pair flags the later transaction, not the ea
 const failingScenarios: FailingScenarios<MigratedKey> = {
   TX_WARRANT_ISSUANCE: [
     {
+      context: contextWith({ stakeholders: [{ id: "sh1" }], warrantIssuances: [issuanceRecord("sec1")] }),
+      data: { ...txRecord("TX_WARRANT_ISSUANCE", "duplicate"), stakeholder_id: "sh1" },
+    },
+    {
       context: baseContext(),
       data: { id: "i1", object_type: "TX_WARRANT_ISSUANCE", security_id: "sec1", stakeholder_id: "nobody", date: "2021-01-01" },
     },
     // Reuses the security_id of a security cancelled before it.
     {
-      context: baseContext({
-        ocfPackageContent: {
-          ...baseContext().ocfPackageContent,
-          stakeholders: [{ id: "sh1" }],
-          transactions: [txRecord("TX_WARRANT_CANCELLATION", "c0", "sec1", "2020-06-01")],
-        } as OcfMachineContext["ocfPackageContent"],
-      }),
+      context: contextAfterCancellation("WARRANT"),
       data: { id: "i1", object_type: "TX_WARRANT_ISSUANCE", security_id: "sec1", stakeholder_id: "sh1", date: "2021-01-01" },
     },
   ],
@@ -956,7 +965,7 @@ describe("declared and emitted checks stay consistent across the family", () => 
 // ---------------------------------------------------------------------------
 
 describe("warrant family findings migrate to the findings channel", () => {
-  it("routes an invalid warrant transaction to findings, leaves report clear, and serializes the errors in the failure result", () => {
+  it("routes an invalid warrant transaction to findings, leaves report clear, and counts the errors in the result", () => {
     const actor = startSeeded(baseContext());
     // No stakeholder matches, so the issuance is invalid.
     actor.send(ev("TX_WARRANT_ISSUANCE", {
@@ -968,14 +977,18 @@ describe("warrant family findings migrate to the findings channel", () => {
     }));
 
     const { context, value } = actor.getSnapshot();
-    expect(value).toBe("validationError");
+    // A failing transaction no longer stops the run (#231).
+    expect(value).toBe("capTable");
     // The errors landed on findings…
     expect(context.findings.length).toBeGreaterThan(0);
     expect(context.findings.every((f) => f.severity === "error")).toBe(true);
     // …no report entry was written for a migrated warrant type…
     const migrated = MIGRATED_KEYS as readonly string[];
     expect(context.report.some((entry: any) => migrated.includes(entry?.transaction_type))).toBe(false);
-    // …and the failure result serialized the error findings.
-    expect(context.result).toContain(JSON.stringify(context.findings, null, 2));
+    // …and the result, written when the run ends, counts them.
+    actor.send({ type: "RUN_END", date: "2021-01-01" });
+    expect(actor.getSnapshot().context.result).toBe(
+      `The validation of the OCF package for Test Co is complete and found ${context.findings.length} error${context.findings.length === 1 ? "" : "s"}.`,
+    );
   });
 });

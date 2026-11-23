@@ -1,4 +1,4 @@
-import {OcfMachineContext} from '../../ocfMachine';
+import {LegacyContext} from '../../ocfMachine';
 
 /*
 CURRENT CHECKS:
@@ -15,7 +15,7 @@ CURRENT CHECKS:
 10.Split_transaction_id when provided must have the same date as the reissuance date
 11.Split_transaction_id when provided must have the same stock class as the incoming security's stock class
 */
-const valid_tx_stock_reissuance = (context: OcfMachineContext, event: any, isGuard: Boolean) => {
+const valid_tx_stock_reissuance = (context: LegacyContext, event: any, isGuard: Boolean) => {
   let validity = false;
   const {transactions} = context.ocfPackageContent;
   let report: any = {transaction_type: "TX_STOCK_REISSUANCE", transaction_id: event.data.id, transaction_date: event.data.date};

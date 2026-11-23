@@ -8,8 +8,8 @@ import type {
 } from "@opencaptablecoalition/ocf-types";
 import type { OcfTransaction, TransactionFor } from "../types/ocf-input";
 import type { OcfPackageContent } from "../read_ocf_package";
-import type { Finding } from "../types/finding";
-import type { Check, GradedValidator, OcfMachineContext } from "../types/validator";
+import type { Finding, Subject } from "../types/finding";
+import type { Check, GradedValidator, LifecycleWord, OcfMachineContext, PoolEffect } from "../types/validator";
 import validators from "./validators";
 import { TX_CONVERTIBLE_ISSUANCE } from "./validators/convertible/tx_convertible_issuance";
 import { TX_CONVERTIBLE_ACCEPTANCE } from "./validators/convertible/tx_convertible_acceptance";
@@ -23,16 +23,21 @@ import { TX_WARRANT_RETRACTION } from "./validators/warrant/tx_warrant_retractio
 import { TX_WARRANT_CANCELLATION } from "./validators/warrant/tx_warrant_cancellation";
 import { TX_WARRANT_TRANSFER } from "./validators/warrant/tx_warrant_transfer";
 import { TX_WARRANT_EXERCISE } from "./validators/warrant/tx_warrant_exercise";
-import { text, toValidate } from "./validators/checkKit";
-import { noEarlierRemoval } from "./validators/checks";
-import { TX_EQUITY_COMPENSATION_ISSUANCE } from "./validators/equity_compensation/tx_equity_compensation_issuance";
-import { TX_EQUITY_COMPENSATION_ACCEPTANCE } from "./validators/equity_compensation/tx_equity_compensation_acceptance";
-import { TX_EQUITY_COMPENSATION_EXERCISE } from "./validators/equity_compensation/tx_equity_compensation_exercise";
-import { TX_EQUITY_COMPENSATION_RELEASE } from "./validators/equity_compensation/tx_equity_compensation_release";
+import { text, toValidate, type CheckObject } from "./validators/checkKit";
+import { issuanceIdChecks, noEarlierRemoval } from "./validators/checks";
+import { endOfDayFindings } from "./validators/stock_plan/pool";
+import { TX_STOCK_PLAN_POOL_ADJUSTMENT } from "./validators/stock_plan/tx_stock_plan_pool_adjustment";
+import { TX_STOCK_PLAN_RETURN_TO_POOL } from "./validators/stock_plan/tx_stock_plan_return_to_pool";
+import { withPlans } from "./stockPlan";
+import { addRoot, applyTransaction, emptyNodes, outstanding, type Verdict } from "./nodes";
+import { TX_EQUITY_COMPENSATION_ISSUANCE, TX_PLAN_SECURITY_ISSUANCE } from "./validators/equity_compensation/tx_equity_compensation_issuance";
+import { TX_EQUITY_COMPENSATION_ACCEPTANCE, TX_PLAN_SECURITY_ACCEPTANCE } from "./validators/equity_compensation/tx_equity_compensation_acceptance";
+import { TX_EQUITY_COMPENSATION_EXERCISE, TX_PLAN_SECURITY_EXERCISE } from "./validators/equity_compensation/tx_equity_compensation_exercise";
+import { TX_EQUITY_COMPENSATION_RELEASE, TX_PLAN_SECURITY_RELEASE } from "./validators/equity_compensation/tx_equity_compensation_release";
 import { TX_EQUITY_COMPENSATION_REPRICING } from "./validators/equity_compensation/tx_equity_compensation_repricing";
-import { TX_EQUITY_COMPENSATION_RETRACTION } from "./validators/equity_compensation/tx_equity_compensation_retraction";
-import { TX_EQUITY_COMPENSATION_CANCELLATION } from "./validators/equity_compensation/tx_equity_compensation_cancellation";
-import { TX_EQUITY_COMPENSATION_TRANSFER } from "./validators/equity_compensation/tx_equity_compensation_transfer";
+import { TX_EQUITY_COMPENSATION_RETRACTION, TX_PLAN_SECURITY_RETRACTION } from "./validators/equity_compensation/tx_equity_compensation_retraction";
+import { TX_EQUITY_COMPENSATION_CANCELLATION, TX_PLAN_SECURITY_CANCELLATION } from "./validators/equity_compensation/tx_equity_compensation_cancellation";
+import { TX_EQUITY_COMPENSATION_TRANSFER, TX_PLAN_SECURITY_TRANSFER } from "./validators/equity_compensation/tx_equity_compensation_transfer";
 import run_EOD from "./eod";
 
 // The validator contract types are defined in types/validator.ts; re-exported
@@ -41,16 +46,13 @@ import run_EOD from "./eod";
 // types/validator.ts directly.
 export type { GradedValidator, OcfMachineContext } from "../types/validator";
 
-// ---------------------------------------------------------------------------
-// Cap-table collections
-// ---------------------------------------------------------------------------
+// Security families
 
 /**
- * The element type held by each family collection. Pairing a collection name
- * with a payload of the wrong family is a *compile* error (see
- * `appendToCollection`).
+ * These keys identify the family in the transaction table, security records and charts. They come
+ * from the original collection names.
  */
-interface CollectionElement {
+export interface CollectionElement {
   stockIssuances: OCFStockIssuance;
   convertibleIssuances: OCFConvertibleIssuance;
   warrantIssuances: OCFWarrantIssuance;
@@ -78,32 +80,6 @@ export type OcfMachineEvent =
   | { type: "RUN_END"; date: string };
 
 // ---------------------------------------------------------------------------
-// Family-collection helpers
-// ---------------------------------------------------------------------------
-
-/**
- * Append `data` to a family collection. The `collection` literal pins `C`, so
- * `current` and `data` must both belong to that family — appending a wrong-family
- * payload (e.g. a warrant payload onto the convertible collection) is a COMPILE
- * error. Exercised in `types/ocf-machine-table.assert.ts`.
- */
-export function appendToCollection<C extends CollectionKey>(
-  _collection: C,
-  current: CollectionElement[C][],
-  data: CollectionElement[C],
-): CollectionElement[C][] {
-  return [...current, data];
-}
-
-/** Remove every member of a collection matching `securityId`. */
-function removeFromCollection<E extends { security_id: string }>(
-  current: E[],
-  securityId: unknown,
-): E[] {
-  return current.filter((obj) => obj.security_id !== securityId);
-}
-
-// ---------------------------------------------------------------------------
 // Per-transaction descriptors
 // ---------------------------------------------------------------------------
 
@@ -119,59 +95,49 @@ function removeFromCollection<E extends { security_id: string }>(
  * family migrates to the graded shape.
  */
 type Validator<T> = (
-  context: OcfMachineContext,
+  context: LegacyContext,
   event: { data?: T },
   isGuard: boolean,
 ) => any;
 
+/** Some legacy validators read outstanding stock as an array. */
+export type LegacyContext = OcfMachineContext & { stockIssuances: OCFStockIssuance[] };
+
+const legacyContext = (context: OcfMachineContext): LegacyContext => {
+  let stockIssuances: OCFStockIssuance[] | undefined;
+  return {
+    ...context,
+    get stockIssuances() {
+      return stockIssuances ??= outstanding(context.nodes, "stockIssuances");
+    },
+  };
+};
+
 /**
- * Everything the machine needs to know about one transaction type, keyed on its
- * `effect`. A non-passthrough descriptor names its validator under exactly one
- * of two mutually exclusive fields — `legacyValidate` (dual-mode shape) or
- * `validate` (graded shape) — so which convention a transaction uses is part of
- * the table's static description, and the machine dispatches on field presence
- * the same way it dispatches on `effect`. The validator is referenced once so
- * the guard and the recorded outcome always use the same one. The
- * `legacyValidate` arms exist only while families migrate; the union collapses
- * to the graded arms when the last one does.
+ * A descriptor selects the validator, applicable security families, lifecycle change and optional
+ * pool operation. Issuances and removals name their collection. Other transactions list their
+ * families. A return to pool requires a removed security.
  *
- *  - `passthrough`: no validator or mutation. The machine checks only that its
- *                   security wasn't removed earlier (see buildTransactionHandlers).
- *  - `none`:        validate and record, but mutate no collection.
- *  - `remove`:      validate, record, and filter `collection` by `security_id`.
- *  - `append`:      validate, record, and append the issuance to `collection`.
- *                   An issuance's security mustn't have been removed earlier.
- *
- * The `none`/`remove` graded arms take `GradedValidator<any>`, not
- * `GradedValidator<unknown>`: the payload is contravariant, so `unknown` would
- * reject every family-typed validator — like `Validator<unknown>` over the
- * `event: any` validators, the `any` constrains the shape, not the payload.
- *
- * The `append` variants distribute over `CollectionKey`, tying `collection` to
- * the payload family of the validator — under either field — so a family-typed
- * validator cannot be declared under a mismatched collection (demonstrated in
- * `types/ocf-machine-table.assert.ts`).
- *
- * Graded descriptors (the ones with `validate`) must also list their checks in
- * `checks` (see `types/validator.ts`). The machine doesn't read this list while
- * validating; it's for the coverage report, which shows what each transaction
- * type checks. Making it required means no family can move to the graded style
- * without listing its checks. Legacy descriptors don't have it.
- *
- * The list isn't only documentation, though. For validators built with
- * `defineValidator`, the same check definitions produce the findings, and each
- * finding's severity is copied from its check. Changing a check's severity
- * changes whether a failing transaction is blocked.
+ * The reducer applies the security and plan changes. Validators that return findings declare the
+ * checks used by both the runner and coverage report. Legacy stock validators still use their guard
+ * and report. The types require an issuance payload to match its collection.
  */
-type Descriptor =
-  | { effect: "passthrough" }
-  | { effect: "none"; legacyValidate: Validator<unknown> }
-  | { effect: "none"; validate: GradedValidator<any>; checks: readonly Check[] }
-  | { effect: "remove"; legacyValidate: Validator<unknown>; collection: CollectionKey }
-  | { effect: "remove"; validate: GradedValidator<any>; collection: CollectionKey; checks: readonly Check[] }
+type Descriptor = (
+  | { effect: "passthrough"; lifecycle: LifecycleWord; families: readonly CollectionKey[] }
+  | { effect: "none"; lifecycle: "stays"; families: readonly CollectionKey[]; legacyValidate: Validator<unknown> }
+  | {
+      effect: "none";
+      lifecycle: "stays" | "after removal";
+      families: readonly CollectionKey[];
+      validate: GradedValidator<any>;
+      checks: readonly Check[];
+    }
+  | { effect: "remove"; lifecycle: "removes"; legacyValidate: Validator<unknown>; collection: CollectionKey }
+  | { effect: "remove"; lifecycle: "removes"; validate: GradedValidator<any>; collection: CollectionKey; checks: readonly Check[] }
   | {
       [C in CollectionKey]: {
         effect: "append";
+        lifecycle: "issue";
         collection: C;
         legacyValidate: Validator<CollectionElement[C]>;
       };
@@ -179,11 +145,13 @@ type Descriptor =
   | {
       [C in CollectionKey]: {
         effect: "append";
+        lifecycle: "issue";
         collection: C;
         validate: GradedValidator<CollectionElement[C]>;
         checks: readonly Check[];
       };
-    }[CollectionKey];
+    }[CollectionKey]
+) & { pool?: PoolEffect };
 
 /** A non-passthrough descriptor — the shape the dispatch helpers consume. */
 export type ActiveDescriptor = Exclude<Descriptor, { effect: "passthrough" }>;
@@ -200,15 +168,38 @@ export type ActiveDescriptor = Exclude<Descriptor, { effect: "passthrough" }>;
  */
 export type DescriptorTable = { [K in TxKey]: Descriptor & { transaction?: K } };
 
+/** Include keys that appear on only one member of the union. */
+type KeyOfAny<T> = T extends unknown ? keyof T : never;
+
+/** A family supports vesting if its issuance type has a vesting terms or template ID. */
+export type VestingFamily = {
+  [C in CollectionKey]: Extract<KeyOfAny<CollectionElement[C]>, "vesting_terms_id" | "vesting_template_id"> extends never
+    ? never
+    : C;
+}[CollectionKey];
+
+/**
+ * Keep this list in step with the issuance types that have vesting terms. The build checks the
+ * match.
+ */
+export const VESTING_FAMILIES = [
+  "stockIssuances",
+  "warrantIssuances",
+  "equityCompensation",
+] as const satisfies readonly VestingFamily[];
+
 export const TX_DESCRIPTORS = {
+  // Reuse the current equity compensation descriptors for all seven older transaction names.
+
   // --- append: issuance appended to its family collection -----------------
-  TX_STOCK_ISSUANCE: { effect: "append", collection: "stockIssuances", legacyValidate: validators.valid_tx_stock_issuance },
+  TX_STOCK_ISSUANCE: { pool: "draws", effect: "append", lifecycle: "issue", collection: "stockIssuances", legacyValidate: validators.valid_tx_stock_issuance },
   TX_CONVERTIBLE_ISSUANCE,
   TX_WARRANT_ISSUANCE,
   TX_EQUITY_COMPENSATION_ISSUANCE,
+  TX_PLAN_SECURITY_ISSUANCE,
 
   // --- none: validate and record, no collection mutation ------------------
-  TX_STOCK_ACCEPTANCE: { effect: "none", legacyValidate: validators.valid_tx_stock_acceptance },
+  TX_STOCK_ACCEPTANCE: { effect: "none", lifecycle: "stays", families: ["stockIssuances"], legacyValidate: validators.valid_tx_stock_acceptance },
   TX_CONVERTIBLE_ACCEPTANCE,
   TX_WARRANT_ACCEPTANCE,
   TX_EQUITY_COMPENSATION_ACCEPTANCE,
@@ -220,14 +211,21 @@ export const TX_DESCRIPTORS = {
   TX_EQUITY_COMPENSATION_EXERCISE,
   TX_EQUITY_COMPENSATION_RELEASE,
   TX_EQUITY_COMPENSATION_REPRICING,
+  TX_PLAN_SECURITY_ACCEPTANCE,
+  TX_PLAN_SECURITY_EXERCISE,
+  TX_PLAN_SECURITY_RELEASE,
+  // A return credits a plan after the security's removal. An adjustment sets the plan's reserve and
+  // needs no security.
+  TX_STOCK_PLAN_RETURN_TO_POOL,
+  TX_STOCK_PLAN_POOL_ADJUSTMENT,
 
   // --- remove: filter the family collection by security_id ---------------
-  TX_STOCK_RETRACTION: { effect: "remove", collection: "stockIssuances", legacyValidate: validators.valid_tx_stock_retraction },
-  TX_STOCK_CANCELLATION: { effect: "remove", collection: "stockIssuances", legacyValidate: validators.valid_tx_stock_cancellation },
-  TX_STOCK_CONVERSION: { effect: "remove", collection: "stockIssuances", legacyValidate: validators.valid_tx_stock_conversion },
-  TX_STOCK_REISSUANCE: { effect: "remove", collection: "stockIssuances", legacyValidate: validators.valid_tx_stock_reissuance },
-  TX_STOCK_REPURCHASE: { effect: "remove", collection: "stockIssuances", legacyValidate: validators.valid_tx_stock_repurchase },
-  TX_STOCK_TRANSFER: { effect: "remove", collection: "stockIssuances", legacyValidate: validators.valid_tx_stock_transfer },
+  TX_STOCK_RETRACTION: { effect: "remove", lifecycle: "removes", collection: "stockIssuances", legacyValidate: validators.valid_tx_stock_retraction },
+  TX_STOCK_CANCELLATION: { pool: "carriesStock", effect: "remove", lifecycle: "removes", collection: "stockIssuances", legacyValidate: validators.valid_tx_stock_cancellation },
+  TX_STOCK_CONVERSION: { pool: "carriesStock", effect: "remove", lifecycle: "removes", collection: "stockIssuances", legacyValidate: validators.valid_tx_stock_conversion },
+  TX_STOCK_REISSUANCE: { pool: "carriesStock", effect: "remove", lifecycle: "removes", collection: "stockIssuances", legacyValidate: validators.valid_tx_stock_reissuance },
+  TX_STOCK_REPURCHASE: { pool: "carriesStock", effect: "remove", lifecycle: "removes", collection: "stockIssuances", legacyValidate: validators.valid_tx_stock_repurchase },
+  TX_STOCK_TRANSFER: { pool: "carriesStock", effect: "remove", lifecycle: "removes", collection: "stockIssuances", legacyValidate: validators.valid_tx_stock_transfer },
   TX_CONVERTIBLE_RETRACTION,
   TX_CONVERTIBLE_CANCELLATION,
   TX_CONVERTIBLE_TRANSFER,
@@ -239,35 +237,34 @@ export const TX_DESCRIPTORS = {
   TX_EQUITY_COMPENSATION_RETRACTION,
   TX_EQUITY_COMPENSATION_CANCELLATION,
   TX_EQUITY_COMPENSATION_TRANSFER,
+  TX_PLAN_SECURITY_RETRACTION,
+  TX_PLAN_SECURITY_CANCELLATION,
+  TX_PLAN_SECURITY_TRANSFER,
 
-  // --- passthrough: no validator of their own ----------------------------
-  //   No report entry, no collection mutation. Except for the return to pool,
-  //   the machine fails one on a security an earlier transaction removed (see
-  //   buildTransactionHandlers); otherwise they stay in `capTable` with nothing
-  //   recorded, so the characterization snapshot (which contains
-  //   TX_VESTING_START) records nothing for it.
-  //   `satisfies DescriptorTable` below forces any future OCF transaction type
-  //   to be classified here — a compile error until it is.
-  TX_ISSUER_AUTHORIZED_SHARES_ADJUSTMENT: { effect: "passthrough" },
-  TX_PLAN_SECURITY_ACCEPTANCE: { effect: "passthrough" },
-  TX_PLAN_SECURITY_CANCELLATION: { effect: "passthrough" },
-  TX_PLAN_SECURITY_EXERCISE: { effect: "passthrough" },
-  TX_PLAN_SECURITY_ISSUANCE: { effect: "passthrough" },
-  TX_PLAN_SECURITY_RELEASE: { effect: "passthrough" },
-  TX_PLAN_SECURITY_RETRACTION: { effect: "passthrough" },
-  TX_PLAN_SECURITY_TRANSFER: { effect: "passthrough" },
-  TX_STOCK_CLASS_AUTHORIZED_SHARES_ADJUSTMENT: { effect: "passthrough" },
-  TX_STOCK_CLASS_CONVERSION_RATIO_ADJUSTMENT: { effect: "passthrough" },
-  TX_STOCK_CLASS_SPLIT: { effect: "passthrough" },
-  TX_STOCK_CONSOLIDATION: { effect: "passthrough" },
-  TX_STOCK_PLAN_POOL_ADJUSTMENT: { effect: "passthrough" },
-  TX_STOCK_PLAN_RETURN_TO_POOL: { effect: "passthrough" },
-  TX_VESTING_ACCELERATION: { effect: "passthrough" },
-  TX_VESTING_EVENT: { effect: "passthrough" },
-  TX_VESTING_START: { effect: "passthrough" },
+  // The machine checks these transactions for earlier removal. Vesting leaves stock, warrants and
+  // equity grants outstanding. Successful passthrough transactions make no change to the outstanding
+  // securities.
+  TX_VESTING_START: { effect: "passthrough", lifecycle: "stays", families: VESTING_FAMILIES },
+  TX_VESTING_EVENT: { effect: "passthrough", lifecycle: "stays", families: VESTING_FAMILIES },
+  TX_VESTING_ACCELERATION: { effect: "passthrough", lifecycle: "stays", families: VESTING_FAMILIES },
+  // A consolidation replaces several stock securities with one.
+  TX_STOCK_CONSOLIDATION: { pool: "carriesStock", effect: "passthrough", lifecycle: "removes", families: ["stockIssuances"] },
+  // Class and issuer transactions name no individual security. They have no entry on a security
+  // family's chart.
+  TX_STOCK_CLASS_SPLIT: { effect: "passthrough", lifecycle: "stays", families: [] },
+  TX_STOCK_CLASS_AUTHORIZED_SHARES_ADJUSTMENT: { effect: "passthrough", lifecycle: "stays", families: [] },
+  TX_STOCK_CLASS_CONVERSION_RATIO_ADJUSTMENT: { effect: "passthrough", lifecycle: "stays", families: [] },
+  TX_ISSUER_AUTHORIZED_SHARES_ADJUSTMENT: { effect: "passthrough", lifecycle: "stays", families: [] },
 } satisfies DescriptorTable;
 
 export type { Descriptor };
+
+/**
+ * Return the security families affected by this transaction. An empty list means it names no
+ * security.
+ */
+export const lifecycleFamilies = (descriptor: Descriptor): readonly CollectionKey[] =>
+  "collection" in descriptor ? [descriptor.collection] : descriptor.families;
 
 const CONTROL_EVENTS = ["START", "RUN_EOD", "RUN_END"] as const;
 type ControlEvent = (typeof CONTROL_EVENTS)[number];
@@ -312,7 +309,7 @@ const subjectOf = (event: ValidatorEvent): string =>
     ? event.data.id
     : event.type;
 
-/** The single blocking rule for graded findings: only an error blocks. */
+/** Only an error-level finding prevents the transaction's writes. */
 const isErrorFinding = (finding: Finding): boolean => finding.severity === "error";
 
 /**
@@ -329,7 +326,7 @@ export function isValidOutcome(
   if ("validate" in descriptor) {
     return !descriptor.validate(context, event.data).some(isErrorFinding);
   }
-  return descriptor.legacyValidate(context, event, true);
+  return descriptor.legacyValidate(legacyContext(context), event, true);
 }
 
 /**
@@ -351,7 +348,7 @@ export function outcomeUpdate(
       lastErrorFindings: found.filter(isErrorFinding),
     };
   }
-  return { report: [...context.report, descriptor.legacyValidate(context, event, false)] };
+  return { report: [...context.report, descriptor.legacyValidate(legacyContext(context), event, false)] };
 }
 
 /**
@@ -403,66 +400,68 @@ export const malformedResult = (ocfPackageContent: OcfPackageContent, transactio
 // The machine — typed via setup({ types, actions, guards })
 // ---------------------------------------------------------------------------
 
-/**
- * Valid-branch collection mutation, driven by the descriptor's `effect` and
- * `collection`. `append` descriptors push the issuance onto their family
- * collection; `remove` descriptors filter it by `security_id`; `none` descriptors
- * (and control events) mutate nothing.
- */
-export function collectionUpdate(
+/** Apply a valid legacy transaction's effect and return any change to the security records. */
+export function nodesUpdate(
   context: OcfMachineContext,
   event: OcfMachineEvent,
 ): Partial<OcfMachineContext> {
   if (isControlEvent(event)) return {};
-  const descriptor = TX_DESCRIPTORS[event.type];
+  const nodes = applyTransaction(context.nodes, TX_DESCRIPTORS[event.type], event.data);
+  return nodes === context.nodes ? {} : { nodes };
+}
 
-  if (descriptor.effect === "append") {
-    // The per-key narrowing makes `event.data` the matching family payload, so a
-    // wrong-family append is a compile error (see appendToCollection). TypeScript
-    // cannot pair a runtime `descriptor.collection` with the narrowed payload, so
-    // the collection literal comes from the per-type case, not the descriptor.
-    switch (event.type) {
-      case "TX_STOCK_ISSUANCE":
-        return { stockIssuances: appendToCollection("stockIssuances", context.stockIssuances, event.data) };
-      case "TX_CONVERTIBLE_ISSUANCE":
-        return { convertibleIssuances: appendToCollection("convertibleIssuances", context.convertibleIssuances, event.data) };
-      case "TX_WARRANT_ISSUANCE":
-        return { warrantIssuances: appendToCollection("warrantIssuances", context.warrantIssuances, event.data) };
-      case "TX_EQUITY_COMPENSATION_ISSUANCE":
-        return { equityCompensation: appendToCollection("equityCompensation", context.equityCompensation, event.data) };
-      default:
-        return {};
+// Applying transactions that return findings
+
+/**
+ * Apply the writes unless an error-level check failed or was blocked. A failure contributes the
+ * current transaction as a cause. A blocked check carries the original failures forward. Warnings
+ * allow writes in either case.
+ */
+export function verdictOf(subject: Subject, findings: readonly Finding[]): Verdict {
+  const errors = findings.filter(isErrorFinding);
+  if (errors.length === 0) return { ok: true };
+
+  const roots: Subject[] = errors.some((finding) => finding.outcome === "failed") ? [subject] : [];
+  for (const finding of errors) {
+    if (finding.outcome === "blocked") {
+      for (const root of finding.roots) addRoot(roots, root);
     }
   }
+  const invalidReplacement = errors.some((finding) => finding.outcome === "failed" &&
+    (finding.check === "plan-replacement" || finding.check === "plan-source-quantity"));
+  return invalidReplacement ? { ok: false, roots, invalidReplacement } : { ok: false, roots };
+}
 
-  if (descriptor.effect === "remove") {
-    const securityId = "security_id" in event.data ? event.data.security_id : undefined;
-    // `removeFromCollection` is family-agnostic (it only needs security_id); the
-    // descriptor's own `collection` picks the field, retiring the name-prefix guess.
-    switch (descriptor.collection) {
-      case "stockIssuances":
-        return { stockIssuances: removeFromCollection(context.stockIssuances, securityId) };
-      case "convertibleIssuances":
-        return { convertibleIssuances: removeFromCollection(context.convertibleIssuances, securityId) };
-      case "warrantIssuances":
-        return { warrantIssuances: removeFromCollection(context.warrantIssuances, securityId) };
-      case "equityCompensation":
-        return { equityCompensation: removeFromCollection(context.equityCompensation, securityId) };
-    }
+/**
+ * Count failed errors, warnings and blocked checks separately so the result distinguishes problems
+ * to fix from checks to retry. Runs that stop early report the event that stopped them.
+ */
+export function completedResult(context: OcfMachineContext): string {
+  let errors = 0;
+  let warnings = 0;
+  let blocked = 0;
+  for (const finding of context.findings) {
+    if (finding.outcome === "blocked") blocked++;
+    else if (finding.severity === "error") errors++;
+    else warnings++;
   }
 
-  return {};
+  const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
+  const counted = warnings === 0 ? "" : `, with ${plural(warnings, "warning")}`;
+  const { legal_name } = context.ocfPackageContent.manifest.issuer;
+
+  if (errors === 0 && blocked === 0) {
+    return text`The validation of the OCF package for ${legal_name} is complete and the package appears valid${counted}.`;
+  }
+  const consequences = blocked === 0 ? "" : ` and ${plural(blocked, "check")} blocked by ${errors === 1 ? "it" : "them"}`;
+  return text`The validation of the OCF package for ${legal_name} is complete and found ${plural(errors, "error")}${consequences}${counted}.`;
 }
 
 // ---------------------------------------------------------------------------
 // Removed securities
 // ---------------------------------------------------------------------------
 
-/**
- * The earliest transaction in `transactions` that removes each security from
- * its collection (an effect of "remove"), by security_id: the machine's
- * `removals`, which no-earlier-removal reads. START builds it, once per run.
- */
+/** Index the earliest recorded removal attempt for each security ID when the run starts. */
 export const earliestRemovals = (transactions: readonly OcfTransaction[]): OcfMachineContext["removals"] => {
   const removals = new Map<unknown, OcfTransaction>();
   for (const ele of transactions) {
@@ -475,48 +474,45 @@ export const earliestRemovals = (transactions: readonly OcfTransaction[]): OcfMa
   return removals;
 };
 
-/** noEarlierRemoval in the shape the dispatch helpers take. */
-const notRemoved = {
+/** Stock issuance and passthrough transactions run shared checks before their own handlers. */
+const sharedChecks = (checks: readonly CheckObject<any>[]) => ({
   effect: "none",
-  validate: toValidate([noEarlierRemoval]),
-  checks: [noEarlierRemoval],
-} satisfies ActiveDescriptor;
+  lifecycle: "stays",
+  families: [],
+  checks,
+  validate: toValidate(checks),
+} as const satisfies ActiveDescriptor);
 
-/**
- * Build the `on` map for every key in `TX_DESCRIPTORS`. Active keys share the
- * two-branch transition. Graded validators declare no-earlier-removal where it
- * applies; for the transactions that can't declare it, the machine runs it
- * first. A legacy issuance runs it before its own validator, and a
- * passthrough type runs only it and is otherwise a no-op. The return to pool
- * is exempt: it records where a removed security's shares went.
- */
-function buildTransactionHandlers() {
-  const activeTransitions = [
-    {
-      guard: "isValidTx",
-      target: "capTable",
-      actions: ["recordOutcome", "mutateCollection"],
-    },
-    {
-      target: "validationError",
-      actions: ["recordOutcome", "setValidationError"],
-    },
-  ] as const;
-  const afterRemoval = {
-    guard: "followsRemoval",
+const stockIssuanceChecks = sharedChecks(issuanceIdChecks);
+const passthroughChecks = sharedChecks([noEarlierRemoval]);
+
+export function checksBeforeValidation(type: string, descriptor: Descriptor) {
+  if (descriptor.effect === "append" && "legacyValidate" in descriptor) return stockIssuanceChecks;
+  if (descriptor.effect === "passthrough") return passthroughChecks;
+}
+
+const legacyTransitions = [
+  {
+    guard: "isValidTx",
+    target: "capTable",
+    actions: ["recordOutcome", "applyToNodes"],
+  },
+  {
     target: "validationError",
-    actions: ["recordRemoval", "setRemovalError"],
-  } as const;
+    actions: ["recordOutcome", "setValidationError"],
+  },
+] as const;
 
+function buildTransactionHandlers() {
   const handlerFor = (type: TxKey) => {
     const descriptor = TX_DESCRIPTORS[type];
-    if (descriptor.effect === "passthrough") {
-      return type === "TX_STOCK_PLAN_RETURN_TO_POOL" ? {} : [afterRemoval];
+    const checks = checksBeforeValidation(type, descriptor);
+    if ("validate" in descriptor || (descriptor.effect === "passthrough" && checks)) {
+      return { target: "capTable", actions: ["applyByFindings"] } as const;
     }
-    if (descriptor.effect === "append" && "legacyValidate" in descriptor) {
-      return [afterRemoval, ...activeTransitions];
-    }
-    return activeTransitions;
+    if (descriptor.effect === "passthrough") return {};
+    if (checks) return { target: "stockIssuance", actions: "recordStockIdChecks" } as const;
+    return legacyTransitions;
   };
 
   return (Object.keys(TX_DESCRIPTORS) as TxKey[]).reduce(
@@ -534,24 +530,29 @@ export const ocfMachine = setup({
     events: OcfMachineEvent;
   },
   guards: {
-    // Guard the valid branch via the type's own validator, legacyValidate or
-    // validate (see isValidOutcome). Control events never reach this guard
-    // (they have their own handlers); the narrow drops them so `event` carries
-    // the `data` the validator reads.
+    // Use the legacy validator to choose the success or failure transition. Control events have
+    // their own handlers.
     isValidTx: ({ context, event }) => {
       if (isControlEvent(event)) return false;
       const descriptor = activeDescriptorFor(event.type);
       return descriptor ? isValidOutcome(descriptor, context, event) : false;
     },
-    // A passthrough transaction or issuance on a removed security (see
-    // noEarlierRemoval and buildTransactionHandlers).
-    followsRemoval: ({ context, event }) =>
-      !isControlEvent(event) && !isValidOutcome(notRemoved, context, event),
   },
   actions: {
-    // Record the validator's outcome on its shape's channel — legacy report
-    // entries onto `report`, graded findings onto `findings`. Same descriptor
-    // as the guard, so the guard and the record can never diverge.
+    // Record the findings and apply the transaction only if its checks allow it.
+    applyByFindings: assign(({ context, event }) => {
+      if (isControlEvent(event)) return {};
+      const descriptor = TX_DESCRIPTORS[event.type];
+      const validate: GradedValidator<any> = "validate" in descriptor ? descriptor.validate : passthroughChecks.validate;
+      const found = validate(context, event.data);
+      const nodes = applyTransaction(context.nodes, descriptor, event.data, verdictOf({ object_type: event.type, id: event.data.id }, found));
+      return {
+        ...(found.length > 0 && { findings: [...context.findings, ...found] }),
+        ...(nodes !== context.nodes && { nodes }),
+      };
+    }),
+
+    // Use the same legacy validator for the report and the pass/fail decision.
     recordOutcome: assign(({ context, event }) => {
       if (isControlEvent(event)) return {};
       const descriptor = activeDescriptorFor(event.type);
@@ -565,27 +566,18 @@ export const ocfMachine = setup({
         failureResult(isControlEvent(event) ? undefined : activeDescriptorFor(event.type), context, event),
     }),
 
-    // Valid branch collection mutation, driven by the descriptor's `effect` and
-    // `collection`. `none` descriptors (and control events) mutate nothing.
-    mutateCollection: assign(({ context, event }) => collectionUpdate(context, event)),
+    // Apply a successful legacy transaction's effect.
+    applyToNodes: assign(({ context, event }) => nodesUpdate(context, event)),
 
-    // The followsRemoval branch's record and failure message, as for a
-    // graded validator's invalid branch.
-    recordRemoval: assign(({ context, event }) => outcomeUpdate(notRemoved, context, event)),
-    setRemovalError: assign({
-      result: ({ context, event }) => failureResult(notRemoved, context, event),
-    }),
+    recordStockIdChecks: assign(({ context, event }) => outcomeUpdate(stockIssuanceChecks, context, event)),
   },
 }).createMachine({
   id: "OCF-xstate",
   initial: "capTable",
-  // A function, so each run starts with its own arrays: a caller that changes
-  // one in a run's returned context can't change the next run's.
+  // Create fresh collections for each run so a caller cannot change another run's results.
   context: () => ({
-    stockIssuances: [],
-    equityCompensation: [],
-    convertibleIssuances: [],
-    warrantIssuances: [],
+    nodes: emptyNodes(),
+    nodesAtStartOfDay: emptyNodes(),
     ocfPackageContent: {
       manifest: {},
       stakeholders: [],
@@ -613,29 +605,34 @@ export const ocfMachine = setup({
         ...buildTransactionHandlers(),
         START: {
           target: "capTable",
-          actions: assign({
-            ocfPackageContent: ({ event }) => event.data,
-            removals: ({ event }) => earliestRemovals(event.data.transactions),
+          actions: assign(({ context, event }) => {
+            // Load plans before saving the starting map so an initial reserve does not count as a
+            // first-day transaction.
+            const nodes = withPlans(context.nodes, event.data.stockPlans);
+            return {
+              ocfPackageContent: event.data,
+              removals: earliestRemovals(event.data.transactions),
+              nodes,
+              nodesAtStartOfDay: nodes,
+            };
           }),
         },
+        // Check the day's final totals before taking the snapshot. Save this map as the starting
+        // point for the next day.
         RUN_EOD: {
           target: "capTable",
-          actions: assign({
-            snapshots: ({ context, event }) => [...context.snapshots, run_EOD(context, event)],
+          actions: assign(({ context, event }) => {
+            const found = endOfDayFindings(context, context.nodesAtStartOfDay, event.date);
+            return {
+              ...(found.length === 0 ? {} : { findings: [...context.findings, ...found] }),
+              snapshots: [...context.snapshots, run_EOD(context, event)],
+              nodesAtStartOfDay: context.nodes,
+            };
           }),
         },
         RUN_END: {
           target: "capTable",
-          actions: assign({
-            // Warnings don't stop a run, so a valid package can have them. The
-            // result counts them, so a caller reading only `result` knows to
-            // look at `findings` (#215).
-            result: ({ context }) => {
-              const warnings = context.findings.filter((finding) => finding.severity === "warning").length;
-              const counted = warnings === 0 ? "" : `, with ${warnings} warning${warnings === 1 ? "" : "s"}`;
-              return text`The validation of the OCF package for ${context.ocfPackageContent.manifest.issuer.legal_name} is complete and the package appears valid${counted}.`;
-            },
-          }),
+          actions: assign({ result: ({ context }) => completedResult(context) }),
         },
         // Fires only for runtime `type` strings outside TxKey (genuinely unknown /
         // malformed). Builds its message from `event.type`, never `event.data`.
@@ -647,6 +644,16 @@ export const ocfMachine = setup({
           }),
         },
       },
+    },
+    stockIssuance: {
+      always: [
+        {
+          guard: ({ context }) => context.lastErrorFindings.length > 0,
+          target: "validationError",
+          actions: assign({ result: ({ context, event }) => failureResult(stockIssuanceChecks, context, event) }),
+        },
+        ...legacyTransitions,
+      ],
     },
     validationError: {
       type: "final",

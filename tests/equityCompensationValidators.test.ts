@@ -7,6 +7,7 @@ import {
   startSeeded,
   ev,
   contextWith,
+  contextAfterCancellation,
   validatePackage,
   withStakeholder,
   txRecord,
@@ -16,6 +17,7 @@ import {
   emittedCheckIds,
   expectFindingShape,
   type FailingScenarios,
+  collection,
 } from "./helpers";
 
 const MIGRATED_KEYS = [
@@ -76,21 +78,27 @@ describe("equity compensation issuance validity", () => {
 
     const snapshot = actor.getSnapshot();
     expect(snapshot.value).toBe("capTable");
-    expect(snapshot.context.equityCompensation).toHaveLength(1);
-    expect(snapshot.context.equityCompensation[0]).toMatchObject({ id: "eci1", security_id: "sec1" });
+    expect(collection(snapshot.context, "equityCompensation")).toHaveLength(1);
+    expect(collection(snapshot.context, "equityCompensation")[0]).toMatchObject({ id: "eci1", security_id: "sec1" });
     expect(snapshot.context.findings).toEqual([]);
   });
 
-  it("halts an invalid issuance in validationError with the error finding recorded", () => {
+  it("records an invalid issuance's error finding and goes on, with the security withheld and marked", () => {
     const actor = startSeeded(withStakeholder("someone-else"));
     actor.send(ev("TX_EQUITY_COMPENSATION_ISSUANCE", issuance()));
 
     const snapshot = actor.getSnapshot();
-    expect(snapshot.value).toBe("validationError");
+    // The validator continues after this transaction fails.
+    expect(snapshot.value).toBe("capTable");
     expect(snapshot.context.findings).toHaveLength(1);
     expect(snapshot.context.findings[0].check).toBe("stakeholder-exists");
-    expect(snapshot.context.equityCompensation).toEqual([]);
-    expect(snapshot.context.result).toContain("stakeholder-exists");
+    expect(collection(snapshot.context, "equityCompensation")).toEqual([]);
+    // Keep a record with unknown values and identify the failed issuance.
+    const root = snapshot.context.findings[0].subject;
+    expect(snapshot.context.nodes.security.get("sec1")).toMatchObject({
+      lifecycle: { value: undefined, defects: [root] },
+      issuance: { value: undefined, defects: [root] },
+    });
   });
 });
 
@@ -121,14 +129,14 @@ describe("equity compensation acceptance validity", () => {
       equityCompensation: [issuanceRecord("sec1")] as any,
       transactions: [issuanceRecord("sec1")],
     });
-    const before = structuredClone(seeded.equityCompensation);
+    const before = structuredClone(collection(seeded, "equityCompensation"));
 
     const actor = startSeeded(seeded);
     actor.send(ev("TX_EQUITY_COMPENSATION_ACCEPTANCE", acceptance()));
 
     const snapshot = actor.getSnapshot();
     expect(snapshot.value).toBe("capTable");
-    expect(snapshot.context.equityCompensation).toEqual(before);
+    expect(collection(snapshot.context, "equityCompensation")).toEqual(before);
     expect(snapshot.context.findings).toEqual([]);
   });
 
@@ -190,8 +198,8 @@ describe("equity compensation retraction validity", () => {
 
     const snapshot = actor.getSnapshot();
     expect(snapshot.value).toBe("capTable");
-    expect(snapshot.context.equityCompensation.some((e: any) => e.security_id === "sec1")).toBe(false);
-    expect(snapshot.context.equityCompensation.some((e: any) => e.security_id === "sec2")).toBe(true);
+    expect(collection(snapshot.context, "equityCompensation").some((e: any) => e.security_id === "sec1")).toBe(false);
+    expect(collection(snapshot.context, "equityCompensation").some((e: any) => e.security_id === "sec2")).toBe(true);
     expect(snapshot.context.findings).toEqual([]);
   });
 
@@ -264,8 +272,8 @@ describe("equity compensation cancellation validity", () => {
 
     const snapshot = actor.getSnapshot();
     expect(snapshot.value).toBe("capTable");
-    expect(snapshot.context.equityCompensation.some((e: any) => e.security_id === "sec1")).toBe(false);
-    expect(snapshot.context.equityCompensation.some((e: any) => e.security_id === "sec2")).toBe(true);
+    expect(collection(snapshot.context, "equityCompensation").some((e: any) => e.security_id === "sec1")).toBe(false);
+    expect(collection(snapshot.context, "equityCompensation").some((e: any) => e.security_id === "sec2")).toBe(true);
   });
 
   it("emits one no-other-transactions finding per past offender, exempting acceptances and itself", () => {
@@ -361,7 +369,7 @@ describe("equity compensation cancellation validity", () => {
     const snapshot = actor.getSnapshot();
     expect(snapshot.value).toBe("capTable");
     expect(snapshot.context.findings).toEqual([]);
-    expect(snapshot.context.equityCompensation).toEqual([]);
+    expect(collection(snapshot.context, "equityCompensation")).toEqual([]);
   });
 
   it("clears a cancellation of a v2 grant after a v2 vesting event, removing it and recording no findings", () => {
@@ -378,7 +386,7 @@ describe("equity compensation cancellation validity", () => {
     const snapshot = actor.getSnapshot();
     expect(snapshot.value).toBe("capTable");
     expect(snapshot.context.findings).toEqual([]);
-    expect(snapshot.context.equityCompensation).toEqual([]);
+    expect(collection(snapshot.context, "equityCompensation")).toEqual([]);
   });
 });
 
@@ -414,8 +422,8 @@ describe("equity compensation transfer validity", () => {
 
     const snapshot = actor.getSnapshot();
     expect(snapshot.value).toBe("capTable");
-    expect(snapshot.context.equityCompensation.some((e: any) => e.security_id === "sec1")).toBe(false);
-    expect(snapshot.context.equityCompensation.some((e: any) => e.security_id === "sec2")).toBe(true);
+    expect(collection(snapshot.context, "equityCompensation").some((e: any) => e.security_id === "sec1")).toBe(false);
+    expect(collection(snapshot.context, "equityCompensation").some((e: any) => e.security_id === "sec2")).toBe(true);
   });
 
   it("flags a not-outstanding issuance with an error naming the security_id", () => {
@@ -469,14 +477,14 @@ describe("equity compensation release validity", () => {
       equityCompensation: [issuanceRecord("sec1")] as any,
       transactions: [issuanceRecord("sec1")],
     });
-    const before = structuredClone(seeded.equityCompensation);
+    const before = structuredClone(collection(seeded, "equityCompensation"));
 
     const actor = startSeeded(seeded);
     actor.send(ev("TX_EQUITY_COMPENSATION_RELEASE", release()));
 
     const snapshot = actor.getSnapshot();
     expect(snapshot.value).toBe("capTable");
-    expect(snapshot.context.equityCompensation).toEqual(before);
+    expect(collection(snapshot.context, "equityCompensation")).toEqual(before);
     expect(snapshot.context.findings).toEqual([]);
   });
 
@@ -488,18 +496,16 @@ describe("equity compensation release validity", () => {
     expect(findings[0].message).toContain("sec1");
   });
 
-  // Release used to be passthrough, which would leave the machine in capTable
-  // here; now an invalid release stops the run.
-  it("halts an invalid release in validationError with the error finding recorded", () => {
+  // Record the invalid release and continue checking the package.
+  it("records an invalid release's error finding and goes on", () => {
     // In the package history but not the live collection.
     const actor = startSeeded(contextWith({ transactions: [issuanceRecord("sec1")] }));
     actor.send(ev("TX_EQUITY_COMPENSATION_RELEASE", release()));
 
     const snapshot = actor.getSnapshot();
-    expect(snapshot.value).toBe("validationError");
+    expect(snapshot.value).toBe("capTable");
     expect(snapshot.context.findings).toHaveLength(1);
     expectFindingShape(snapshot.context.findings[0], "issuance-exists", subject);
-    expect(snapshot.context.result).toContain("failed on rel1");
   });
 
   it("passes a second full release, which quantity-outstanding would flag once it's written", () => {
@@ -541,14 +547,14 @@ describe("equity compensation repricing validity", () => {
       equityCompensation: [issuanceRecord("sec1")] as any,
       transactions: [issuanceRecord("sec1")],
     });
-    const before = structuredClone(seeded.equityCompensation);
+    const before = structuredClone(collection(seeded, "equityCompensation"));
 
     const actor = startSeeded(seeded);
     actor.send(ev("TX_EQUITY_COMPENSATION_REPRICING", repricing()));
 
     const snapshot = actor.getSnapshot();
     expect(snapshot.value).toBe("capTable");
-    expect(snapshot.context.equityCompensation).toEqual(before);
+    expect(collection(snapshot.context, "equityCompensation")).toEqual(before);
     expect(snapshot.context.findings).toEqual([]);
   });
 
@@ -567,7 +573,7 @@ describe("equity compensation repricing validity", () => {
     const cancellation = { id: "can-1", object_type: "TX_EQUITY_COMPENSATION_CANCELLATION", security_id: "sec1", quantity: "1000", reason_text: "Terminated", date: "2021-01-01" };
 
     const { result, findings } = validatePackage([grant, cancellation, repricing({ date: "2021-06-01" })], [{ id: "sh1" }]);
-    expect(result).toContain("failed on rep1");
+    expect(result).toBe("The validation of the OCF package for Test Co is complete and found 1 error.");
     expect(findings).toHaveLength(1);
     expectFindingShape(findings[0], "issuance-exists", subject);
   });
@@ -614,7 +620,7 @@ describe("equity compensation exercise validity", () => {
       equityCompensation: [issuanceRecord("sec1")] as any,
       transactions: [issuanceRecord("sec1")],
     });
-    const before = structuredClone(seeded.equityCompensation);
+    const before = structuredClone(collection(seeded, "equityCompensation"));
 
     const actor = startSeeded(seeded);
     actor.send(ev("TX_EQUITY_COMPENSATION_EXERCISE", exercise()));
@@ -623,7 +629,7 @@ describe("equity compensation exercise validity", () => {
     expect(snapshot.value).toBe("capTable");
     // Unlike warrant exercise, which removes the exercised security, equity
     // compensation exercise removes nothing — the issuance survives.
-    expect(snapshot.context.equityCompensation).toEqual(before);
+    expect(collection(snapshot.context, "equityCompensation")).toEqual(before);
     expect(snapshot.context.findings).toEqual([]);
   });
 
@@ -710,10 +716,11 @@ describe("issuance-exists reports why the referenced issuance is unavailable", (
     );
   });
 
-  it("names the deprecated type when the security was issued only as a TX_PLAN_SECURITY_ISSUANCE", () => {
+  it("counts an issuance under the older name TX_PLAN_SECURITY_ISSUANCE as the security's issuance", () => {
+    // The message should explain that this security was issued and is no longer outstanding.
     expectSoleCause(
-      contextWith({ transactions: [{ ...issuanceRecord("sec1"), object_type: "TX_PLAN_SECURITY_ISSUANCE" }] }),
-      "The equity compensation issuance referenced by security_id sec1 uses the deprecated type TX_PLAN_SECURITY_ISSUANCE, which the validator doesn't process.",
+      contextWith({ transactions: [{ ...issuanceRecord("sec1", "2020-01-01"), object_type: "TX_PLAN_SECURITY_ISSUANCE" }] }),
+      "The equity compensation issuance referenced by security_id sec1 (dated 2020-01-01) is not outstanding as of this transaction's date.",
     );
   });
 
@@ -731,16 +738,15 @@ describe("issuance-exists reports why the referenced issuance is unavailable", (
     );
   });
 
-  it("fails a whole-package run that releases a security issued as a TX_PLAN_SECURITY_ISSUANCE, saying why", () => {
-    const deprecatedIssuance = { id: "psi-1", object_type: "TX_PLAN_SECURITY_ISSUANCE", security_id: "rsu-1", stakeholder_id: "sh1", quantity: "1000", date: "2020-01-01" };
+  it("passes a whole-package run that releases a security issued as a TX_PLAN_SECURITY_ISSUANCE", () => {
+    // The older issuance makes the grant outstanding before the release.
+    const olderNameIssuance = { id: "psi-1", object_type: "TX_PLAN_SECURITY_ISSUANCE", security_id: "rsu-1", stakeholder_id: "sh1", quantity: "1000", date: "2020-01-01" };
     const release = { id: "rel-1", object_type: "TX_EQUITY_COMPENSATION_RELEASE", security_id: "rsu-1", quantity: "400", resulting_security_ids: [], date: "2021-01-01" };
 
-    const { result, findings } = validatePackage([deprecatedIssuance, release], [{ id: "sh1" }]);
-    expect(result).toContain("failed on rel-1");
-    expect(findings).toHaveLength(1);
-    expect(findings[0].message).toBe(
-      "The equity compensation issuance referenced by security_id rsu-1 uses the deprecated type TX_PLAN_SECURITY_ISSUANCE, which the validator doesn't process.",
-    );
+    const context = validatePackage([olderNameIssuance, release], [{ id: "sh1" }]);
+    expect(context.result).toBe("The validation of the OCF package for Test Co is complete and the package appears valid.");
+    expect(context.findings).toEqual([]);
+    expect(collection(context, "equityCompensation")).toEqual([olderNameIssuance]);
   });
 });
 
@@ -802,7 +808,8 @@ describe("a conflicting transaction pair flags the later transaction, not the ea
 
     actor.send(ev("TX_EQUITY_COMPENSATION_RETRACTION", retraction));
     const { context, value } = actor.getSnapshot();
-    expect(value).toBe("validationError");
+    // The validator continues after this transaction fails.
+    expect(value).toBe("capTable");
 
     const errors = context.findings.filter((f) => f.severity === "error");
     expect(errors).toHaveLength(1);
@@ -829,11 +836,12 @@ describe("a conflicting transaction pair flags the later transaction, not the ea
     expect(afterRetraction.value).toBe("capTable");
     expect(afterRetraction.context.findings).toEqual([]);
     // The retraction removed the issuance from the live collection.
-    expect(afterRetraction.context.equityCompensation.some((e: any) => e.security_id === "sec1")).toBe(false);
+    expect(collection(afterRetraction.context, "equityCompensation").some((e: any) => e.security_id === "sec1")).toBe(false);
 
     actor.send(ev("TX_EQUITY_COMPENSATION_ACCEPTANCE", acceptance));
     const { context, value } = actor.getSnapshot();
-    expect(value).toBe("validationError");
+    // The validator continues after this transaction fails.
+    expect(value).toBe("capTable");
 
     const errors = context.findings.filter((f) => f.severity === "error");
     expect(errors.map((f) => f.check).sort()).toEqual(["issuance-exists", "no-retraction"]);
@@ -890,7 +898,7 @@ describe("the validator accepts cancelling what's left of a grant after part of 
 
   it("but still fails an exercise dated after the cancellation", () => {
     const { result, findings } = validatePackage([option, cancellation("opt-1", "2021-01-01"), exercise("2021-06-01")], stakeholders);
-    expect(result).toContain("failed on ex-1");
+    expect(result).toBe("The validation of the OCF package for Test Co is complete and found 1 error.");
     expect(findings.map((f) => f.check)).toEqual(["issuance-exists"]);
   });
 });
@@ -904,21 +912,34 @@ describe("the validator accepts cancelling what's left of a grant after part of 
 // emit; a module's declared gaps (transfer's no-other-transactions, and the
 // exercise's resulting-security checks and no-other-transactions) have no
 // failing scenario because no code path emits them.
+const fundedContext = validatePackage([
+    { ...issuanceRecord("sec1"), stock_plan_id: "plan", quantity: "10", stakeholder_id: "sh1" },
+    { ...txRecord("TX_STOCK_ISSUANCE", "stock", "output"), stakeholder_id: "sh1", stock_plan_id: "plan", stock_class_id: "common", stock_legend_ids: [], quantity: "5" },
+  ], [{ id: "sh1" }], [{ id: "common" }]);
+const invalidPlanMovements = (type: string) => ["11", "3"].map((quantity) => ({
+  context: fundedContext,
+  data: { ...txRecord(type, "move"), quantity, balance_security_id: "output", resulting_security_ids: ["output"] },
+}));
+
 const failingScenarios: FailingScenarios<MigratedKey> = {
   TX_EQUITY_COMPENSATION_ISSUANCE: [
+    { context: withStakeholder("sh1"), data: { ...issuanceRecord("sec1"), stakeholder_id: "sh1", stock_plan_id: "", quantity: "10" } },
+    {
+      context: contextWith({ stakeholders: [{ id: "sh1" }], equityCompensation: [issuanceRecord("sec1")] }),
+      data: { ...txRecord("TX_EQUITY_COMPENSATION_ISSUANCE", "duplicate"), stakeholder_id: "sh1" },
+    },
     {
       context: baseContext(),
       data: { id: "i1", object_type: "TX_EQUITY_COMPENSATION_ISSUANCE", security_id: "sec1", stakeholder_id: "nobody", date: "2021-01-01" },
     },
     {
-      context: contextWith({
-        stakeholders: [{ id: "sh1" }],
-        transactions: [
-          issuanceRecord("sec1"),
-          txRecord("TX_EQUITY_COMPENSATION_RETRACTION", "r1", "sec1", "2020-06-01"),
-        ],
-      }),
+      context: contextAfterCancellation("EQUITY_COMPENSATION"),
       data: { id: "i1", object_type: "TX_EQUITY_COMPENSATION_ISSUANCE", security_id: "sec1", stakeholder_id: "sh1", date: "2021-01-01" },
+    },
+    {
+      // The grant needs a valid quantity because it draws on a plan.
+      context: withStakeholder("sh1"),
+      data: { id: "i1", object_type: "TX_EQUITY_COMPENSATION_ISSUANCE", security_id: "sec1", stakeholder_id: "sh1", stock_plan_id: "plan-1", quantity: "many", date: "2021-01-01" },
     },
   ],
   TX_EQUITY_COMPENSATION_ACCEPTANCE: [
@@ -930,16 +951,20 @@ const failingScenarios: FailingScenarios<MigratedKey> = {
     { context: contextWith({ equityCompensation: [issuanceRecord("sec1")] as any, transactions: [issuanceRecord("sec1"), txRecord("TX_EQUITY_COMPENSATION_ACCEPTANCE", "a1", "sec1", "2020-06-01")] }), data: txRecord("TX_EQUITY_COMPENSATION_RETRACTION", "r1", "sec1", "2021-01-01") },
   ],
   TX_EQUITY_COMPENSATION_CANCELLATION: [
+    ...invalidPlanMovements("TX_EQUITY_COMPENSATION_CANCELLATION"),
     { context: contextWith({ transactions: [issuanceRecord("sec1")] }), data: txRecord("TX_EQUITY_COMPENSATION_CANCELLATION", "c1", "sec1", "2021-01-01") },
     { context: contextWith({ equityCompensation: [issuanceRecord("sec1")] as any, transactions: [issuanceRecord("sec1"), txRecord("TX_EQUITY_COMPENSATION_TRANSFER", "x1", "sec1", "2020-06-01")] }), data: txRecord("TX_EQUITY_COMPENSATION_CANCELLATION", "c1", "sec1", "2021-01-01") },
   ],
   TX_EQUITY_COMPENSATION_TRANSFER: [
+    ...invalidPlanMovements("TX_EQUITY_COMPENSATION_TRANSFER"),
     { context: contextWith({ transactions: [issuanceRecord("sec1")] }), data: txRecord("TX_EQUITY_COMPENSATION_TRANSFER", "x1", "sec1", "2021-01-01") },
   ],
   TX_EQUITY_COMPENSATION_EXERCISE: [
+    ...invalidPlanMovements("TX_EQUITY_COMPENSATION_EXERCISE"),
     { context: contextWith({ transactions: [issuanceRecord("sec1")] }), data: { id: "ex1", object_type: "TX_EQUITY_COMPENSATION_EXERCISE", security_id: "sec1", resulting_security_ids: [], date: "2021-01-01" } },
   ],
   TX_EQUITY_COMPENSATION_RELEASE: [
+    ...invalidPlanMovements("TX_EQUITY_COMPENSATION_RELEASE"),
     { context: contextWith({ transactions: [issuanceRecord("sec1")] }), data: txRecord("TX_EQUITY_COMPENSATION_RELEASE", "rel1", "sec1", "2021-01-01") },
   ],
   TX_EQUITY_COMPENSATION_REPRICING: [
@@ -987,7 +1012,7 @@ describe("declared and emitted checks stay consistent across the family", () => 
 // ---------------------------------------------------------------------------
 
 describe("equity compensation family findings migrate to the findings channel", () => {
-  it("routes an invalid equity compensation transaction to findings, leaves report clear, and serializes the errors in the failure result", () => {
+  it("routes an invalid equity compensation transaction to findings, leaves report clear, and counts the errors in the result", () => {
     const actor = startSeeded(baseContext());
     // No stakeholder matches, so the issuance is invalid.
     actor.send(ev("TX_EQUITY_COMPENSATION_ISSUANCE", {
@@ -999,14 +1024,18 @@ describe("equity compensation family findings migrate to the findings channel", 
     }));
 
     const { context, value } = actor.getSnapshot();
-    expect(value).toBe("validationError");
+    // The validator continues after this transaction fails.
+    expect(value).toBe("capTable");
     // The errors landed on findings…
     expect(context.findings.length).toBeGreaterThan(0);
     expect(context.findings.every((f) => f.severity === "error")).toBe(true);
     // …no report entry was written for a migrated equity compensation type…
     const migrated = MIGRATED_KEYS as readonly string[];
     expect(context.report.some((entry: any) => migrated.includes(entry?.transaction_type))).toBe(false);
-    // …and the failure result serialized the error findings.
-    expect(context.result).toContain(JSON.stringify(context.findings, null, 2));
+    // The final result counts the findings.
+    actor.send({ type: "RUN_END", date: "2021-01-01" });
+    expect(actor.getSnapshot().context.result).toBe(
+      `The validation of the OCF package for Test Co is complete and found ${context.findings.length} error${context.findings.length === 1 ? "" : "s"}.`,
+    );
   });
 });

@@ -9,19 +9,42 @@ import * as os from "os";
 import * as path from "path";
 import { expect } from "vitest";
 import { createActor } from "xstate";
-import { ocfValidator } from "../ocf_validator";
-import { earliestRemovals, ocfMachine, TX_DESCRIPTORS, type OcfMachineEvent } from "../ocf_validator/ocfMachine";
+import { validateOcfPackage } from "../ocf_validator";
+import { readOcfPackage } from "../read_ocf_package";
+import { applyTransaction, emptyNodes, outstanding, type NodeMap } from "../ocf_validator/nodes";
+import { earliestRemovals, ocfMachine, TX_DESCRIPTORS, type CollectionKey, type Descriptor, type OcfMachineEvent } from "../ocf_validator/ocfMachine";
 import type { Finding } from "../types/finding";
+import { expectShadowExplained } from "./lifecycleShadow";
 import type { Check, GradedValidator, OcfMachineContext } from "../types/validator";
 
+/** Security families use the original collection names. */
+const FAMILIES = ["stockIssuances", "convertibleIssuances", "warrantIssuances", "equityCompensation"] as const satisfies readonly CollectionKey[];
+
 /**
- * A full, mostly-empty machine context; `overrides` replace top-level fields.
- * Unless overridden, `removals` indexes the package's transactions, as START
- * builds it, so a seeded actor sees the same removals a real run would.
+ * Tests can supply starting issuances by family. baseContext stores them in the same form as the
+ * validator.
  */
-export const baseContext = (overrides: Partial<OcfMachineContext> = {}): OcfMachineContext => {
+export type ContextSeed = Partial<OcfMachineContext> & { [C in CollectionKey]?: readonly unknown[] };
+
+/** The reducer needs only a collection and an issuance effect to seed this family. */
+const issues = (collection: CollectionKey) => ({ effect: "append", collection }) as unknown as Descriptor;
+
+/** Add the starting issuances using the production reducer. */
+const seededNodes = (seed: ContextSeed): NodeMap =>
+  FAMILIES.reduce(
+    (nodes, family) =>
+      (seed[family] ?? []).reduce<NodeMap>((map, issuance) => applyTransaction(map, issues(family), issuance as any), nodes),
+    seed.nodes ?? emptyNodes(),
+  );
+
+/**
+ * Start with an empty context, apply test overrides and index removals from the package as the START
+ * event does.
+ */
+export const baseContext = (overrides: ContextSeed = {}): OcfMachineContext => {
+  const { stockIssuances, convertibleIssuances, warrantIssuances, equityCompensation, ...fields } = overrides;
   const ocfPackageContent =
-    overrides.ocfPackageContent ??
+    fields.ocfPackageContent ??
     ({
       manifest: { issuer: { legal_name: "Test Co" } },
       stakeholders: [],
@@ -33,10 +56,6 @@ export const baseContext = (overrides: Partial<OcfMachineContext> = {}): OcfMach
       valuations: [],
     } as OcfMachineContext["ocfPackageContent"]);
   return {
-    stockIssuances: [],
-    convertibleIssuances: [],
-    warrantIssuances: [],
-    equityCompensation: [],
     ocfPackageContent,
     removals: earliestRemovals(ocfPackageContent.transactions),
     report: [],
@@ -44,28 +63,36 @@ export const baseContext = (overrides: Partial<OcfMachineContext> = {}): OcfMach
     lastErrorFindings: [],
     snapshots: [],
     result: "Incomplete",
-    ...overrides,
+    nodesAtStartOfDay: emptyNodes(),
+    ...fields,
+    nodes: seededNodes(overrides),
   };
 };
 
-/**
- * Runs the whole validator over a package holding the given transactions,
- * stakeholders, and stock classes, so the run goes through the driver and
- * same-day sort as a real one does. It writes a minimal package (a manifest, a
- * stakeholders file, a stock classes file, and a transactions file) to a
- * temporary directory and removes it afterwards.
- */
-export const validatePackage = (
+/** Read the family's outstanding issuances in issuance order. */
+export const collection = <C extends CollectionKey>(context: OcfMachineContext, family: C) =>
+  outstanding(context.nodes, family);
+
+export const validateWithShadow = (dir: string) => {
+  const visits: Finding[][] = [];
+  const context = validateOcfPackage(readOcfPackage(dir), (findings) => visits.push(findings));
+  return { ...context, shadow: expectShadowExplained(context.ocfPackageContent.transactions, { context, visits }) };
+};
+
+/** Run a validator on a temporary OCF package written to disk. */
+export const validatePackageWith = <T>(validate: (dir: string) => T) => (
   transactions: Record<string, unknown>[],
   stakeholders: { id: string }[] = [],
   stockClasses: { id: string }[] = [],
-): OcfMachineContext => {
+  stockPlans: Record<string, unknown>[] = [],
+) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ocf-tools-test-"));
   try {
     const write = (name: string, content: unknown) =>
       fs.writeFileSync(path.join(dir, name), JSON.stringify(content));
     write("Stakeholders.ocf.json", { items: stakeholders });
     write("StockClasses.ocf.json", { items: stockClasses });
+    if (stockPlans.length) write("StockPlans.ocf.json", { items: stockPlans });
     write("Transactions.ocf.json", { items: transactions });
     write("Manifest.ocf.json", {
       issuer: { legal_name: "Test Co" },
@@ -73,20 +100,30 @@ export const validatePackage = (
       transactions_files: [{ filepath: "Transactions.ocf.json" }],
       stock_classes_files: [{ filepath: "StockClasses.ocf.json" }],
       vesting_terms_files: [],
-      stock_plans_files: [],
+      stock_plans_files: stockPlans.length ? [{ filepath: "StockPlans.ocf.json" }] : [],
       stock_legend_templates_files: [],
       valuations_files: [],
     });
-    return ocfValidator(dir);
+    return validate(dir);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
 };
 
-/** Start an actor seeded into `capTable` with the given context. */
-export const startSeeded = (context: OcfMachineContext) =>
+export const validatePackage = validatePackageWith(validateWithShadow);
+
+/** Seed an applied removal for checks that run directly against a context. */
+export function contextAfterCancellation(family: string, security_id = "sec1") {
+  return validatePackage([
+    { ...txRecord(`TX_${family}_ISSUANCE`, "issue", security_id, "2020-01-01"), stakeholder_id: "sh1" },
+    txRecord(`TX_${family}_CANCELLATION`, "cancel", security_id, "2020-06-01"),
+  ], [{ id: "sh1" }]);
+}
+
+/** Start the machine in capTable with the supplied records and issuances. */
+export const startSeeded = (context: OcfMachineContext & ContextSeed) =>
   createActor(ocfMachine, {
-    snapshot: ocfMachine.resolveState({ value: "capTable", context }),
+    snapshot: ocfMachine.resolveState({ value: "capTable", context: baseContext(context) }),
   }).start();
 
 /** Cast a hand-built event to the typed event union (test-only boundary). */
@@ -95,7 +132,7 @@ export const ev = (type: string, data: Record<string, unknown> = {}): OcfMachine
 
 /** A context whose package `transactions` and `stakeholders` lists are the ones given. */
 export const contextWith = (
-  overrides: Partial<OcfMachineContext> & { transactions?: any[]; stakeholders?: { id: string }[] } = {},
+  overrides: ContextSeed & { transactions?: any[]; stakeholders?: { id: string }[] } = {},
 ): OcfMachineContext => {
   const { transactions = [], stakeholders = [], ...rest } = overrides;
   return baseContext({
@@ -162,7 +199,7 @@ export const emittedCheckIds = <K extends string>(scenarios: FailingScenarios<K>
   return emitted;
 };
 
-/** Assert a finding carries the declared id, error severity, and the transaction as subject. */
+/** Check the error level, outcome, check ID and transaction named in the finding. */
 export const expectFindingShape = (
   finding: Finding,
   check: string,
@@ -170,5 +207,6 @@ export const expectFindingShape = (
 ) => {
   expect(finding.check).toBe(check);
   expect(finding.severity).toBe("error");
+  expect(finding.outcome).toBe("failed");
   expect(finding.subject).toEqual(subject);
 };

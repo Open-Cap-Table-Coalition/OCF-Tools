@@ -1,4 +1,4 @@
-import {OcfMachineContext} from '../../ocfMachine';
+import {LegacyContext} from '../../ocfMachine';
 
 /*
 CURRENT CHECKS:
@@ -10,7 +10,7 @@ MISSING CHECKS:
 None
 */
 
-const valid_tx_stock_acceptance = (context: OcfMachineContext, event: any, isGuard: Boolean) => {
+const valid_tx_stock_acceptance = (context: LegacyContext, event: any, isGuard: Boolean) => {
   const {transactions} = context.ocfPackageContent;
 
   let validity = false;

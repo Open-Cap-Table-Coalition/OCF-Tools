@@ -30,7 +30,7 @@ Use a focused check or reducer test for the rule itself. For changes to ordering
 
 ## Write comments, documentation and PR descriptions
 
-Name the transaction, field or person affected. Use the names in the OCF schema or code when a reader needs them to find a rule. Explain a technical term the first time its meaning matters. Use ordinary verbs such as “reads,” “checks,” “adds” and “returns.” Avoid invented labels, project shorthand and references to numbered steps that only make sense in an earlier discussion.
+Keep code comments short. Write them in plain English that someone new to the project can understand. Name the transaction, field or person affected. Use the names in the OCF schema or code when a reader needs them to find a rule. Explain a technical term the first time its meaning matters. Use ordinary verbs such as “reads,” “checks,” “adds” and “returns.” Avoid invented labels, project shorthand and references to numbered steps that only make sense in an earlier discussion.
 
 Place a comment beside the decision it explains. For example, “Check the plan after the last transaction of the day because a cancellation can identify a balance grant that was issued earlier that day.” The test for that decision should show the final share count. Remove comments that only repeat the next statement.
 

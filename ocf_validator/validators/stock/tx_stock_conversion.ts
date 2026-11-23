@@ -1,4 +1,4 @@
-import { OcfMachineContext } from "../../ocfMachine";
+import { LegacyContext } from "../../ocfMachine";
 
 /*
 CURRENT CHECKS:
@@ -20,7 +20,7 @@ NOT IMPLEMENTED:
 The quantity_converted variable must equal the sum of any stock issuances referred to in the resulting_security_ids variable
 */
 
-const valid_tx_stock_conversion = (context: OcfMachineContext, event: any, isGuard: Boolean) => {
+const valid_tx_stock_conversion = (context: LegacyContext, event: any, isGuard: Boolean) => {
   let validity = false;
   const { transactions } = context.ocfPackageContent;
   let report: any = { transaction_type: "TX_STOCK_CONVERSION", transaction_id: event.data.id, transaction_date: event.data.date };

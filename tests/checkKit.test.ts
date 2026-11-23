@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { defineValidator, text, type CheckObject } from "../ocf_validator/validators/checkKit";
+import { defineValidator, text, toValidate, type CheckObject } from "../ocf_validator/validators/checkKit";
+import type { OcfMachineContext } from "../types/validator";
 import { stakeholderExists } from "../ocf_validator/validators/checks";
 import { issuanceExists } from "../ocf_validator/validators/equity_compensation/checks";
 import { baseContext, contextWith, runValidator } from "./helpers";
@@ -42,11 +43,43 @@ describe("a check that throws", () => {
     const data = { ...subject, security_id: "safe-1", stakeholder_id: "nobody", date: "2021-01-01" } as any;
 
     expect(validate(baseContext(), data)).toEqual([
-      { severity: "error", check: "throws", message: "The check threw TypeError: Cannot convert object to primitive value", subject },
-      { severity: "error", check: "stakeholder-exists", message: "The stakeholder nobody referenced by the transaction was not found in the stakeholder file.", subject },
+      { severity: "error", outcome: "failed", check: "throws", message: "The check threw TypeError: Cannot convert object to primitive value", subject },
+      { severity: "error", outcome: "failed", check: "stakeholder-exists", message: "The stakeholder nobody referenced by the transaction was not found in the stakeholder file.", subject },
     ]);
   });
 });
+
+describe("a finding's outcome", () => {
+  it("is failed for every finding a check that ran produces, at either severity", () => {
+    // The runner currently emits failed findings. Only blocked findings carry the failures that
+    // caused them.
+    const warns = {
+      id: "warns",
+      severity: "warning",
+      description: "Warns on every transaction.",
+      run: () => ["A warning."],
+    } satisfies CheckObject;
+    const { validate } = defineValidator({
+      transaction: "TX_CONVERTIBLE_ISSUANCE",
+      effect: "append",
+      collection: "convertibleIssuances",
+      checks: [warns, stakeholderExists],
+    });
+    const data = { id: "ci-1", object_type: "TX_CONVERTIBLE_ISSUANCE", security_id: "safe-1", stakeholder_id: "nobody", date: "2021-01-01" } as any;
+
+    const findings = validate(baseContext(), data);
+
+    expect(findings.map((finding) => [finding.severity, finding.outcome])).toEqual([
+      ["warning", "failed"],
+      ["error", "failed"],
+    ]);
+    for (const finding of findings) expect(finding).not.toHaveProperty("roots");
+  });
+});
+
+/** Run one check through the production runner and return its messages. */
+const messagesOf = (check: CheckObject<any>, context: OcfMachineContext, data: Record<string, unknown>): string[] =>
+  toValidate([check])(context, data).map((finding) => finding.message);
 
 describe("every check message renders a malformed package value", () => {
   // Each case puts the unprintable value where its check interpolates a
@@ -67,15 +100,16 @@ describe("every check message renders a malformed package value", () => {
   const withEquityCompensation = (...transactions: Record<string, unknown>[]) =>
     contextWith({ equityCompensation: [equityCompensation] as any, transactions: [equityCompensation, ...transactions] });
 
-  it("renders a malformed security id in the undated and deprecated issuance messages", () => {
-    expect(issuanceExists.run(contextWith(), { security_id: unprintable } as any)).toEqual([
+  it("renders a malformed security id in the undated and no-longer-outstanding issuance messages", () => {
+    expect(messagesOf(issuanceExists, contextWith(), { security_id: unprintable })).toEqual([
       `The transaction has no date, so it can't be checked against the equity compensation issuance with security_id {"toString":null}.`,
     ]);
+    // The history includes an older-name issuance that is no longer outstanding.
     const context = contextWith({
-      transactions: [{ object_type: "TX_PLAN_SECURITY_ISSUANCE", security_id: unprintable }],
+      transactions: [{ object_type: "TX_PLAN_SECURITY_ISSUANCE", security_id: unprintable, date: "2020-01-01" }],
     });
-    expect(issuanceExists.run(context, { security_id: unprintable, date: "2021-01-01" })).toEqual([
-      `The equity compensation issuance referenced by security_id {"toString":null} uses the deprecated type TX_PLAN_SECURITY_ISSUANCE, which the validator doesn't process.`,
+    expect(messagesOf(issuanceExists, context, { security_id: unprintable, date: "2021-01-01" })).toEqual([
+      `The equity compensation issuance referenced by security_id {"toString":null} (dated 2020-01-01) is not outstanding as of this transaction's date.`,
     ]);
   });
 

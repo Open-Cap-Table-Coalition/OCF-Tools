@@ -1,41 +1,33 @@
-import type {
-  OCFStockIssuance,
-  OCFConvertibleIssuance,
-  OCFWarrantIssuance,
-  OCFEquityCompensationIssuance,
-} from "@opencaptablecoalition/ocf-types";
+import type { NodeMap } from "../ocf_validator/nodes";
 import type { OcfPackageContent } from "../read_ocf_package";
 import type { OcfTransaction } from "./ocf-input";
 import type { Snapshot } from "./snapshot";
 import type { Finding, Severity } from "./finding";
 
 /**
- * The machine context a validator receives: the package under validation, the
- * per-family collections accumulated so far, and the record channels —
- * `report` for legacy dual-mode validators, `findings` for graded ones.
- * `report` retires with the legacy convention once every family returns
- * findings.
+ * The context holds the input package, current records and results. Older validators write to
+ * report. Validators built from checks write to findings.
  */
 export type OcfMachineContext = {
-  stockIssuances: OCFStockIssuance[];
-  equityCompensation: OCFEquityCompensationIssuance[];
-  convertibleIssuances: OCFConvertibleIssuance[];
-  warrantIssuances: OCFWarrantIssuance[];
+  /**
+   * Current security and stock plan records. Applying a transaction returns an updated map. Use outstanding to list
+   * a family's current issuances.
+   */
+  nodes: NodeMap;
   ocfPackageContent: OcfPackageContent;
   /**
    * An index of the package, not a record of the run: each security's
    * earliest transaction in the package that removes it from its collection
    * (a cancellation, conversion, transfer, and so on), by security_id, even if
-   * the run stops before it. Built when the run starts, for the
-   * no-earlier-removal check.
+   * the run stops before it. A security record tracks its applied removal separately.
    */
   removals: ReadonlyMap<unknown, DeepReadonly<OcfTransaction>>;
+  /** Save the records at the start of the day so daily checks can identify which plans changed. */
+  nodesAtStartOfDay: NodeMap;
   report: any[];
   findings: Finding[];
   /**
-   * Machine bookkeeping, not validator input: the error findings of the most
-   * recently recorded transaction. Written at record time, read only by the
-   * failure branch to build the failure message.
+   * Error findings from the shared ID checks on the latest legacy stock issuance.
    */
   lastErrorFindings: Finding[];
   snapshots: Snapshot[];
@@ -56,14 +48,8 @@ export type DeepReadonly<T> = T extends readonly (infer E)[]
       : T;
 
 /**
- * A graded validator for a transaction whose payload is `T`: receives the
- * payload directly — no guard flag — and returns findings. The machine derives
- * everything else from that one return value: the transaction is valid iff no
- * finding carries severity "error" (warnings alone do not block), and the
- * findings are recorded on `context.findings`, never on `context.report`.
- * The machine invokes a validator up to twice per transaction (guard and
- * record), always with identical inputs, so a validator must be pure; its
- * inputs are typed `DeepReadonly` so mutating them is a compile error.
+ * A validator returns findings for one transaction. The machine records them and applies writes only
+ * when no error-level finding prevents it. Warnings allow writes, and later transactions still run.
  */
 export type GradedValidator<T> = (
   context: DeepReadonly<OcfMachineContext>,
@@ -98,3 +84,16 @@ export type Check = {
   description: string;
   implemented?: false;
 };
+
+/**
+ * A security starts unissued. Issuance makes it outstanding and removal ends that state. A "stays"
+ * transaction requires an outstanding security. An "after removal" transaction requires a removed
+ * security.
+ */
+export type LifecycleWord = "issue" | "stays" | "removes" | "after removal";
+
+/**
+ * The pool operation tells the reducer whether to charge a grant, carry shares already charged,
+ * credit a return or replace the reserve.
+ */
+export type PoolEffect = "draws" | "carries" | "carriesStock" | "returns" | "reserves";

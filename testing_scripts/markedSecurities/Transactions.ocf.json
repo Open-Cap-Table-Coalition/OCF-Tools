@@ -1,0 +1,63 @@
+{
+  "file_type": "OCF_TRANSACTIONS_FILE",
+  "items": [
+    {
+      "id": "ci-1",
+      "object_type": "TX_CONVERTIBLE_ISSUANCE",
+      "date": "2021-01-05",
+      "security_id": "safe-1",
+      "custom_id": "SAFE-1",
+      "stakeholder_id": "ada",
+      "security_law_exemptions": [],
+      "investment_amount": { "amount": "50000.00", "currency": "USD" },
+      "convertible_type": "SAFE",
+      "conversion_triggers": [],
+      "seniority": 1
+    },
+    {
+      "id": "wi-1",
+      "object_type": "TX_WARRANT_ISSUANCE",
+      "date": "2021-01-10",
+      "security_id": "war-1",
+      "custom_id": "W-1",
+      "stakeholder_id": "nobody",
+      "security_law_exemptions": [],
+      "quantity": "1000",
+      "purchase_price": { "amount": "100.00", "currency": "USD" },
+      "exercise_triggers": []
+    },
+    {
+      "id": "wa-1",
+      "object_type": "TX_WARRANT_ACCEPTANCE",
+      "date": "2021-02-01",
+      "security_id": "war-1"
+    },
+    {
+      "id": "cv-1",
+      "object_type": "TX_CONVERTIBLE_CONVERSION",
+      "date": "2021-03-01",
+      "security_id": "safe-1",
+      "reason_text": "Converted at the Series A.",
+      "trigger_id": "series-a",
+      "resulting_security_ids": ["stock-that-was-never-issued"]
+    },
+    {
+      "id": "wi-2",
+      "object_type": "TX_WARRANT_ISSUANCE",
+      "date": "2021-04-01",
+      "security_id": "war-2",
+      "custom_id": "W-2",
+      "stakeholder_id": "grace",
+      "security_law_exemptions": [],
+      "quantity": "500",
+      "purchase_price": { "amount": "50.00", "currency": "USD" },
+      "exercise_triggers": []
+    },
+    {
+      "id": "wa-2",
+      "object_type": "TX_WARRANT_ACCEPTANCE",
+      "date": "2021-04-15",
+      "security_id": "war-2"
+    }
+  ]
+}

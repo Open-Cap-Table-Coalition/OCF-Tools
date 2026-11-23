@@ -1,4 +1,5 @@
-import { defineValidator, asGap, type CheckObject } from "../checkKit";
+import { planReplacement, planSourceQuantity } from "./planChecks";
+import { defineValidator, asGap, underOlderName, type CheckObject } from "../checkKit";
 import { issuanceExists, noOtherTransactions, quantityOutstanding } from "./checks";
 
 // The exercise documents these resulting-security checks but implements none of
@@ -40,9 +41,13 @@ const quantityReconciles = {
 export const TX_EQUITY_COMPENSATION_EXERCISE = defineValidator({
   transaction: "TX_EQUITY_COMPENSATION_EXERCISE",
   effect: "none",
+  pool: "carriesStock",
+  families: ["equityCompensation"],
   checks: [
     issuanceExists,
     quantityOutstanding,
+    planSourceQuantity,
+    planReplacement,
     resultingStockExists,
     // The exercise doesn't perform the family's no-other-transactions yet, so
     // it's listed as a gap. It reuses cancellation's definition so the two stay
@@ -53,3 +58,6 @@ export const TX_EQUITY_COMPENSATION_EXERCISE = defineValidator({
     quantityReconciles,
   ],
 });
+
+/** The same validator under the transaction's older name. */
+export const TX_PLAN_SECURITY_EXERCISE = underOlderName(TX_EQUITY_COMPENSATION_EXERCISE, "TX_PLAN_SECURITY_EXERCISE");

@@ -1,5 +1,6 @@
 export { readOcfPackage } from "./read_ocf_package";
 export { ocfValidator } from "./ocf_validator";
+export { outstanding } from "./ocf_validator/nodes";
 export { ocfSnapshot } from "./ocf_snapshot";
 
 // Return types of the public entry points, so the surface is nameable by consumers.
@@ -7,3 +8,4 @@ export { ocfSnapshot } from "./ocf_snapshot";
 export type { OcfPackageContent } from "./read_ocf_package";
 export type { OcfMachineContext } from "./types/validator";
 export type { Snapshot } from "./types/snapshot";
+export type { BlockedFinding, FailedFinding, Finding, Outcome, Severity, Subject } from "./types/finding";

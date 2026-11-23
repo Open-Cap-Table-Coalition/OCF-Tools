@@ -1,43 +1,37 @@
 import type { TransactionFor } from "../../types/ocf-input";
-import type { Finding } from "../../types/finding";
+import type { Finding, Subject } from "../../types/finding";
+import { addRoot, fieldAt, type FieldRef, type FieldRefValue, type NodeMap } from "../nodes";
 import type {
   Check,
   DeepReadonly,
   GradedValidator,
+  LifecycleWord,
   OcfMachineContext,
+  PoolEffect,
 } from "../../types/validator";
 import type { CollectionKey, TxKey } from "../ocfMachine";
 
 /**
- * One validation check, written as a plain object: its id, severity, and
- * description, plus a `run` function that performs it.
+ * Define each check once with an ID, severity, description and optional run function. Return one
+ * message per problem. Omitting run lists a known gap in coverage.
  *
- * `run` returns a list of failure messages, one per problem found, or an empty
- * list if the check passes. It returns only the message text. `defineValidator`
- * fills in each finding's severity, check id, and subject from this object, so
- * a check can't get them wrong.
+ * Declare each state field the check needs in reads. The runner blocks the check if an earlier
+ * failure makes one of those fields unreliable. Other checks still run. Use the supplied read
+ * function for those fields. Package data is available through the context.
  *
- * A check with no `run` is a declared gap: a check we know is needed but
- * haven't written yet. The coverage report lists it as not implemented, and it
- * never produces findings.
- *
- * `P` names the transaction fields the check reads, e.g. `{ security_id: string }`.
- * Any transaction that has those fields can reuse the check, and
- * `defineValidator` won't compile a check attached to a transaction that lacks
- * them.
- *
- * Write a check as `{ ... } satisfies CheckObject<P>` and leave `run`'s
- * parameters unannotated. They then take their types from here, which makes the
- * context and the transaction read-only inside `run`: a check that tries to
- * modify either won't compile.
- *
- * Keep `run` declared as a property (`run?: (...) => ...`), not a method
- * (`run?(...)`). TypeScript checks method parameters more loosely, so the
- * wrong-field protection above would quietly stop working.
+ * Use satisfies CheckObject<P> to check the input fields and keep the inputs read-only. Declare run
+ * as a function property so TypeScript checks parameter compatibility.
  */
 export type CheckObject<P = unknown> = Pick<Check, "id" | "severity" | "description"> & {
-  run?: (context: DeepReadonly<OcfMachineContext>, data: DeepReadonly<P>) => string[];
+  reads?: (data: DeepReadonly<P>) => readonly FieldRef[];
+  run?: (context: DeepReadonly<CheckContext>, data: DeepReadonly<P>, read: ReadField) => string[];
 };
+
+/** Checks use declared reads for derived state. */
+export type CheckContext = Pick<OcfMachineContext, "ocfPackageContent" | "removals">;
+
+/** Read a declared field. A missing or unknown value produces undefined. An undeclared read throws. */
+export type ReadField = <R extends FieldRef>(ref: R) => DeepReadonly<FieldRefValue<R>> | undefined;
 
 const show = (value: unknown): string => {
   try {
@@ -77,21 +71,28 @@ export const asGap = ({ id, severity, description }: CheckObject<any>): CheckObj
 });
 
 /**
- * What a validator module declares: which transaction it validates, what that
- * transaction does to the cap table, and its list of checks.
- *
- * `effect` is one of:
- *  - "none":   validate only; no collection changes (e.g. acceptances).
- *  - "append": add the transaction to `collection` (issuances).
- *  - "remove": remove the security from `collection` (e.g. cancellations).
- * A "none" transaction changes no collection, so it can't name one.
- *
- * The checks are typed loosely here; `defineValidator` makes sure each one fits
- * the transaction.
+ * Declare the transaction, its checks, its security change and any pool operation. Issuances and
+ * removals name a collection. Other checked transactions list their families and can require a
+ * previously removed security.
  */
-type Spec =
-  | { transaction: TxKey; effect: "none"; collection?: never; checks: readonly CheckObject<any>[] }
-  | { transaction: TxKey; effect: "append" | "remove"; collection: CollectionKey; checks: readonly CheckObject<any>[] };
+type Spec = { pool?: PoolEffect } & (
+  | {
+      transaction: TxKey;
+      effect: "none";
+      collection?: never;
+      lifecycle?: "after removal";
+      families: readonly CollectionKey[];
+      checks: readonly CheckObject<any>[];
+    }
+  | { transaction: TxKey; effect: "append" | "remove"; collection: CollectionKey; checks: readonly CheckObject<any>[] }
+);
+
+/** Derive the usual lifecycle change from the effect so authors only specify it once. */
+const LIFECYCLE_OF_EFFECT = {
+  append: "issue",
+  none: "stays",
+  remove: "removes",
+} as const satisfies Record<Spec["effect"], LifecycleWord>;
 
 /**
  * Builds the check list the coverage report reads: each check's id, severity,
@@ -109,34 +110,73 @@ const toMetadata = (checks: readonly CheckObject<any>[]): readonly Check[] =>
     return metadata;
   });
 
+const describeField = (ref: FieldRef): string => {
+  if (ref.kind === "security") return text`the ${ref.field} of security ${ref.id}`;
+  return ref.field === "drawn"
+    ? text`the shares drawn from stock plan ${ref.id}`
+    : text`the shares reserved for stock plan ${ref.id}`;
+};
+
+const sameField = (a: FieldRef, b: FieldRef): boolean =>
+  a.kind === b.kind && a.id === b.id && a.field === b.field &&
+  (a.kind !== "security" || (b.kind === "security" && a.family === b.family));
+
+/** Collect the distinct failures affecting these fields and the first affected field for the message. */
+const defectsOn = (nodes: NodeMap, refs: readonly FieldRef[]): { roots: Subject[]; ref?: FieldRef } => {
+  const roots: Subject[] = [];
+  let first: FieldRef | undefined;
+  for (const ref of refs) {
+    const defects = fieldAt(nodes, ref)?.defects ?? [];
+    if (defects.length > 0) first ??= ref;
+    for (const root of defects) addRoot(roots, root);
+  }
+  return { roots, ref: first };
+};
+
+/** Format the transaction types and IDs for a finding. */
+const namesOf = (roots: readonly Subject[]): string => {
+  const names = roots.map((root) => text`${root.object_type} ${root.id}`);
+  if (names.length <= 2) return names.join(" and ");
+  return `${names.slice(0, -1).join(", ")}, and ${names[names.length - 1]}`;
+};
+
 /**
- * Builds the validator function from the checks. It runs each check that has a
- * `run`, in list order, and turns every message returned into a finding. The
- * finding's severity and check id come from the check; its subject (the
- * transaction's type and id) comes from the transaction being validated. The
- * only thing a check controls is the message text.
- *
- * A check that throws produces one error finding saying so, whatever the
- * check's severity: a check that couldn't finish has checked nothing, so the
- * transaction can't pass on it. The other checks still run. A package value
- * of the wrong type can make a check throw (#218), and a throw that left the
- * validator would stop the whole run.
- *
- * `data` is typed `any` here. `defineValidator` checks every check against the
- * transaction's type before building one; any other caller must make sure its
- * checks can read the transactions it gives them.
+ * Run implemented checks in order. Produce a failed finding for each message. A check with
+ * unreliable inputs produces a blocked finding naming the earlier failures. Continue with the
+ * remaining checks. A thrown exception produces an error finding.
  */
 export const toValidate =
   (checks: readonly CheckObject<any>[]): GradedValidator<any> =>
   (context, data: any) => {
     const subject = { object_type: data.object_type, id: data.id };
+    const { nodes, ocfPackageContent, removals } = context;
+    const checkContext = { ocfPackageContent, removals };
     const findings: Finding[] = [];
     for (const check of checks) {
       if (!check.run) continue;
       let severity = check.severity;
       let messages: string[];
       try {
-        messages = check.run(context, data);
+        const refs = check.reads?.(data) ?? [];
+        const { roots, ref } = defectsOn(nodes, refs);
+        if (ref !== undefined) {
+          findings.push({
+            severity,
+            outcome: "blocked",
+            check: check.id,
+            message: `Not checked: it reads ${describeField(ref)}, which can't be relied on because ${namesOf(roots)} failed.`,
+            subject,
+            roots,
+          });
+          continue;
+        }
+        const read: ReadField = (wanted) => {
+          if (!refs.some((declared) => sameField(declared, wanted))) {
+            throw new Error(`It read ${describeField(wanted)}, which it doesn't declare in its reads.`);
+          }
+          return fieldAt(nodes, wanted, removals)?.value as DeepReadonly<FieldRefValue<typeof wanted>> | undefined;
+        };
+        messages = check.run(checkContext, data, read);
       } catch (error) {
         severity = "error";
         messages = [text`The check threw ${error}`];
@@ -144,6 +184,7 @@ export const toValidate =
       for (const message of messages) {
         findings.push({
           severity,
+          outcome: "failed",
           check: check.id,
           message,
           subject,
@@ -154,35 +195,38 @@ export const toValidate =
   };
 
 /**
- * Builds a validator's entry in the descriptor table from its declaration.
- *
- * `transaction` decides what the validator's input looks like, and every check
- * must work on that input. Attaching a check that reads a field the transaction
- * doesn't have (e.g. the stakeholder check on an acceptance) won't compile.
- *
- * The result keeps `transaction`, `effect`, and `collection` from the
- * declaration and adds `validate` (the function that runs the checks) and
- * `checks` (the list the coverage report reads).
- *
- * Keeping `transaction` lets the table in `ocfMachine.ts` catch an entry filed
- * under the wrong key. The table also catches an "append" entry pointed at
- * another family's collection. The types don't catch a "remove" entry pointed
- * at the wrong collection; the hand-written `EXPECTED_COLLECTION` list in
- * `tests/ocfMachine.test.ts` does.
+ * Build the validator and coverage metadata from the same checks. Keep the transaction type so the
+ * table can check the validator's input and issuance family. Use the lifecycle implied by the effect
+ * unless the declaration requires an already removed security.
  */
 export function defineValidator<const S extends Spec>(
   spec: S & { checks: readonly CheckObject<TransactionFor<S["transaction"]>>[] },
-): Omit<S, "checks"> & {
-  validate: GradedValidator<TransactionFor<S["transaction"]>>;
-  checks: readonly Check[];
-} {
+): Defined<S> {
   const { checks, ...rest } = spec;
   return {
+    lifecycle: LIFECYCLE_OF_EFFECT[spec.effect],
     ...rest,
+    rules: checks,
     validate: toValidate(checks),
     checks: toMetadata(checks),
-  } as Omit<S, "checks"> & {
-    validate: GradedValidator<TransactionFor<S["transaction"]>>;
-    checks: readonly Check[];
-  };
+  } as Defined<S>;
+}
+
+/** Preserve the transaction and family types when adding validation and check metadata. */
+type Defined<S extends Spec> = Omit<S, "checks" | "lifecycle"> & {
+  rules: S["checks"];
+  lifecycle: S extends { lifecycle: infer Declared extends LifecycleWord } ? Declared : (typeof LIFECYCLE_OF_EFFECT)[S["effect"]];
+  validate: GradedValidator<TransactionFor<S["transaction"]>>;
+  checks: readonly Check[];
+};
+
+/**
+ * Reuse the current validator, checks and effects under an older OCF name. TypeScript checks that
+ * the validator accepts the older payload.
+ */
+export function underOlderName<D extends { transaction: TxKey }, const K extends TxKey>(
+  descriptor: D,
+  olderName: TransactionFor<K> extends TransactionFor<D["transaction"]> ? K : never,
+): Omit<D, "transaction"> & { transaction: K } {
+  return { ...descriptor, transaction: olderName };
 }

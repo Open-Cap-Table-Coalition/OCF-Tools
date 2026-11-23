@@ -1,7 +1,7 @@
-import { describe, it, expect } from "vitest";
+import { afterEach, describe, it, expect, vi } from "vitest";
 import { createActor } from "xstate";
 import {
-  collectionUpdate,
+  nodesUpdate,
   isValidOutcome,
   outcomeUpdate,
   failureResult,
@@ -11,9 +11,10 @@ import {
   type TxKey,
   type CollectionKey,
 } from "../ocf_validator/ocfMachine";
+import * as nodes from "../ocf_validator/nodes";
 import type { Finding } from "../types/finding";
 import type { GradedValidator, OcfMachineContext } from "../types/validator";
-import { baseContext, contextWith, startSeeded, ev } from "./helpers";
+import { baseContext, contextAfterCancellation, startSeeded, ev, collection } from "./helpers";
 
 // ---------------------------------------------------------------------------
 // Unknown transaction types
@@ -76,6 +77,7 @@ describe("results render an issuer name that isn't a string", () => {
 // ---------------------------------------------------------------------------
 
 describe("passthrough transaction types are no-ops unless their security was removed earlier", () => {
+  // For a passthrough transaction, record any earlier-removal finding and keep processing.
   it("leaves capTable and every channel deep-equal after TX_VESTING_START + TX_STOCK_CLASS_SPLIT", () => {
     const seeded = baseContext({
       stockIssuances: [{ id: "si", security_id: "s" }] as any,
@@ -84,9 +86,9 @@ describe("passthrough transaction types are no-ops unless their security was rem
       equityCompensation: [{ id: "ec", security_id: "e" }] as any,
       report: [{ marker: "pre-existing report" }],
       findings: [
-        { severity: "error", check: "demo", message: "m", subject: { object_type: "TX_STOCK_ISSUANCE", id: "x" } },
+        { severity: "error", outcome: "failed", check: "demo", message: "m", subject: { object_type: "TX_STOCK_ISSUANCE", id: "x" } },
       ],
-      snapshots: [{ date: "2020-01-01", stockIssuances: [], convertibles: [], warrants: [], equityCompensation: [] }],
+      snapshots: [{ date: "2020-01-01", stockIssuances: [], convertibles: [], warrants: [], equityCompensation: [], stockPlans: [] }],
       result: "PRESERVED",
     });
 
@@ -110,14 +112,11 @@ describe("passthrough transaction types are no-ops unless their security was rem
     expect(actor.getSnapshot().value).toBe("capTable");
   });
 
-  it("fails one on a security an earlier transaction removed, as a real run does", () => {
-    // The seeded context indexes its history's removals, as START would.
-    const actor = startSeeded(
-      contextWith({ transactions: [{ id: "cc-1", object_type: "TX_CONVERTIBLE_CANCELLATION", security_id: "s", date: "2021-06-01" }] }),
-    );
+  it("records a finding for one on a security an earlier transaction removed, as a real run does", () => {
+    const actor = startSeeded(contextAfterCancellation("CONVERTIBLE", "s"));
     actor.send(ev("TX_VESTING_START", { id: "vs", object_type: "TX_VESTING_START", security_id: "s", date: "2021-07-01" }));
 
-    expect(actor.getSnapshot().value).toBe("validationError");
+    expect(actor.getSnapshot().value).toBe("capTable");
     expect(actor.getSnapshot().context.findings.map((f) => f.check)).toEqual(["no-earlier-removal"]);
   });
 });
@@ -154,7 +153,7 @@ describe("stock retraction reports retraction-specific content", () => {
     expect(entry).toHaveProperty("incoming_stockIssuance_validity");
     expect(entry).not.toHaveProperty("stockClass_validity");
     // And the security was removed from the live collection (remove op).
-    expect(snapshot.context.stockIssuances.some((s: any) => s.security_id === "sec1")).toBe(false);
+    expect(collection(snapshot.context, "stockIssuances").some((s: any) => s.security_id === "sec1")).toBe(false);
   });
 });
 
@@ -178,12 +177,12 @@ describe("warrant issuance lands in its own family collection", () => {
 
     const ctx = actor.getSnapshot().context;
     // The warrant landed in warrantIssuances…
-    expect(ctx.warrantIssuances.some((w: any) => w.id === "wi1")).toBe(true);
+    expect(collection(ctx, "warrantIssuances").some((w: any) => w.id === "wi1")).toBe(true);
     // …the convertible collection did not leak into warrantIssuances…
-    expect(ctx.warrantIssuances.some((w: any) => w.id === "ci1")).toBe(false);
-    expect(ctx.warrantIssuances).toHaveLength(1);
+    expect(collection(ctx, "warrantIssuances").some((w: any) => w.id === "ci1")).toBe(false);
+    expect(collection(ctx, "warrantIssuances")).toHaveLength(1);
     // …and convertibleIssuances is untouched.
-    expect(ctx.convertibleIssuances).toEqual([sentinel]);
+    expect(collection(ctx, "convertibleIssuances")).toEqual([sentinel]);
   });
 });
 
@@ -197,21 +196,24 @@ const ACTIVE_KEYS = (Object.keys(TX_DESCRIPTORS) as TxKey[]).filter(
   (key) => TX_DESCRIPTORS[key].effect !== "passthrough",
 );
 
+// The four security families use their collection names.
+const FAMILIES: CollectionKey[] = ["stockIssuances", "convertibleIssuances", "warrantIssuances", "equityCompensation"];
+
 // The active keys that name a collection (append/remove), derived the same way.
 const COLLECTION_KEYS = (Object.keys(TX_DESCRIPTORS) as TxKey[]).filter(
   (key) => "collection" in TX_DESCRIPTORS[key],
 );
 
-// Independent oracle: the collection each append/remove key must declare, written
-// out by hand — no prefix logic, no mapping helper imported from the interpreter.
-// The `remove` path trusts `descriptor.collection` verbatim, so this oracle is the
-// independent check that each declaration is right.
+// List the expected family for each issuance and removal independently of the table. A descriptor
+// assigned to the wrong family would otherwise make the same mistake in both the update and its
+// test.
 const EXPECTED_COLLECTION: Record<string, CollectionKey> = {
   // append
   TX_STOCK_ISSUANCE: "stockIssuances",
   TX_CONVERTIBLE_ISSUANCE: "convertibleIssuances",
   TX_WARRANT_ISSUANCE: "warrantIssuances",
   TX_EQUITY_COMPENSATION_ISSUANCE: "equityCompensation",
+  TX_PLAN_SECURITY_ISSUANCE: "equityCompensation",
   // remove
   TX_STOCK_RETRACTION: "stockIssuances",
   TX_STOCK_CANCELLATION: "stockIssuances",
@@ -230,6 +232,9 @@ const EXPECTED_COLLECTION: Record<string, CollectionKey> = {
   TX_EQUITY_COMPENSATION_RETRACTION: "equityCompensation",
   TX_EQUITY_COMPENSATION_CANCELLATION: "equityCompensation",
   TX_EQUITY_COMPENSATION_TRANSFER: "equityCompensation",
+  TX_PLAN_SECURITY_RETRACTION: "equityCompensation",
+  TX_PLAN_SECURITY_CANCELLATION: "equityCompensation",
+  TX_PLAN_SECURITY_TRANSFER: "equityCompensation",
 };
 
 describe("per-type collection placement", () => {
@@ -243,14 +248,13 @@ describe("per-type collection placement", () => {
     }
   });
 
-  it.each(ACTIVE_KEYS)("%s mutates only the collection its descriptor declares", (key) => {
+  it.each(ACTIVE_KEYS)("%s changes only the family its descriptor declares", (key) => {
     const descriptor = TX_DESCRIPTORS[key];
-    const data = { id: "incoming", security_id: "SEC", object_type: key };
 
     if (!("collection" in descriptor)) {
-      // none: validate and record, but mutate nothing.
+      // An effect of "none" records validation without changing a collection.
       expect(descriptor.effect).toBe("none");
-      const result = collectionUpdate(baseContext(), ev(key, data));
+      const result = nodesUpdate(baseContext(), ev(key, { id: "incoming", security_id: "SEC", object_type: key }));
       expect(Object.keys(result)).toHaveLength(0);
       return;
     }
@@ -258,20 +262,24 @@ describe("per-type collection placement", () => {
     const fam = descriptor.collection;
     const matching = { id: "match", security_id: "SEC", object_type: "seed" };
     const other = { id: "other", security_id: "OTHER", object_type: "seed" };
-    const ctx = baseContext({ [fam]: [matching, other] } as Partial<OcfMachineContext>);
+    const ctx = baseContext({ [fam]: [matching, other] });
 
-    const result = collectionUpdate(ctx, ev(key, data)) as Record<string, any[]>;
+    // Issue a new security or remove the one supplied by the test.
+    const data = { id: "incoming", security_id: descriptor.effect === "append" ? "NEW" : "SEC", object_type: key };
+    const result = nodesUpdate(ctx, ev(key, data));
 
-    // The mutation lands in exactly the collection the descriptor names.
-    expect(Object.keys(result)).toEqual([fam]);
+    // Only the descriptor's family should gain a security.
+    expect(Object.keys(result)).toEqual(["nodes"]);
+    const after = { ...ctx, ...result };
+    for (const family of FAMILIES) {
+      if (family !== fam) expect(collection(after, family)).toEqual([]);
+    }
 
     if (descriptor.effect === "append") {
-      expect(result[fam]).toHaveLength(3);
-      expect(result[fam].at(-1)).toEqual(data);
+      expect(collection(after, fam)).toEqual([matching, other, data]);
     } else {
-      // remove: the matching security_id is filtered out, the rest retained.
-      expect(result[fam].some((x) => x.security_id === "SEC")).toBe(false);
-      expect(result[fam].some((x) => x.security_id === "OTHER")).toBe(true);
+      // Remove the named security and keep the others outstanding.
+      expect(collection(after, fam)).toEqual([other]);
     }
   });
 
@@ -285,8 +293,8 @@ describe("per-type collection placement", () => {
     expect(collection).toBe(EXPECTED_COLLECTION[key]);
   });
 
-  it("a passthrough type mutates no collection", () => {
-    const result = collectionUpdate(baseContext(), ev("TX_VESTING_START", { security_id: "s" }));
+  it("a passthrough type changes no security", () => {
+    const result = nodesUpdate(baseContext({ equityCompensation: [{ id: "ec", security_id: "s" }] }), ev("TX_VESTING_START", { security_id: "s" }));
     expect(Object.keys(result)).toHaveLength(0);
   });
 });
@@ -295,24 +303,18 @@ describe("per-type collection placement", () => {
 // Family collections hold only issuances
 // ---------------------------------------------------------------------------
 
-// issuance-exists finds an issuance by security_id alone (decision 3 on #198).
-// That's only safe if the collections never hold anything but issuances, which
-// is true because:
-//  - they start empty (tested here);
-//  - only the four family issuance types add to them (tested here), and each
-//    adds its own transaction (tested above);
-//  - removing only takes things out (tested above).
-// The issuance types are written out by hand on purpose. TX_PLAN_SECURITY_ISSUANCE
-// isn't one of them: the machine appends nothing for that type.
+// Only issuances enter these collections. This lets issuance-exists look up a security by ID within
+// its family.
 const ISSUANCE_KEYS = [
   "TX_STOCK_ISSUANCE",
   "TX_CONVERTIBLE_ISSUANCE",
   "TX_WARRANT_ISSUANCE",
   "TX_EQUITY_COMPENSATION_ISSUANCE",
+  "TX_PLAN_SECURITY_ISSUANCE",
 ];
 
 describe("family collections hold only issuances", () => {
-  it("appends for exactly the four family issuance keys", () => {
+  it("appends for exactly the family issuance keys", () => {
     const appendKeys = (Object.keys(TX_DESCRIPTORS) as TxKey[]).filter(
       (key) => TX_DESCRIPTORS[key].effect === "append",
     );
@@ -321,10 +323,10 @@ describe("family collections hold only issuances", () => {
 
   it("starts every family collection empty", () => {
     const { context } = createActor(ocfMachine).start().getSnapshot();
-    expect(context.stockIssuances).toEqual([]);
-    expect(context.convertibleIssuances).toEqual([]);
-    expect(context.warrantIssuances).toEqual([]);
-    expect(context.equityCompensation).toEqual([]);
+    expect(collection(context, "stockIssuances")).toEqual([]);
+    expect(collection(context, "convertibleIssuances")).toEqual([]);
+    expect(collection(context, "warrantIssuances")).toEqual([]);
+    expect(collection(context, "equityCompensation")).toEqual([]);
   });
 });
 
@@ -361,7 +363,7 @@ describe("family collections end holding only the surviving issuance", () => {
     const snapshot = actor.getSnapshot();
     expect(snapshot.value).toBe("capTable");
     expect(snapshot.context.findings).toEqual([]);
-    expect(snapshot.context.convertibleIssuances).toEqual([issueA]);
+    expect(collection(snapshot.context, "convertibleIssuances")).toEqual([issueA]);
   });
 
   it("keeps the warrant collection as exactly the security-A issuance after an append and a removal", () => {
@@ -387,7 +389,7 @@ describe("family collections end holding only the surviving issuance", () => {
     const snapshot = actor.getSnapshot();
     expect(snapshot.value).toBe("capTable");
     expect(snapshot.context.findings).toEqual([]);
-    expect(snapshot.context.warrantIssuances).toEqual([issueA]);
+    expect(collection(snapshot.context, "warrantIssuances")).toEqual([issueA]);
   });
 });
 
@@ -403,11 +405,12 @@ describe("family collections end holding only the surviving issuance", () => {
 
 /** A synthetic `none` descriptor carrying a graded validator and (empty) checks. */
 const gradedDescriptor = (validate: GradedValidator<any>) =>
-  ({ effect: "none", validate, checks: [] }) as const;
+  ({ effect: "none", lifecycle: "stays", families: [], validate, checks: [] }) as const;
 
 /** A minimal finding; `check` doubles as the distinguishing label. */
 const finding = (severity: Finding["severity"], check: string): Finding => ({
   severity,
+  outcome: "failed",
   check,
   message: `${check} message`,
   subject: { object_type: "TX_STOCK_ISSUANCE", id: "si1" },
@@ -506,6 +509,8 @@ describe("graded validators through the dispatch helpers", () => {
 // deleted with `legacyValidate` when the last family migrates.
 
 describe("legacy validators through the machine", () => {
+  afterEach(() => vi.restoreAllMocks());
+
   const seededWithStakeholder = () =>
     baseContext({
       ocfPackageContent: {
@@ -539,6 +544,30 @@ describe("legacy validators through the machine", () => {
       stakeholder_validity: true,
     });
     expect(snapshot.context.findings).toEqual([]);
+  });
+
+  it("issues stock without scanning outstanding holdings for either validation or reporting", () => {
+    const actor = startSeeded({
+      ...seededWithStakeholder(),
+      warrantIssuances: [{ id: "wi1", security_id: "w1", object_type: "TX_WARRANT_ISSUANCE" }],
+    });
+    const holdings = vi.spyOn(nodes, "outstanding");
+    actor.send(ev("TX_STOCK_ISSUANCE", stockIssuance()));
+
+    expect(actor.getSnapshot().context.report.at(-1)?.transaction_id).toBe("si1");
+    expect(holdings).not.toHaveBeenCalled();
+  });
+
+  it("builds the holdings list once when a transfer reads it several times", () => {
+    const context = baseContext({
+      stockIssuances: [stockIssuance({ object_type: "TX_STOCK_ISSUANCE", quantity: "10" })],
+    });
+    const holdings = vi.spyOn(nodes, "outstanding");
+    const transfer = ev("TX_STOCK_TRANSFER", { id: "transfer", security_id: "s-sec1", resulting_security_ids: [] });
+    const update = outcomeUpdate(TX_DESCRIPTORS.TX_STOCK_TRANSFER, context, transfer);
+
+    expect(update.report?.at(-1)?.incoming_stockIssuance_validity).toBe(true);
+    expect(holdings).toHaveBeenCalledTimes(1);
   });
 
   it("fails an invalid transaction with the report entry serialized in the result and findings still empty", () => {
