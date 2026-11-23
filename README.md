@@ -43,9 +43,11 @@ flowchart TD
 
 The reader loads the package once per validation. For transactions on the same date, the validator uses a fixed order by type. The XState machine uses `TX_DESCRIPTORS` to choose the checks and update the outstanding securities. For example, issuing a warrant adds it to the cap table and cancelling it removes it. A transaction under one of the older `TX_PLAN_SECURITY_*` names is validated as the equity compensation transaction it stands for. [Package reader](read_ocf_package/index.ts) · [Transaction order](ocf_validator/index.ts) · [Transaction rules](ocf_validator/ocfMachine.ts) · [Snapshot fields](ocf_validator/eod.ts)
 
-Convertible, warrant, equity compensation and stock plan checks report findings, as does the earlier-removal check on other transactions, such as vesting. When one of these checks fails at error level, the validator withholds that transaction's changes and marks the fields it would have written as unreliable. A later check that needs one of those fields reports a blocked finding instead of guessing. Independent checks still run.
+Convertible, warrant, equity compensation and stock plan checks report findings, as does the earlier-removal check on other transactions, such as vesting. When one of these checks fails at error level, the validator withholds that transaction's changes and marks the fields it would have written as unreliable. A later check that needs one of those fields reports a blocked finding instead of guessing. Independent checks still run. A check that throws is recorded as a failed error finding in the same way, and the remaining checks still run.
 
-Stock transactions work differently. A failed stock check stops the run. The security ID and earlier-removal checks on a stock issuance report findings, and the other stock checks use the older `report` format. A transaction with an unknown type or a check that throws also stops the run. A transaction whose date or type isn't a string stops it before the first transaction is processed.
+The day-end stock plan check is different. It records a finding and withholds nothing. A grant that takes a plan over its reserve stays in the plan's drawn total, and no field is marked unreliable, so don't assume an over-limit grant was withheld.
+
+Stock transactions work differently. A failed stock check stops the run. The security ID and earlier-removal checks on a stock issuance report findings, and the other stock checks use the older `report` format. A transaction with an unknown type also stops the run, as does an error that escapes the validator, such as a bug in a stock check. A transaction whose date or type isn't a string stops it before the first transaction is processed.
 
 ### What `ocfValidator` returns
 
@@ -66,7 +68,7 @@ const stock = outstanding(nodes, "stockIssuances");
 
 A plan starts with its initial reserve and zero drawn shares. An adjustment replaces the reserve. A grant or stock issuance that names the plan draws shares once. For example, cancelling 40 of a 100-share grant and issuing a 60-share balance leaves 100 drawn. An explicit return of 40 brings that total to 60. The source allowance follows the security across all returns, even when a return credits a successor plan, so a successor can have a negative drawn balance. A transaction that names a plan missing from the package creates a plan row with an unknown reserve.
 
-At the end of each day, the `pool-not-exceeded` check compares drawn shares with the reserve for each plan whose totals changed that day. The finding identifies the plan (`STOCK_PLAN`) and the date. A defect on either total blocks the check. The check is skipped when the reserve is unknown. A valid adjustment clears reserve defects because it replaces the full reserve. Drawn shares are a running total and keep earlier defects. [Pool check](ocf_validator/validators/stock_plan/pool.ts)
+At the end of each day, the `pool-not-exceeded` check compares drawn shares with the reserve for each plan whose totals changed that day. The finding identifies the plan (`STOCK_PLAN`) and the date. It does not fail or withhold any grant. A defect on either total blocks the check. The check is skipped when the reserve is unknown. A valid adjustment clears reserve defects because it replaces the full reserve. Drawn shares are a running total and keep earlier defects. [Pool check](ocf_validator/validators/stock_plan/pool.ts)
 
 ## Limits on main
 
