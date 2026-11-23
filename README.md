@@ -26,6 +26,8 @@ const ocfValidation = ocfValidator(ocfPackageFolderDir);
 
 Validation processes transactions in date order. Convertible, warrant, equity compensation, and stock plan pool validators record errors and continue. A failed check withholds the transaction’s writes and marks affected fields as unreliable. Later checks that need those fields report a blocked finding. Independent checks still run. Legacy stock validation failures, unknown transaction types, and internal errors can stop validation early.
 
+For the rules the validator applies and the corner cases settled so far, see [Validation rules and corner cases](docs/validation-rules.md).
+
 The output includes these fields.
 
 - `result` states whether the package appears valid. A completed run counts failed errors, blocked checks, and warnings separately. If validation stops early, the result identifies the failure.
