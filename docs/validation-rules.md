@@ -22,7 +22,7 @@ These rules cover the stock a transfer, cancellation, repurchase, conversion or 
 - **It can be removed earlier that day.** Removals run before transfers and repurchases, so stock issued and cancelled on the transaction's date should still count. Today it does not. The balance and quantity-sum checks in cancellation, repurchase, conversion and transfer read only outstanding stock, so a balance issued and cancelled earlier that day can stop validation. (#247)
 - **Stock from an earlier day does not count once removed**, even if the removal is dated the same day as the transaction.
 - **Retracted stock should not count.** A retraction voids the issuance, so the stock was never validly issued. Today a retracted balance is rejected, because balances are read from outstanding stock. Conversion and reissuance look their results up in the whole package history and never check for a retraction, so a retracted result can pass their existence, date, class and stakeholder checks.
-- **Every resulting security should be checked**, not only the last one listed. Today transfer, conversion and reissuance reset their per-result flags on each pass through the list, so a valid last result can hide an earlier invalid one. For example, a transfer whose first result has the wrong issuance date passes the date check if its last result has the right date. (#247)
+- **Every resulting security is checked**, not only the last one listed. Transfer, conversion and reissuance check the issuance date of each result, and conversion and reissuance also check each result's class and stakeholder. Each failing result gets its own finding, so a valid last result cannot hide an earlier invalid one.
 
 ## Stock reissuance
 

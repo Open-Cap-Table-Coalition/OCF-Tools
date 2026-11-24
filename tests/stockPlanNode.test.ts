@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { applyTransaction, emptyNodes, fieldAt, securityAt, securityField, securityRecords, withPlans, type NodeMap } from "../ocf_validator/nodes";
-import { TX_DESCRIPTORS, type TxKey } from "../ocf_validator/ocfMachine";
+import { TX_DESCRIPTORS, type TxKey } from "../ocf_validator/validators";
 import type { Subject } from "../types/finding";
 import { toValidate, type CheckObject } from "../ocf_validator/validators/checkKit";
 import { validateOcfPackage } from "../ocf_validator";
@@ -688,7 +688,7 @@ describe("stock issued from a plan", () => {
 
   it.each(["not a quantity", "-1"])("rejects a plan stock draw of %s before updating the pool", (quantity) => {
     const context = runStock([{ ...stock, quantity }]);
-    expect(context.report.at(-1)).toMatchObject({ transaction_id: stock.id, plan_quantity_validity: false });
+    expect(context.findings).toContainEqual(expect.objectContaining({ check: "quantity-countable", subject: { id: stock.id, object_type: stock.object_type } }));
     expect(context.nodes.plan.get(PLAN.id)?.drawn.value).toBe("0");
   });
 

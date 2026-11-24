@@ -5,14 +5,7 @@
 import type {
   OCFWarrantIssuance,
 } from "@opencaptablecoalition/ocf-types";
-import {
-  TX_DESCRIPTORS,
-  type VESTING_FAMILIES,
-  type TxKey,
-  type Descriptor,
-  type DescriptorTable,
-  type VestingFamily,
-} from "../ocf_validator/ocfMachine";
+import { TX_DESCRIPTORS, type VESTING_FAMILIES, type TxKey, type Descriptor, type DescriptorTable, type VestingFamily } from "../ocf_validator/validators";
 import { defineValidator, underOlderName, type CheckContext, type CheckObject } from "../ocf_validator/validators/checkKit";
 import type { OLDER_NAMES } from "../ocf_validator/constants/constants";
 import { familyChecksFor } from "../ocf_validator/validators/checks";
@@ -32,8 +25,7 @@ const _gradedChecks: readonly Check[] = [
   { id: "quantity-positive", severity: "warning", description: "The issued quantity is positive.", implemented: false },
 ];
 
-// A graded validator whose payload family the none/remove arms ignore (they take
-// GradedValidator<any>); declared, not defined, so this file stays runtime-free.
+// A validator for the examples below.
 declare const gradedValidate: GradedValidator<any>;
 
 // An implemented check omits `implemented`; each required field is present.
@@ -92,22 +84,6 @@ type _Exhaustive = Expect<Equal<keyof typeof TX_DESCRIPTORS, TxKey>>;
 const _keyOmitted: Record<TxKey, Descriptor> = {
   TX_VESTING_START: { effect: "passthrough", lifecycle: "stays", families: [] },
 };
-
-// --- Wrong-family legacy append descriptor is a compile error ---------------
-// (Deleted with the legacy convention when the last family migrates.)
-
-// A legacy validator whose payload is a warrant issuance.
-const warrantLegacyValidate = (
-  _context: OcfMachineContext,
-  _event: { data?: OCFWarrantIssuance },
-  _isGuard: boolean,
-): boolean => true;
-
-// The warrant validator pairs with the warrant collection…
-const _appendWarrant: Descriptor = { effect: "append", lifecycle: "issue", collection: "warrantIssuances", legacyValidate: warrantLegacyValidate };
-// …but the same validator cannot type the convertible collection (differs only in family).
-// @ts-expect-error — a warrant validator does not match the convertible collection's payload.
-const _appendWrongFamily: Descriptor = { effect: "append", lifecycle: "issue", collection: "convertibleIssuances", legacyValidate: warrantLegacyValidate };
 
 // --- Wrong-family graded append descriptor is a compile error ---------------
 
@@ -195,13 +171,15 @@ const _warrantRetraction = defineValidator({ transaction: "TX_WARRANT_RETRACTION
 
 // Filed under its own key, the descriptor fits the table…
 const _filedUnderOwnKey = { TX_WARRANT_RETRACTION: _warrantRetraction } satisfies Partial<DescriptorTable>;
-// …but listed under the convertible retraction's key it does not. Nothing else
-// would catch this: "remove" descriptors aren't checked against their collection.
+// Filing it under another transaction type fails.
 // @ts-expect-error — the descriptor names TX_WARRANT_RETRACTION, not TX_CONVERTIBLE_RETRACTION.
 const _filedUnderOtherKey = { TX_CONVERTIBLE_RETRACTION: _warrantRetraction } satisfies Partial<DescriptorTable>;
 
-// Check the real table here too, not only in ocfMachine.ts, so loosening the
-// type check there can't quietly turn off the key check.
+// Even the right transaction label cannot hide an incompatible validator.
+// @ts-expect-error A warrant retraction cannot validate a stock transfer payload.
+const _wrongPayload: DescriptorTable["TX_STOCK_TRANSFER"] = { ..._warrantRetraction, transaction: "TX_STOCK_TRANSFER" };
+
+// Check the assembled table against its public type.
 const _realTable: DescriptorTable = TX_DESCRIPTORS;
 
 // --- familyChecksFor: family vocabulary --------------------------------------

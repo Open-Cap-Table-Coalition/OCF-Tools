@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { applyTransaction, emptyNodes, outstandingSecurity, securitiesIn, type NodeMap } from "../ocf_validator/nodes";
 import { outstanding } from "../index";
-import { TX_DESCRIPTORS, type TxKey } from "../ocf_validator/ocfMachine";
+import { TX_DESCRIPTORS, type TxKey } from "../ocf_validator/validators";
 import { collection, validatePackage } from "./helpers";
 
 // Test security records directly and through a complete package run.
@@ -174,8 +174,7 @@ describe("a run's node map", () => {
     };
     const context = validatePackage([first, duplicate], [{ id: "sh-1" }], [{ id: "class-1" }]);
 
-    const legacy = object_type === "TX_STOCK_ISSUANCE";
-    expect(context.result).toContain(legacy ? "failed on duplicate" : "complete and found 1 error");
+    expect(context.result).toContain("complete and found 1 error");
     expect(context.findings).toEqual([{
       check: "unique-security-id", severity: "error", outcome: "failed",
       subject: { object_type, id: "duplicate" },
@@ -183,7 +182,7 @@ describe("a run's node map", () => {
     }]);
     expect(context.nodes.security.size).toBe(1);
     expect(collection(context, "equityCompensation")).toEqual([first]);
-    expect(context.snapshots.map((day) => day.date)).toEqual(legacy ? [first.date] : [first.date, duplicate.date]);
+    expect(context.snapshots.map((day) => day.date)).toEqual([first.date, duplicate.date]);
     expect(context.snapshots.at(-1)?.equityCompensation).toMatchObject([{ quantity: "80" }]);
     expect(context.nodes.security.get(first.security_id)?.lifecycle.defects).toEqual([]);
   });

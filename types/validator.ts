@@ -5,8 +5,7 @@ import type { Snapshot } from "./snapshot";
 import type { Finding, Severity } from "./finding";
 
 /**
- * The context holds the input package, current records and results. Older validators write to
- * report. Validators built from checks write to findings.
+ * The context holds the input package, current records and results. Validators write to findings.
  */
 export type OcfMachineContext = {
   /**
@@ -24,12 +23,7 @@ export type OcfMachineContext = {
   removals: ReadonlyMap<unknown, DeepReadonly<OcfTransaction>>;
   /** Save the records at the start of the day so daily checks can identify which plans changed. */
   nodesAtStartOfDay: NodeMap;
-  report: any[];
   findings: Finding[];
-  /**
-   * Error findings from the shared ID checks on the latest legacy stock issuance.
-   */
-  lastErrorFindings: Finding[];
   snapshots: Snapshot[];
   result: string;
 };

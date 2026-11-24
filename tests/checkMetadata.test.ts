@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { TX_DESCRIPTORS } from "../ocf_validator/ocfMachine";
+import { TX_DESCRIPTORS } from "../ocf_validator/validators";
 
 // ---------------------------------------------------------------------------
 // Per-descriptor check-id uniqueness

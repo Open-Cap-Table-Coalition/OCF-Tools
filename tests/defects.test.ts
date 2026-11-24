@@ -1,6 +1,7 @@
 import { afterEach, describe, it, expect, vi } from "vitest";
 import { applyTransaction, emptyNodes, fieldAt, outstandingSecurity, securityField, type NodeMap } from "../ocf_validator/nodes";
-import { completedResult, TX_DESCRIPTORS, verdictOf, type TxKey } from "../ocf_validator/ocfMachine";
+import { completedResult, verdictOf } from "../ocf_validator/ocfMachine";
+import { TX_DESCRIPTORS, type TxKey } from "../ocf_validator/validators";
 import { uniqueSecurityId } from "../ocf_validator/validators/checks";
 import { defineValidator, toValidate, type CheckObject } from "../ocf_validator/validators/checkKit";
 import type { Finding, Subject } from "../types/finding";
@@ -488,9 +489,7 @@ describe("a passthrough transaction on a removed security", () => {
 });
 
 describe("a stock failure", () => {
-  it("still stops the run, after the findings recorded before it", () => {
-    // Validation continues after the warrant failure and stops at the invalid legacy stock issuance
-    // (#229).
+  it("reports all three independent failures and completes every transaction day", () => {
     const context = validatePackage(
       [
         warrant({ stakeholder_id: "nobody" }),
@@ -501,9 +500,9 @@ describe("a stock failure", () => {
       [{ id: "sc-1" }],
     );
 
-    expect(outcomes(context.findings)).toEqual([["wi-1", "stakeholder-exists", "failed"]]);
-    expect(context.result).toMatch(/^The validation of the OCF package for Test Co failed on si-1: /);
-    expect(context.snapshots.map((snapshot) => snapshot.date)).toEqual(["2021-01-01"]);
+    expect(outcomes(context.findings)).toEqual(["wi-1", "si-1", "ci-1"].map((id) => [id, "stakeholder-exists", "failed"]));
+    expect(context.result).toContain("is complete and found 3 errors");
+    expect(context.snapshots.map((snapshot) => snapshot.date)).toEqual(["2021-01-01", "2021-02-01", "2021-03-01"]);
   });
 });
 

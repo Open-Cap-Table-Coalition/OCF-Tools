@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { lifecycleFamilies, TX_DESCRIPTORS, type TxKey } from "../ocf_validator/ocfMachine";
+import { lifecycleFamilies, TX_DESCRIPTORS, type TxKey } from "../ocf_validator/validators";
 import { currentName, OLDER_NAMES } from "../ocf_validator/constants/constants";
 import { ocfValidator } from "../index";
 import { collection, validatePackage, validatePackageWith } from "./helpers";

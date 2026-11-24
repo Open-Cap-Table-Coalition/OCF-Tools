@@ -1,5 +1,5 @@
 /** The build checks the public finding types. */
-import type { OcfMachineContext } from "../ocf_validator/ocfMachine";
+import type { OcfMachineContext } from "./validator";
 import type { BlockedFinding, FailedFinding, Finding, Outcome, Severity, Subject } from "./finding";
 import type { ObjectTypeMap } from "@opencaptablecoalition/ocf-types";
 import type { Expect, Equal } from "./type-assert";
@@ -131,8 +131,7 @@ const _acc = (c: OcfMachineContext, f: Finding): Finding[] => [
   f,
 ];
 
-// Optional: pin that report's declared type is left untouched.
-type _Report = Expect<Equal<OcfMachineContext["report"], any[]>>;
+type _NoLegacyReport = Expect<Equal<Extract<keyof OcfMachineContext, "report" | "lastErrorFindings">, never>>;
 
 // Silence unused-variable warnings from tsc.
 void _warningFinding;

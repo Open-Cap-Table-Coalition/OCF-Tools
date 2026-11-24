@@ -4,7 +4,8 @@
 
 import { getNextSnapshot } from "xstate";
 import { lifecycleStep, type LifecycleState } from "../ocf_validator/lifecycle";
-import { checksBeforeValidation, lifecycleFamilies, ocfMachine, TX_DESCRIPTORS, type CollectionKey, type OcfMachineEvent } from "../ocf_validator/ocfMachine";
+import { passthroughRules, ocfMachine, type OcfMachineEvent } from "../ocf_validator/ocfMachine";
+import { lifecycleFamilies, TX_DESCRIPTORS, type CollectionKey } from "../ocf_validator/validators";
 import { applyTransaction } from "../ocf_validator/nodes";
 import { toValidate, type CheckObject } from "../ocf_validator/validators/checkKit";
 import type { Finding } from "../types/finding";
@@ -86,9 +87,8 @@ export function shadowRows(transactions: readonly Transaction[], run?: Run): Sha
     const descriptor = TX_DESCRIPTORS[transaction.object_type as keyof typeof TX_DESCRIPTORS];
     const actual = run?.visits[index];
     const skipped = run !== undefined && actual === undefined;
-    const rules: readonly CheckObject<any>[] = "rules" in descriptor ? descriptor.rules : [];
+    const rules: readonly CheckObject<any>[] = "rules" in descriptor ? descriptor.rules : passthroughRules;
     const checks = rules.filter((rule) => rule.run && (SHADOWED.includes(rule.id) || (skipped && rule.id === "issuance-exists")));
-    checks.unshift(...(checksBeforeValidation(transaction.object_type, descriptor)?.checks ?? []));
     const runs = checks.map((check) => check.id).filter((id) => SHADOWED.includes(id));
     const replayed = skipped ? replay(context, transaction, checks) : undefined;
     if (replayed) context = replayed.context;

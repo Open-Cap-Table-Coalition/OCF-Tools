@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { TX_DESCRIPTORS } from "../ocf_validator/ocfMachine";
+import { TX_DESCRIPTORS } from "../ocf_validator/validators";
 import type { OcfMachineContext } from "../types/validator";
 import {
   baseContext,
@@ -1038,7 +1038,7 @@ describe("declared and emitted checks stay consistent across the family", () => 
 // ---------------------------------------------------------------------------
 
 describe("convertible family findings migrate to the findings channel", () => {
-  it("routes an invalid convertible transaction to findings, leaves report clear, and counts the errors in the result", () => {
+  it("routes an invalid convertible transaction to findings, and counts the errors in the result", () => {
     const actor = startSeeded(baseContext());
     // No stakeholder matches, so the issuance is invalid.
     actor.send(ev("TX_CONVERTIBLE_ISSUANCE", {
@@ -1055,9 +1055,7 @@ describe("convertible family findings migrate to the findings channel", () => {
     // The errors landed on findings…
     expect(context.findings.length).toBeGreaterThan(0);
     expect(context.findings.every((f) => f.severity === "error")).toBe(true);
-    // …no report entry was written for a migrated convertible type…
-    const migrated = MIGRATED_KEYS as readonly string[];
-    expect(context.report.some((entry: any) => migrated.includes(entry?.transaction_type))).toBe(false);
+    expect(context).not.toHaveProperty("report");
     // The final result counts the findings.
     actor.send({ type: "RUN_END", date: "2021-01-01" });
     expect(actor.getSnapshot().context.result).toBe(

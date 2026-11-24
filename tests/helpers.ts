@@ -12,7 +12,8 @@ import { createActor } from "xstate";
 import { validateOcfPackage } from "../ocf_validator";
 import { readOcfPackage } from "../read_ocf_package";
 import { applyTransaction, emptyNodes, outstanding, type NodeMap } from "../ocf_validator/nodes";
-import { earliestRemovals, ocfMachine, TX_DESCRIPTORS, type CollectionKey, type Descriptor, type OcfMachineEvent } from "../ocf_validator/ocfMachine";
+import { earliestRemovals, ocfMachine, type OcfMachineEvent } from "../ocf_validator/ocfMachine";
+import { TX_DESCRIPTORS, type CollectionKey, type Descriptor } from "../ocf_validator/validators";
 import type { Finding } from "../types/finding";
 import { expectShadowExplained } from "./lifecycleShadow";
 import type { Check, GradedValidator, OcfMachineContext } from "../types/validator";
@@ -58,9 +59,7 @@ export const baseContext = (overrides: ContextSeed = {}): OcfMachineContext => {
   return {
     ocfPackageContent,
     removals: earliestRemovals(ocfPackageContent.transactions),
-    report: [],
     findings: [],
-    lastErrorFindings: [],
     snapshots: [],
     result: "Incomplete",
     nodesAtStartOfDay: emptyNodes(),

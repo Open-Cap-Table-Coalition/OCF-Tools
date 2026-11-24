@@ -2,7 +2,7 @@ import type { OcfMachineContext } from "../types/validator";
 import type { DefectMark, Snapshot, SnapshotStockPlan } from "../types/snapshot";
 import { isOnCapTable } from "./lifecycle";
 import { securityRecords, type PlanNode, type SecurityNode } from "./nodes";
-import type { CollectionKey } from "./ocfMachine";
+import type { CollectionKey } from "./validators";
 
 const snapshotList = {
   stockIssuances: "stockIssuances",
