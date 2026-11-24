@@ -250,7 +250,6 @@ describe("the lookup is a pure function of the stored state", () => {
   });
 
   it("allows a transaction that leaves the security where it is", () => {
-    // XState 5.18.2 needs an explicit target for a transition that does nothing else.
     for (const type of EXPECTED.equityCompensation.stays) {
       expect(lifecycleStep("equityCompensation", "outstanding", type)).toEqual({ allowed: true, next: "outstanding" });
     }

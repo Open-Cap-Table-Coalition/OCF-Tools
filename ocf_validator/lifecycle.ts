@@ -29,7 +29,7 @@ type Arrows = Record<LifecycleState, Record<string, { target: LifecycleState; gu
 
 /**
  * Include only the transactions that apply to this family. Give every transition a target because
- * XState 5.18.2 treats a transition without a target or action as unavailable.
+ * XState's can() returns false for a transition without a target or action.
  */
 const arrowsFor = (family: CollectionKey, descriptors: Readonly<Record<string, Descriptor>>): Arrows => {
   const arrows: Arrows = { notIssued: {}, outstanding: {}, removed: {} };
@@ -45,7 +45,7 @@ const arrowsFor = (family: CollectionKey, descriptors: Readonly<Record<string, D
 /**
  * Build from the transaction table so a new descriptor also updates the chart. Tests can supply a
  * smaller table. If outstanding securities gain nested states, put each self-transition in the state
- * it changes. Re-entering the parent resets its nested states in XState 5.18.2.
+ * it changes. A transition that targets the parent itself resets its nested states.
  */
 export function buildLifecycleChart(
   family: CollectionKey,
