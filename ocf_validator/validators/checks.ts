@@ -176,6 +176,8 @@ const VESTING_TRANSACTIONS = [
   "TX_VESTING_ACCELERATION",
 ] as const satisfies readonly TxKey[];
 
+export const isVestingTransaction = (type: string): boolean => (VESTING_TRANSACTIONS as readonly string[]).includes(type);
+
 /**
  * The transaction that records which stock plan's pool a security's shares
  * went back to when it was cancelled. It names the cancelled security.
@@ -310,7 +312,7 @@ export function familyChecksFor({
           ele.date <= data.date &&
           type !== issuance &&
           type !== acceptance &&
-          !(vests && (VESTING_TRANSACTIONS as readonly string[]).includes(type)) &&
+          !(vests && isVestingTransaction(type)) &&
           !(leavesOutstanding as readonly string[]).includes(type) &&
           !(returnsToPool && type === RETURN_TO_POOL) &&
           !(ele.object_type === data.object_type && ele.id === data.id)

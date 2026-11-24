@@ -1,7 +1,7 @@
 import { namedStock, outputReads, stockField } from "./outputs";
 import { isStockPlanId } from "../../stockPlan";
 import { addsUpTo, exceeds, isNumeric, isQuantity } from "../../numeric";
-import { familyChecksFor, transactionsOn } from "../checks";
+import { familyChecksFor, isVestingTransaction, transactionsOn } from "../checks";
 import { text, type CheckObject, type ReadField } from "../checkKit";
 
 export const { issuanceExists } = familyChecksFor({
@@ -143,14 +143,18 @@ export const noOtherTransactions = {
   id: "no-other-transactions",
   severity: "error",
   description:
-    "Only issuance, acceptance and this transaction reference the stock, except for an eligible return after retirement.",
+    "Only issuance, acceptance, vesting and this transaction reference the stock, except for an eligible return after retirement.",
   reads: (data) => (isRetirement(data) ? sourceReads(data) : []),
   run: (context, data, read) => {
     const canReturn = isRetirement(data) && isStockPlanId(read(stockField(data.security_id))?.stock_plan_id);
     return transactionsOn(context, data.security_id).flatMap((tx) => {
+      // A TX_VESTING_START, TX_VESTING_EVENT or TX_VESTING_ACCELERATION leaves the stock outstanding,
+      // so it can't conflict with this transaction. One dated after the stock was removed fails its
+      // own no-earlier-removal check.
       if (
         tx.object_type === "TX_STOCK_ISSUANCE" ||
         tx.object_type === "TX_STOCK_ACCEPTANCE" ||
+        isVestingTransaction(tx.object_type) ||
         (tx.object_type === data.object_type && tx.id === data.id) ||
         (canReturn && tx.object_type === "TX_STOCK_PLAN_RETURN_TO_POOL" && tx.date >= data.date)
       )
