@@ -222,19 +222,21 @@ describe.each([
 
     expect(context.findings).toEqual([]);
     expect(context.result).toBe(VALID);
-    expect(context.ocfPackageContent.transactions.map((tx) => tx.id)).toEqual(["g-1", "release", "reprice", "exercise", "remove"]);
+    // The three that leave the grant outstanding run before the removal, in order of their IDs.
+    expect(context.ocfPackageContent.transactions.map((tx) => tx.id)).toEqual(["g-1", "exercise", "release", "reprice", "remove"]);
     expect(context.snapshots.map((snapshot) => snapshot.equityCompensation.length)).toEqual([1, 0]);
   });
 });
 
-it.each(PAIRS)("%s and %s keep their file order when both name the same kind of transaction", (olderName, name) => {
+it.each(PAIRS)("%s and %s run in order of their IDs, whichever name each uses and wherever it is in the file", (olderName, name) => {
   const actions = [olderName, name, olderName].map((object_type, i) => ({
     ...grant(object_type), id: `action-${i}`, security_id: `opt-${i}`, date: "2021-06-01", resulting_security_ids: [],
   }));
   const issuances = name === "TX_EQUITY_COMPENSATION_ISSUANCE" ? [] : actions.map(({ security_id }) => ({
     ...grant("TX_EQUITY_COMPENSATION_ISSUANCE"), id: `grant-${security_id}`, security_id,
   }));
-  const context = validate([...actions, ...issuances], [{ id: "sh-1" }]);
+  // The file lists the three in reverse order of their IDs, with the current name between the two older ones.
+  const context = validate([...[...actions].reverse(), ...issuances], [{ id: "sh-1" }]);
 
   expect(context.result).toBe(VALID);
   expect(context.ocfPackageContent.transactions.slice(issuances.length)).toEqual(actions);

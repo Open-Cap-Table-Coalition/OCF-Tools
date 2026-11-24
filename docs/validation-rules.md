@@ -9,20 +9,30 @@ An entry that cites a pull request that is still open (#247) says what the valid
 ## Ground rules
 
 - **A package is immutable.** Nothing in an OCF package is edited in place. Changing a record will need an edit event, and OCF has no such event today. The validator relies on this: it indexes the package once per run. (#247)
-- **Transactions run in date order.** On the same day they run by type, in the order listed in [`constants.ts`](../ocf_validator/constants/constants.ts). Two transactions of the same type keep their file order.
-- **Same-day stock order.** Issuance, retraction, acceptance, cancellation, conversion, reissuance, repurchase, transfer. So a cancellation always runs before a transfer dated the same day.
+- **Transactions run in date order.** Within a day, the order comes from the securities each transaction names. See [Same-day order](#same-day-order).
 - **A package with no transactions is complete, with nothing checked.** `result` says that no transaction was found. It does not say the package appears valid. There are no findings and no snapshots, and the package's stock plans are still loaded with nothing drawn. The tests are in [`emptyPackage.test.ts`](../tests/emptyPackage.test.ts). (#184)
 - **A security ID is issued once.** The same ID cannot be issued again, in any of the four families.
 - **Quantities are decimal strings.** OCF allows up to ten fractional digits. [`numeric.ts`](../ocf_validator/numeric.ts) adds them exactly, so `0.1` + `0.2` equals `0.3`. Today only the stock plan checks add quantities with it: a plan's reserve and drawn shares, returns to the pool, plan-issued equity compensation grants, and cancellation or repurchase of plan-issued stock. The other stock checks, including transfer, conversion, reissuance, and cancellation or repurchase of stock not issued from a plan, add quantities as floats and compare them with `===`. A transfer of `0.3` whose results are `0.1` and `0.2` fails for that reason. (#247 moves the transfer, conversion and reissuance quantity checks to exact arithmetic.)
+
+## Same-day order
+
+OCF dates a transaction to the day, so a package does not say which of two same-day transactions came first. The validator works the order out in [`sameDayOrder.ts`](../ocf_validator/sameDayOrder.ts). The tests are in [`sameDayOrder.test.ts`](../tests/sameDayOrder.test.ts). (#232)
+
+- **One security's day runs in stages.** First its issuance. Then a transaction of an unrecognized type, so that a later check that reads the security is blocked. Then a retraction, which voids the issuance. Then a transaction that names the security as its balance or result. Then transactions that leave it outstanding: acceptance, vesting, exercise or release of an equity compensation grant, and repricing. Then a transaction that removes it: cancellation, repurchase, transfer, conversion, reissuance, consolidation or a warrant exercise. Last, a return to the pool. Every transaction at an earlier stage runs before any at a later one.
+- **A transaction holds a stage on each security it names.** A transfer removes the stock in `security_id` and names the stock in `resulting_security_ids` and `balance_security_id`. It waits for the issuance of each one it names, and runs before anything else removes them that day.
+- **Otherwise the lowest ID runs first.** Transactions that share no security, or that hold the same stage on one, run in order of `id`, then `object_type`. Two transactions with the same ID and type keep their file order. Nothing else depends on the order of the file.
+- **Two removals of one security have no order by type.** A cancellation no longer always runs before a transfer of the same stock. The one that is free to run first goes first. That is the lower ID, unless it still waits for the issuance of a security it names. For two transfers of one option on one day, the lower ID is applied and the other fails `issuance-exists`, whichever the file lists first.
+- **A loop is an error of its own.** If each of several same-day transactions has to run before the next, no order works. Each one gets a `same-day-order` error that lists the loop. None of them is checked or applied. Their changes are withheld as for any failed transaction of the same type, which marks the security in each one's `security_id` as unreliable. Transactions that waited on the loop run after it.
+- **Results follow the run order.** `ocfPackageContent.transactions` is left in the order the run used. Findings are in that order, and a snapshot lists securities issued the same day in the order their issuances ran.
 
 ## Stock named as a balance or result
 
 These rules cover the stock a transfer, cancellation, repurchase, conversion or reissuance names in `balance_security_id` or `resulting_security_ids`. The tests are in [`stockCancellation.test.ts`](../tests/stockCancellation.test.ts).
 
 - **It must be issued the same day** as the transaction that names it.
-- **It can be removed earlier that day.** Removals run before transfers and repurchases, so stock issued and cancelled on the transaction's date should still count. Today it does not. The balance and quantity-sum checks in cancellation, repurchase, conversion and transfer read only outstanding stock, so a balance issued and cancelled earlier that day can stop validation. (#247)
-- **Stock from an earlier day does not count once removed**, even if the removal is dated the same day as the transaction.
-- **Retracted stock should not count.** A retraction voids the issuance, so the stock was never validly issued. Today a retracted balance is rejected, because balances are read from outstanding stock. Conversion and reissuance look their results up in the whole package history and never check for a retraction, so a retracted result can pass their existence, date, class and stakeholder checks.
+- **It can be removed that day.** The transaction that names it runs before anything removes it, so stock issued and cancelled on the transaction's date still counts.
+- **Stock from an earlier day does not count**, whether it was removed on an earlier day or is cancelled on the transaction's date.
+- **Retracted stock should not count.** A retraction voids the issuance, so the stock was never validly issued. A retraction runs straight after the issuance, before a transaction that names the stock the same day. Today a retracted balance is rejected, because balances are read from outstanding stock. A transfer and a reissuance reject a retracted result in the same way. A conversion looks its results up in the whole package history and never checks for a retraction, so a retracted result passes it.
 - **Every resulting security is checked**, not only the last one listed. Transfer, conversion and reissuance check the issuance date of each result, and conversion and reissuance also check each result's class and stakeholder. Each failing result gets its own finding, so a valid last result cannot hide an earlier invalid one.
 
 ## Stock reissuance
@@ -71,7 +81,7 @@ These rules cover a transaction whose `object_type` the validator has no entry f
 
 - **It is reported, and the run continues.** The transaction gets one `transaction-type-known` error. It is not checked and none of its changes are applied.
 - **The security it names can no longer be relied on.** Nothing says what the transaction did to the security in its `security_id`. Its lifecycle and issuance are marked unreliable, whether it is outstanding or removed, and a later check that reads either is blocked and points at the unrecognized transaction.
-- **It runs after the day's other transactions.** A security issued that day then has a record to mark. Other transactions on the security that day are checked before it.
+- **It runs straight after a same-day issuance of the security.** The security then has a record to mark. Every other transaction on the security that day runs after it, and a check that reads the security is blocked.
 - **A security with no issuance in the package is not marked.** There is no record to mark, so a later transaction on that security reports the missing issuance itself.
 - **A later removal also fails `no-other-transactions`.** That check allows a fixed list of transaction types before a removal, and an unrecognized type is not on it.
 - **Only `security_id` is read.** A security the transaction names in another field, such as `balance_security_id` or `resulting_security_ids`, is not marked. Neither is a stock plan it names.

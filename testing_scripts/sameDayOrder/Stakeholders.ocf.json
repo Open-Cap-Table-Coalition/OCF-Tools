@@ -1,0 +1,9 @@
+{
+  "file_type": "OCF_STAKEHOLDERS_FILE",
+  "items": [
+    { "id": "ada", "object_type": "STAKEHOLDER", "name": { "legal_name": "Ada Founder" }, "stakeholder_type": "INDIVIDUAL", "current_relationships": ["FOUNDER"] },
+    { "id": "grace", "object_type": "STAKEHOLDER", "name": { "legal_name": "Grace Seed Investor" }, "stakeholder_type": "INDIVIDUAL", "current_relationships": ["INVESTOR"] },
+    { "id": "omar", "object_type": "STAKEHOLDER", "name": { "legal_name": "Omar Series A Investor" }, "stakeholder_type": "INDIVIDUAL", "current_relationships": ["INVESTOR"] },
+    { "id": "emily", "object_type": "STAKEHOLDER", "name": { "legal_name": "Emily Employee" }, "stakeholder_type": "INDIVIDUAL", "current_relationships": ["EMPLOYEE"] }
+  ]
+}

@@ -1,0 +1,148 @@
+{
+  "file_type": "OCF_TRANSACTIONS_FILE",
+  "items": [
+    {
+      "id": "accept-omar",
+      "object_type": "TX_STOCK_ACCEPTANCE",
+      "date": "2024-05-01",
+      "security_id": "stock-omar"
+    },
+    {
+      "id": "transfer-ada-to-omar",
+      "object_type": "TX_STOCK_TRANSFER",
+      "date": "2024-05-01",
+      "security_id": "stock-ada",
+      "quantity": "200000",
+      "consideration_text": "Sold to Omar Series A Investor for 2.00 USD per share at the Series A closing",
+      "resulting_security_ids": ["stock-omar"],
+      "balance_security_id": "stock-ada-balance"
+    },
+    {
+      "id": "issue-omar",
+      "object_type": "TX_STOCK_ISSUANCE",
+      "date": "2024-05-01",
+      "security_id": "stock-omar",
+      "custom_id": "CS-3",
+      "stakeholder_id": "omar",
+      "stock_class_id": "common",
+      "security_law_exemptions": [],
+      "share_price": { "amount": "2.00", "currency": "USD" },
+      "quantity": "200000",
+      "stock_legend_ids": []
+    },
+    {
+      "id": "issue-ada-balance",
+      "object_type": "TX_STOCK_ISSUANCE",
+      "date": "2024-05-01",
+      "security_id": "stock-ada-balance",
+      "custom_id": "CS-2",
+      "stakeholder_id": "ada",
+      "stock_class_id": "common",
+      "security_law_exemptions": [],
+      "share_price": { "amount": "0.0001", "currency": "USD" },
+      "quantity": "800000",
+      "stock_legend_ids": []
+    },
+    {
+      "id": "convert-grace-safe",
+      "object_type": "TX_CONVERTIBLE_CONVERSION",
+      "date": "2024-05-01",
+      "security_id": "safe-grace",
+      "reason_text": "Converted at the Series A closing",
+      "trigger_id": "series-a-closing",
+      "resulting_security_ids": ["stock-grace"]
+    },
+    {
+      "id": "issue-grace-series-a",
+      "object_type": "TX_STOCK_ISSUANCE",
+      "date": "2024-05-01",
+      "security_id": "stock-grace",
+      "custom_id": "PA-1",
+      "stakeholder_id": "grace",
+      "stock_class_id": "series-a",
+      "security_law_exemptions": [],
+      "share_price": { "amount": "2.00", "currency": "USD" },
+      "quantity": "125000",
+      "stock_legend_ids": []
+    },
+    {
+      "id": "exercise-emily",
+      "object_type": "TX_EQUITY_COMPENSATION_EXERCISE",
+      "date": "2024-05-01",
+      "security_id": "option-emily",
+      "quantity": "4000",
+      "resulting_security_ids": ["stock-emily"]
+    },
+    {
+      "id": "issue-emily-exercise",
+      "object_type": "TX_STOCK_ISSUANCE",
+      "date": "2024-05-01",
+      "security_id": "stock-emily",
+      "custom_id": "CS-4",
+      "stakeholder_id": "emily",
+      "stock_class_id": "common",
+      "security_law_exemptions": [],
+      "share_price": { "amount": "0.50", "currency": "USD" },
+      "quantity": "4000",
+      "stock_legend_ids": []
+    },
+    {
+      "id": "grant-emily-option",
+      "object_type": "TX_EQUITY_COMPENSATION_ISSUANCE",
+      "date": "2023-09-01",
+      "security_id": "option-emily",
+      "custom_id": "OPT-1",
+      "stakeholder_id": "emily",
+      "stock_plan_id": "plan-2023",
+      "stock_class_id": "common",
+      "security_law_exemptions": [],
+      "compensation_type": "OPTION_ISO",
+      "quantity": "10000",
+      "exercise_price": { "amount": "0.50", "currency": "USD" },
+      "expiration_date": "2033-09-01",
+      "termination_exercise_windows": []
+    },
+    {
+      "id": "issue-grace-safe",
+      "object_type": "TX_CONVERTIBLE_ISSUANCE",
+      "date": "2023-06-01",
+      "security_id": "safe-grace",
+      "custom_id": "SAFE-1",
+      "stakeholder_id": "grace",
+      "security_law_exemptions": [],
+      "investment_amount": { "amount": "250000.00", "currency": "USD" },
+      "convertible_type": "SAFE",
+      "conversion_triggers": [
+        {
+          "trigger_id": "series-a-closing",
+          "nickname": "Converts at the next equity financing",
+          "type": "AUTOMATIC_ON_CONDITION",
+          "trigger_condition": "The company sells preferred stock in a bona fide equity financing.",
+          "conversion_right": {
+            "type": "CONVERTIBLE_CONVERSION_RIGHT",
+            "conversion_mechanism": {
+              "type": "SAFE_CONVERSION",
+              "conversion_mfn": false,
+              "conversion_valuation_cap": { "amount": "10000000.00", "currency": "USD" }
+            },
+            "converts_to_future_round": true
+          }
+        }
+      ],
+      "seniority": 1
+    },
+    {
+      "id": "issue-ada-founder",
+      "object_type": "TX_STOCK_ISSUANCE",
+      "date": "2023-01-10",
+      "security_id": "stock-ada",
+      "custom_id": "CS-1",
+      "stakeholder_id": "ada",
+      "stock_class_id": "common",
+      "security_law_exemptions": [],
+      "share_price": { "amount": "0.0001", "currency": "USD" },
+      "quantity": "1000000",
+      "stock_legend_ids": []
+    }
+  ]
+}

@@ -189,7 +189,8 @@ const endings = [
     } satisfies OCFStockReissuance,
     alsoThatDay: [split, splitShares, founderSplitShares, founderReissuance],
     founder: founderSplitShares,
-    lastSnapshot: { stockIssuances: [splitShares, founderSplitShares].map(row) },
+    // Stock issued the same day is listed in order of the issuances' IDs.
+    lastSnapshot: { stockIssuances: [founderSplitShares, splitShares].map(row) },
   },
 ];
 

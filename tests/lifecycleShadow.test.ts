@@ -131,8 +131,9 @@ describe("where the chart and the checks disagree", () => {
   it("reports both uses of the cancelled grant", () => {
     const context = validatePackage([grant, grantCancellation, reprice, exercise], [{ id: "sh-1" }]);
 
+    // The two are dated the same day and run in order of their IDs.
     expect(context.findings.map((f) => [f.subject.id, f.check, f.outcome])).toEqual([
-      [reprice.id, "issuance-exists", "failed"], [exercise.id, "issuance-exists", "failed"],
+      [exercise.id, "issuance-exists", "failed"], [reprice.id, "issuance-exists", "failed"],
     ]);
     expect(disagreements(context.shadow).map(explain)).toEqual([
       "removed, and neither check runs on it", "removed, and neither check runs on it",
@@ -172,8 +173,8 @@ describe("where the chart and the checks disagree", () => {
     expect(context.findings.map((finding) => [finding.subject.id, finding.check])).toEqual([[transaction.id, "issuance-exists"]]);
   });
 
-  it("the chart refuses a vesting event on the day its warrant is cancelled, which no-earlier-removal allows", () => {
-    // The validator currently accepts vesting on the day a warrant is cancelled (#214).
+  it("the chart allows a vesting event on the day its warrant is cancelled, because the vesting event runs first", () => {
+    // Vesting leaves the warrant outstanding, so it runs before the cancellation dated the same day.
     const context = validatePackage(
       [
         { id: "wi-1", object_type: "TX_WARRANT_ISSUANCE", security_id: "war-1", stakeholder_id: "sh-1", date: "2021-01-01" },
@@ -185,8 +186,32 @@ describe("where the chart and the checks disagree", () => {
     const rows = context.shadow;
 
     expect(context.findings).toEqual([]);
+    expect(rows.map((row) => [row.id, row.state, row.allowed])).toEqual([
+      ["wi-1", "notIssued", true],
+      ["ve-1", "outstanding", true],
+      ["wc-1", "outstanding", true],
+    ]);
+    expect(disagreements(rows)).toEqual([]);
+  });
+
+  it("the chart refuses a consolidation of stock cancelled the same day, which no-earlier-removal allows", () => {
+    // Both transactions remove stock-1, so they run in order of their IDs and the cancellation is
+    // first. The date check passes any transaction on the day of a removal (#214).
+    const context = validatePackage(
+      [
+        { id: "si-1", object_type: "TX_STOCK_ISSUANCE", security_id: "stock-1", stakeholder_id: "sh-1", stock_class_id: "common", stock_legend_ids: [], quantity: "100", date: "2021-01-01" },
+        { id: "si-2", object_type: "TX_STOCK_ISSUANCE", security_id: "stock-2", stakeholder_id: "sh-1", stock_class_id: "common", stock_legend_ids: [], quantity: "100", date: "2021-06-01" },
+        { id: "cancel-1", object_type: "TX_STOCK_CANCELLATION", security_id: "stock-1", quantity: "100", reason_text: "Cancelled", date: "2021-06-01" },
+        { id: "consolidate-1", object_type: "TX_STOCK_CONSOLIDATION", security_ids: ["stock-1"], resulting_security_id: "stock-2", date: "2021-06-01" },
+      ],
+      [{ id: "sh-1" }],
+      [{ id: "common" }],
+    );
+    const rows = context.shadow;
+
+    expect(context.findings).toEqual([]);
     expect(disagreements(rows)).toMatchObject([
-      { id: "ve-1", state: "removed", allowed: false, runs: ["no-earlier-removal"], reported: [], removedBy: { id: "wc-1", date: "2021-06-01" } },
+      { id: "consolidate-1", state: "removed", allowed: false, runs: ["no-earlier-removal"], reported: [], removedBy: { id: "cancel-1", date: "2021-06-01" } },
     ]);
     expect(disagreements(rows).map(explain)).toEqual(["removed earlier the same day"]);
   });
@@ -315,14 +340,15 @@ describe("a disagreement nothing explains", () => {
   });
 
   it.each([
-
     ["TX_CONVERTIBLE_ISSUANCE", "TX_CONVERTIBLE_TRANSFER", "TX_VESTING_EVENT", cancellation.date],
-  ])("flags the last step in %s → %s → %s", (issue, remove, last, date) => {
+  ])("flags the vesting event in %s → %s with a same-day %s", (issue, remove, last, date) => {
+    // A vesting event runs before the transfer dated the same day. The chart still refuses it,
+    // because a convertible does not vest, and no check reports that.
     expect(() => validatePackage([
       { ...issuance, object_type: issue },
       { ...cancellation, object_type: remove },
       { ...cancellation, object_type: last, id: "last", date },
-    ], [{ id: "sh-1" }])).toThrow(`${last} "last" on security "safe-1" (removed)`);
+    ], [{ id: "sh-1" }])).toThrow(`${last} "last" on security "safe-1" (outstanding)`);
   });
 
   it("agrees that a removed warrant cannot return shares to a stock plan", () => {

@@ -1,0 +1,29 @@
+{
+  "ocf_version": "1.2.1-alpha+main",
+  "file_type": "OCF_MANIFEST_FILE",
+  "issuer": {
+    "id": "closingDayCo",
+    "comments": [],
+    "object_type": "ISSUER",
+    "legal_name": "Closing Day Co",
+    "formation_date": "2023-01-02",
+    "country_of_formation": "US",
+    "country_subdivision_of_formation": "DE"
+  },
+  "as_of": "2024-05-01",
+  "generated_at": "2024-05-01T00:00:00.000Z",
+  "stock_plans_files": [{ "filepath": "./StockPlans.ocf.json", "md5": "00000000000000000000000000000000" }],
+  "stock_legend_templates_files": [],
+  "stock_classes_files": [{ "filepath": "./StockClasses.ocf.json", "md5": "00000000000000000000000000000000" }],
+  "transactions_files": [{ "filepath": "./Transactions.ocf.json", "md5": "00000000000000000000000000000000" }],
+  "stakeholders_files": [{ "filepath": "./Stakeholders.ocf.json", "md5": "00000000000000000000000000000000" }],
+  "vesting_terms_files": [],
+  "valuations_files": [],
+  "comments": [
+    "Check that transactions dated the same day run in an order worked out from the securities they name, not from their place in the file (#232).",
+    "Eight transactions are dated 2024-05-01, the day the Series A closes. The file lists each transaction before the issuance it depends on.",
+    "Ada sells 200,000 of her 1,000,000 founder shares to Omar, who accepts them. The transfer names Omar's new stock as its result and Ada's remaining 800,000 as its balance.",
+    "Grace's SAFE converts into Series A Preferred, and Emily exercises 4,000 of her 10,000 options. Each names the stock issued for it.",
+    "The package is valid in every arrangement of the file."
+  ]
+}

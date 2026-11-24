@@ -43,7 +43,7 @@ function outputs(data: DeepReadonly<Movement>) {
   return { stock, date, ids: balance ? [balance, ...results] : results };
 }
 
-/** Find the output's first issuance in the package. Settlement or same-day order can run it after the source. */
+/** Find the output's first issuance in the package. A later settlement date can run it after the source. */
 const issuanceAhead = (context: DeepReadonly<CheckContext>, stock: boolean, id: string) =>
   transactionsOn(context, id).find((tx) => isOfType(tx, stock ? "TX_STOCK_ISSUANCE" : "TX_EQUITY_COMPENSATION_ISSUANCE"));
 
@@ -58,7 +58,7 @@ function claimOn(context: DeepReadonly<CheckContext>, data: DeepReadonly<Movemen
   return { source: data.security_id, date, ...(issuance && { issuance }) };
 }
 
-/** Check the issuance even when settlement or same-day processing puts it after the source. */
+/** Check the issuance even when a later settlement date puts it after the source. */
 export const planReplacement = {
   id: "plan-replacement",
   severity: "error",

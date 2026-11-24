@@ -6,6 +6,7 @@ import { isStockPlanId } from "../stockPlan";
 import { isNegative, isNumeric } from "../numeric";
 import type { CollectionElement, CollectionKey, TxKey } from "../validators";
 import { currentName, type CurrentTxKey } from "../constants/constants";
+import type { OrderLink, Stage } from "../sameDayOrder";
 import { text, type CheckContext, type CheckObject, type ReadField } from "./checkKit";
 
 /** Include older names when checking the type of a transaction in the package history. */
@@ -72,6 +73,34 @@ export const transactionTypeKnown = {
     text`The validator does not recognize object_type ${data.object_type}, so it did not check this transaction or apply any change it makes.`,
   ],
 } satisfies CheckObject<{ object_type: string }>;
+
+/** What a transaction at each stage of a security's day does to that security, for a message. */
+const AT_STAGE = {
+  issues: (security) => text`issues ${security}`,
+  unrecognized: (security) => text`has an unrecognized type and names ${security}`,
+  retracts: (security) => text`retracts ${security}`,
+  names: (security) => text`names ${security} as its balance or result`,
+  stays: (security) => text`acts on ${security} while it is outstanding`,
+  removes: (security) => text`removes ${security}`,
+  "after removal": (security) => text`follows the removal of ${security}`,
+} satisfies Record<Stage, (security: unknown) => string>;
+
+/**
+ * Fails every transaction it runs on. The machine runs it only on a transaction the run could not
+ * place: one of several, dated the same day, that each have to run before the next.
+ */
+export const sameDayOrder = {
+  id: "same-day-order",
+  severity: "error",
+  description: "The transactions dated the same day can be put in an order that suits every security they name.",
+  run: (_context, data) => {
+    const links = data.loop.map(
+      ({ before, after, security }) =>
+        text`${before.id} (${AT_STAGE[before.stage](security)}) has to run before ${after.id} (${AT_STAGE[after.stage](security)})`,
+    );
+    return [text`No order works for the transactions dated ${data.date}: ${links.join("; ")}. The validator did not check or apply them.`];
+  },
+} satisfies CheckObject<{ date: string; loop: readonly OrderLink[] }>;
 
 export const destinationPlan = {
   id: "destination-plan",
