@@ -171,12 +171,14 @@ export const EXPLANATIONS = {
     "The transaction's family does not match the security's issuance, so its issuance check rejects it.",
 
   /**
-   * The date check allows vesting on the day of removal (#214). The chart follows processing order,
-   * which puts cancellation first. Resolve this difference before using the chart to reject packages
-   * (#232).
+   * The date check allows a transaction on the day of a removal (#214). The chart follows run order.
+   * Vesting runs before a same-day removal, so the two agree there. They still differ when two
+   * transactions remove the same security on one day, such as a cancellation and a consolidation:
+   * the one that runs second finds the security removed. Resolve this difference before using the
+   * chart to reject packages.
    */
   "removed earlier the same day":
-    "no-earlier-removal ignores a removal dated the same day; the chart follows run order, which puts the removal first.",
+    "no-earlier-removal ignores a removal dated the same day; the chart follows run order, in which another removal came first.",
 
   /**
    * A consolidation lists several security IDs and has no removal effect in the validator. The chart

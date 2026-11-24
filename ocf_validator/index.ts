@@ -1,9 +1,9 @@
 import { createActor, getInitialSnapshot } from "xstate";
 import { OcfPackageContent, readOcfPackage } from "../read_ocf_package";
 import type { Finding } from "../types/finding";
-import { transactionPriority } from "./constants/constants";
 import { emptyResult, errorResult, malformedResult, ocfMachine, type OcfMachineEvent } from "./ocfMachine";
 import { type OcfMachineContext } from "../types/validator";
+import { runOrder } from "./sameDayOrder";
 import { isTxKey } from "./validators";
 
 export const ocfValidator = (packagePath: string): OcfMachineContext => validateOcfPackage(readOcfPackage(packagePath));
@@ -28,12 +28,12 @@ export const validateOcfPackage = (
     };
   }
 
-  // Compare dates the same way as the history checks. On the same day, either spelling of a
-  // transaction has the same priority. Keep the original spelling when dispatching it.
-  const sortedTransactions = transactions.sort((a, b) => {
-    if (a.date < b.date) return -1;
-    if (a.date > b.date) return 1;
-    return transactionPriority(a.object_type) - transactionPriority(b.object_type);
+  // Work out the whole run before it starts: days in date order, and each day's transactions in an
+  // order that follows the securities they name. Put the package's own list in that order too.
+  // Checks that scan a security's history then report it the same way however the file was arranged.
+  const run = runOrder(transactions);
+  run.forEach((placed, index) => {
+    transactions[index] = placed.transaction;
   });
 
   // `ocfMachine` is already a configured machine (built with setup()), so it is
@@ -65,17 +65,19 @@ export const validateOcfPackage = (
   // Send each day's transactions in order. When the date changes, close the day that just ended so
   // the machine checks its stock plans and takes its snapshot.
   let currentDate: string | undefined;
-  for (const ele of sortedTransactions) {
+  for (const { transaction: ele, loop } of run) {
     if (currentDate !== undefined && ele.date !== currentDate) send({ type: "RUN_EOD", date: currentDate });
     currentDate = ele.date;
-    // The package chooses object_type. A type the table lists is sent as the event type. Anything
-    // else is sent as UNRECOGNIZED, so that no value in a package can pass for one of the run's own
-    // events.
+    // The package chooses object_type. A type the table does not list is sent as UNRECOGNIZED, so
+    // that no value in a package can pass for one of the run's own events.
     const type: string = ele.object_type;
+    if (!isTxKey(type)) send({ type: "UNRECOGNIZED", data: ele }, onTransaction);
+    // A transaction the run could not place is sent with the loop it is in.
+    else if (loop) send({ type: "UNORDERED", data: ele, loop }, onTransaction);
     // Boundary cast: `ele` is read from disk, so TS cannot correlate the runtime `type` with its
     // matching payload in the per-key event union. This single declared cast bridges parsed input
     // to the typed event.
-    send(isTxKey(type) ? ({ type, data: ele } as OcfMachineEvent) : { type: "UNRECOGNIZED", data: ele }, onTransaction);
+    else send({ type, data: ele } as OcfMachineEvent, onTransaction);
   }
 
   // A package with no transactions has no day to close, so it gets no snapshot.

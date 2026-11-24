@@ -81,7 +81,9 @@ describe("returning cancelled stock to a plan", () => {
   });
 });
 
-// Same-day stock removals run before transfers and repurchases, and in file order among themselves.
+// A transaction that names stock as its balance or result runs after that stock's issuance and before
+// anything else removes the stock that day. A retraction is the exception: it voids the issuance, so
+// it runs first.
 describe("stock removed the same day another transaction names it", () => {
   const stock = (security_id: string, quantity: string, date = "2021-06-01", fields: Record<string, unknown> = {}) => ({
     id: `issue-${security_id}`, object_type: "TX_STOCK_ISSUANCE", security_id, date, stakeholder_id: "holder",
@@ -112,7 +114,7 @@ describe("stock removed the same day another transaction names it", () => {
       tx: { ...source, object_type: "TX_STOCK_CONVERSION", quantity_converted: "6", resulting_security_ids: ["result"], balance_security_id: "balance" } },
     { name: "a reissuance's resulting stock", outputs: [stock("result", "10")], removed: ["result", "10"],
       tx: { ...source, object_type: "TX_STOCK_REISSUANCE", resulting_security_ids: ["result"] } },
-  ])("accepts $name cancelled earlier that day", ({ outputs, removed, tx }) => {
+  ])("accepts $name cancelled that day", ({ outputs, removed, tx }) => {
     const context = run([stock("held", "10", "2021-01-01"), ...outputs, cancelled(removed[0], removed[1]), tx]);
 
     expect(context.result).toBe(VALID);
@@ -124,7 +126,7 @@ describe("stock removed the same day another transaction names it", () => {
       tx: { ...source, object_type: "TX_STOCK_TRANSFER", quantity: "10", resulting_security_ids: ["result"] } },
     { name: "a cancellation's balance stock", output: stock("balance", "4"), failed: "balance-stock-exists",
       tx: { ...source, object_type: "TX_STOCK_CANCELLATION", quantity: "6", reason_text: "Cancelled", balance_security_id: "balance" } },
-  ])("rejects $name retracted earlier that day", ({ output, failed, tx }) => {
+  ])("rejects $name retracted that day", ({ output, failed, tx }) => {
     const retraction = { id: "retract", object_type: "TX_STOCK_RETRACTION", security_id: output.security_id, date: "2021-06-01", reason_text: "Issued in error" };
     const context = run([stock("held", "10", "2021-01-01"), output, retraction, tx]);
 
@@ -182,18 +184,20 @@ describe("stock removed the same day another transaction names it", () => {
   });
 
   it.each([
-    { name: "issued the next day", other: stock("later", "15", "2021-06-02"), removal: [] as Record<string, unknown>[] },
+    { name: "issued the next day", other: stock("later", "15", "2021-06-02"), removal: [] as Record<string, unknown>[], failed: "resulting-stock-exists" },
     { name: "issued and cancelled on an earlier day", other: stock("later", "15", "2021-05-01"),
-      removal: [{ ...cancelled("later", "15"), date: "2021-05-02" }] },
+      removal: [{ ...cancelled("later", "15"), date: "2021-05-02" }], failed: "resulting-stock-exists" },
+    // The transfer runs before the cancellation, so the stock is still outstanding. Its issuance
+    // date is what rules it out.
     { name: "issued on an earlier day and cancelled that day", other: stock("later", "15", "2021-05-01"),
-      removal: [cancelled("later", "15")] },
-  ])("still rejects a transfer whose resulting stock was $name", ({ other, removal }) => {
+      removal: [cancelled("later", "15")], failed: "resulting-stock-dated" },
+  ])("still rejects a transfer whose resulting stock was $name", ({ other, removal, failed }) => {
     const context = run([
       stock("held", "40", "2021-01-01"), other, ...removal, stock("result", "25"),
       { ...source, object_type: "TX_STOCK_TRANSFER", quantity: "40", resulting_security_ids: ["later", "result"] },
     ]);
 
-    expect(context.findings).toContainEqual(failedCheck("resulting-stock-exists"));
+    expect(context.findings).toContainEqual(failedCheck(failed));
   });
 
   it.each([

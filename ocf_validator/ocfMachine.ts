@@ -5,7 +5,8 @@ import type { Finding, Subject } from "../types/finding";
 import type { DeepReadonly, GradedValidator, OcfMachineContext } from "../types/validator";
 import { TX_DESCRIPTORS, type TxKey } from "./validators";
 import { text, toValidate } from "./validators/checkKit";
-import { noEarlierRemoval, transactionTypeKnown } from "./validators/checks";
+import { noEarlierRemoval, sameDayOrder, transactionTypeKnown } from "./validators/checks";
+import type { OrderLink } from "./sameDayOrder";
 import { endOfDayFindings } from "./validators/stock_plan/pool";
 import { withPlans } from "./stockPlan";
 import { addRoot, applyTransaction, emptyNodes, withUnrecognizedChange, type Verdict } from "./nodes";
@@ -24,11 +25,13 @@ export type OcfMachineEvent =
   // The package chooses object_type, so a type the table does not list is never sent as the event
   // type. A transaction typed "RUN_END" would otherwise be handled as the run's own RUN_END event.
   | { type: "UNRECOGNIZED"; data: UnrecognizedTransaction }
+  // A transaction the run could not place among those dated the same day, with the loop it is in.
+  | { type: "UNORDERED"; data: TransactionFor<TxKey>; loop: readonly OrderLink[] }
   | { type: "START"; data: OcfPackageContent }
   | { type: "RUN_EOD"; date: string }
   | { type: "RUN_END"; date: string };
 
-const CONTROL_EVENTS = ["START", "RUN_EOD", "RUN_END", "UNRECOGNIZED"] as const;
+const CONTROL_EVENTS = ["START", "RUN_EOD", "RUN_END", "UNRECOGNIZED", "UNORDERED"] as const;
 type ControlEvent = (typeof CONTROL_EVENTS)[number];
 
 const isControlEvent = (event: OcfMachineEvent): event is Extract<OcfMachineEvent, { type: ControlEvent }> =>
@@ -144,6 +147,10 @@ const validatePassthrough = toValidate(passthroughRules);
 export const unrecognizedTypeRules = [transactionTypeKnown];
 const validateUnrecognized = toValidate(unrecognizedTypeRules);
 
+/** The one check run on a transaction the run could not place among those dated the same day. */
+export const unorderedRules = [sameDayOrder];
+const validateUnordered = toValidate(unorderedRules);
+
 type ValidationTable = {
   [K in TxKey]: { validate: GradedValidator<TransactionFor<K>> } | { effect: "passthrough" };
 };
@@ -172,6 +179,19 @@ export const ocfMachine = setup({
       const nodes = applyTransaction(context.nodes, descriptor, event.data, verdictOf({ object_type: event.type, id: event.data.id }, found));
       return {
         ...(found.length > 0 && { findings: [...context.findings, ...found] }),
+        ...(nodes !== context.nodes && { nodes }),
+      };
+    }),
+    // The transaction's own checks would depend on which of the loop's transactions ran first, so
+    // none of them runs. Record the loop and withhold the transaction's changes, as for any failed
+    // transaction of its type.
+    withholdUnordered: assign(({ context, event }) => {
+      if (event.type !== "UNORDERED") return {};
+      const { data, loop } = event;
+      const found = validateUnordered(context, { ...data, loop });
+      const nodes = applyTransaction(context.nodes, TX_DESCRIPTORS[data.object_type], data, verdictOf({ object_type: data.object_type, id: data.id }, found));
+      return {
+        findings: [...context.findings, ...found],
         ...(nodes !== context.nodes && { nodes }),
       };
     }),
@@ -251,6 +271,10 @@ export const ocfMachine = setup({
         UNRECOGNIZED: {
           target: "capTable",
           actions: "reportUnrecognizedType",
+        },
+        UNORDERED: {
+          target: "capTable",
+          actions: "withholdUnordered",
         },
         // Fires only for an event type the machine has no entry for. The driver never sends one.
         "*": {

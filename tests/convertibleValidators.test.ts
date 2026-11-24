@@ -727,7 +727,7 @@ describe("convertible conversion through ocfValidator", () => {
   // Unlike the runs above, this one goes through the driver: the date sort,
   // START, the end-of-day snapshots, and RUN_END. The package lists its
   // transactions newest first, so the run depends on the sort, including its
-  // same-day order by type (the option's issuance before its acceptance). The
+  // same-day order (the option's issuance before its acceptance). The
   // resulting stock issuance is a real event here, and the run goes on to the
   // stock and equity compensation validators; the equity compensation
   // acceptance once crashed a run that got past a conversion (#203).

@@ -1,49 +1,7 @@
 import type { TxKey } from "../validators";
 
-const transactionOrder = [
-  'TX_STOCK_ISSUANCE',
-  'TX_STOCK_RETRACTION',
-  'TX_STOCK_ACCEPTANCE',
-  'TX_STOCK_CANCELLATION',
-  'TX_STOCK_CONVERSION',
-  'TX_STOCK_REISSUANCE',
-  'TX_STOCK_REPURCHASE',
-  'TX_STOCK_TRANSFER',
-  'TX_CONVERTIBLE_ISSUANCE',
-  'TX_CONVERTIBLE_RETRACTION',
-  'TX_CONVERTIBLE_ACCEPTANCE',
-  'TX_CONVERTIBLE_CANCELLATION',
-  'TX_CONVERTIBLE_TRANSFER',
-  'TX_CONVERTIBLE_CONVERSION',
-  'TX_WARRANT_ISSUANCE',
-  'TX_WARRANT_RETRACTION',
-  'TX_WARRANT_ACCEPTANCE',
-  'TX_WARRANT_CANCELLATION',
-  'TX_WARRANT_TRANSFER',
-  'TX_WARRANT_EXERCISE',
-  'TX_EQUITY_COMPENSATION_ISSUANCE',
-  'TX_EQUITY_COMPENSATION_RETRACTION',
-  'TX_EQUITY_COMPENSATION_ACCEPTANCE',
-  // A release, repricing, or exercise leaves the security outstanding, so on a
-  // given day they come before a cancellation or transfer of what's left.
-  'TX_EQUITY_COMPENSATION_RELEASE',
-  'TX_EQUITY_COMPENSATION_REPRICING',
-  'TX_EQUITY_COMPENSATION_EXERCISE',
-  'TX_EQUITY_COMPENSATION_CANCELLATION',
-  'TX_EQUITY_COMPENSATION_TRANSFER',
-  'TX_STOCK_CLASS_CONVERSION_RATIO_ADJUSTMENT',
-  'TX_ISSUER_AUTHORIZED_SHARES_ADJUSTMENT',
-  'TX_STOCK_CLASS_AUTHORIZED_SHARES_ADJUSTMENT',
-  'TX_STOCK_CLASS_SPLIT',
-  'TX_STOCK_CONSOLIDATION',
-  'TX_STOCK_PLAN_POOL_ADJUSTMENT',
-  'TX_STOCK_PLAN_RETURN_TO_POOL',
-  'TX_VESTING_ACCELERATION',
-  'TX_VESTING_START',
-  'TX_VESTING_EVENT',
-] as const;
-
-export type CurrentTxKey = (typeof transactionOrder)[number];
+/** A transaction type under the name OCF uses for it today. */
+export type CurrentTxKey = Exclude<TxKey, `TX_PLAN_SECURITY_${string}`>;
 
 export const OLDER_NAMES = {
   TX_PLAN_SECURITY_ISSUANCE: "TX_EQUITY_COMPENSATION_ISSUANCE",
@@ -60,11 +18,3 @@ export function currentName(type: unknown): unknown;
 export function currentName(type: unknown): unknown {
   return typeof type === "string" && Object.hasOwn(OLDER_NAMES, type) ? OLDER_NAMES[type as keyof typeof OLDER_NAMES] : type;
 }
-
-const priorities = new Map<string, number>(transactionOrder.map((type, index) => [type, index]));
-
-/**
- * An unrecognized type runs after the day's other transactions. A security issued that day then has
- * a record the machine can mark as unreliable.
- */
-export const transactionPriority = (type: string): number => priorities.get(currentName(type)) ?? transactionOrder.length;

@@ -190,7 +190,7 @@ describe("the security an unrecognized transaction names", () => {
 describe("an object_type that is not a transaction type at all", () => {
   // The run sends its own events to the same machine that receives transactions. A package value
   // that matches one of their names is reported like any other unrecognized type.
-  it.each(["START", "RUN_EOD", "RUN_END", "UNRECOGNIZED", "*", "constructor", "__proto__"])("reports %s and finishes the run", (object_type) => {
+  it.each(["START", "RUN_EOD", "RUN_END", "UNRECOGNIZED", "UNORDERED", "*", "constructor", "__proto__"])("reports %s and finishes the run", (object_type) => {
     const context = validatePackage([warrant, { ...amendment, object_type }, acceptance], stakeholders);
 
     expect(context.findings.map((f) => [f.subject.object_type, f.subject.id, f.check, f.outcome])).toEqual([

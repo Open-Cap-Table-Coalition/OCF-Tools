@@ -32,18 +32,20 @@ npm test -- tests/warrantValidators.test.ts -t "warrant issuance validity"
 
 ```mermaid
 flowchart TD
-    A["Read the manifest and its files"] --> B["Sort transactions by date"]
+    A["Read the manifest and its files"] --> B["Order transactions by date, then by the securities they name"]
     B --> C["Run the checks for this transaction type"]
     C -->|Pass or warning| D["Apply the transaction"]
     C -->|Error-level finding| E["Record the finding, withhold the transaction's changes and continue"]
     C -->|Unrecognized type| H["Record a finding, mark the security it names as unreliable and continue"]
+    B -->|No order works for some same-day transactions| I["Record a finding on each, withhold their changes and continue"]
     C -->|Internal error| F["Stop and report the failure in result"]
     D --> G["Check each changed stock plan, then save a snapshot at the end of the day"]
     E --> G
     H --> G
+    I --> G
 ```
 
-The reader loads the package once per validation. For transactions on the same date, the validator uses a fixed order by type. The XState machine uses `TX_DESCRIPTORS` to choose the checks and update the outstanding securities. For example, issuing a warrant adds it to the cap table and cancelling it removes it. A transaction under one of the older `TX_PLAN_SECURITY_*` names is validated as the equity compensation transaction it stands for. [Package reader](read_ocf_package/index.ts) · [Transaction order](ocf_validator/index.ts) · [Transaction table](ocf_validator/validators/index.ts) · [State machine](ocf_validator/ocfMachine.ts) · [Snapshot fields](ocf_validator/eod.ts)
+The reader loads the package once per validation. OCF dates a transaction to the day, so the validator works out the order within a day from the securities each transaction names. A security's issuance runs first, then a transaction that names the security as its balance or result, then transactions that leave it outstanding, then one that removes it. Transactions that share no security run in order of their `id`, so the result does not depend on how the file is arranged. If several same-day transactions each have to run before the next, no order works. Each gets a `same-day-order` error, and none of them is checked or applied. The XState machine uses `TX_DESCRIPTORS` to choose the checks and update the outstanding securities. For example, issuing a warrant adds it to the cap table and cancelling it removes it. A transaction under one of the older `TX_PLAN_SECURITY_*` names is validated as the equity compensation transaction it stands for. [Package reader](read_ocf_package/index.ts) · [Same-day order](ocf_validator/sameDayOrder.ts) · [Transaction table](ocf_validator/validators/index.ts) · [State machine](ocf_validator/ocfMachine.ts) · [Snapshot fields](ocf_validator/eod.ts)
 
 Stock, convertible, warrant, equity compensation and stock plan checks report findings, as does the earlier-removal check on other transactions, such as vesting. When one of these checks fails at error level, the validator withholds that transaction's changes and marks the fields it would have written as unreliable. A later check that needs one of those fields reports a blocked finding instead of guessing. Independent checks still run. A check that throws is recorded as a failed error finding in the same way, and the remaining checks still run.
 
@@ -51,7 +53,7 @@ The day-end stock plan check is different. It records a finding and withholds no
 
 A failed stock check does not stop the run. It records findings in the same way as the other checks. Only two things stop a run: an error thrown outside a check, and a transaction whose date or type isn't a string. The second stops the run before the first transaction is processed.
 
-A transaction whose `object_type` the validator does not recognize, such as a type added by a newer version of OCF, does not stop the run either. The validator cannot check or apply it, so it records one `transaction-type-known` error for it. If the transaction names a `security_id`, nothing says what it did to that security. The validator marks the security's lifecycle and issuance as unreliable, and a later check that reads either one reports a blocked finding. An unrecognized transaction runs after the other transactions dated the same day. [Unrecognized types](tests/unrecognizedTransactionType.test.ts)
+A transaction whose `object_type` the validator does not recognize, such as a type added by a newer version of OCF, does not stop the run either. The validator cannot check or apply it, so it records one `transaction-type-known` error for it. If the transaction names a `security_id`, nothing says what it did to that security. The validator marks the security's lifecycle and issuance as unreliable, and a later check that reads either one reports a blocked finding. An unrecognized transaction runs after a same-day issuance of the security it names and before every other transaction on that security that day. [Unrecognized types](tests/unrecognizedTransactionType.test.ts)
 
 Stock quantity checks add decimal share quantities exactly. A reissuance with an omitted or null `split_transaction_id` must have results that add up to the original quantity. A named split must be a stock class split with the reissuance's date and the original stock's class.
 
@@ -62,7 +64,8 @@ For the rules the validator applies and the corner cases settled so far, see [Va
 - `result` states whether the package appears valid. A completed run counts failed errors, blocked checks and warnings separately. If the run stops early, `result` identifies the transaction and the failure. A package with no transactions completes with a `result` that says no transaction was checked. It has no findings and no snapshots, so `ocfSnapshot` returns `null` for it.
 - `findings` lists each check's `severity` (`error` or `warning`), `outcome`, `check` ID, `message` and `subject` (an `object_type` and `id`). A `failed` finding reports a problem the check found. A `blocked` finding lists the earlier failures that caused it in `roots`. Warnings allow the transaction's changes. To group findings, use `check` and `subject`, plus `date` for day-end checks, and keep every message in each group.
 - Stock checks report through `findings`. The `report` and `lastErrorFindings` fields no longer exist, so select a stock transaction's findings by its `subject` and the `check` ID. A check can produce several messages, such as one for each legend or resulting security that fails. A failed stock check can block a later check that reads the same security, and unrelated securities continue through the run. A stock issuance that reuses a security ID produces a finding that names the original issuance or the earlier removal.
-- `snapshots` holds the cap table at the end of each transaction day the run completed. A row's optional `defects` lists the causes of uncertainty under `lifecycle` or `issuance`. A failed first issuance appears as a row that contains only its defects. Each snapshot also lists the plans under `stockPlans`, with decimal strings for `drawn` and, when known, `reserved`. Either total can have its own `defects` entry.
+- `ocfPackageContent.transactions` is left in the order the run used.
+- `snapshots` holds the cap table at the end of each transaction day the run completed. Securities issued the same day are listed in the order their issuances ran. A row's optional `defects` lists the causes of uncertainty under `lifecycle` or `issuance`. A failed first issuance appears as a row that contains only its defects. Each snapshot also lists the plans under `stockPlans`, with decimal strings for `drawn` and, when known, `reserved`. Either total can have its own `defects` entry.
 - `nodes` holds each security's issuance and lifecycle, including removed securities. Each field records its last writer and any defects. A security ID can be issued only once across all four families. `nodes.plan` holds the current pool totals by plan ID.
 
 ```js
@@ -106,7 +109,7 @@ In the project that uses OCF-Tools, run `npm link ocf-tools`. Then add `const { 
 
 | Status | Goal |
 | --- | --- |
-| Proposed | Order same-day transactions by what they reference, so an issuance runs before a transaction that uses it. Check records such as stakeholders and vesting terms before processing transactions that rely on them. [Transaction order](https://github.com/Open-Cap-Table-Coalition/OCF-Tools/issues/232) · [Reference checks](https://github.com/Open-Cap-Table-Coalition/OCF-Tools/issues/234) |
+| Proposed | Check records such as stakeholders and vesting terms before processing transactions that rely on them. [Reference checks](https://github.com/Open-Cap-Table-Coalition/OCF-Tools/issues/234) |
 | Proposed | Track securities, stock classes, plans and the issuer as a dependency graph, so an error reaches every record that relies on it and shares are checked against each class's and the issuer's authorized total. Validate vesting schedules and publish a versioned npm package. [Dependency graph and share limits](https://github.com/Open-Cap-Table-Coalition/OCF-Tools/issues/225) · [Project roadmap](https://github.com/Open-Cap-Table-Coalition/OCF-Tools/discussions/145) |
 
 The contributor guide explains how to write rules, tests and PR descriptions for the validator. [Contributor guide](AGENTS.md)
