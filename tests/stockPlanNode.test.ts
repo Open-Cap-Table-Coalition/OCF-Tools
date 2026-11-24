@@ -238,6 +238,26 @@ describe("accounting for returns and replacements", () => {
     expect(drawnByDay(context).map(([, drawn]) => drawn)).toEqual(["100", "100", "100", "60"]);
   });
 
+  it("blocks a return against an allowance made uncertain by a grant amendment", () => {
+    const amendment = subject("TX_GRANT_AMENDMENT", "amend");
+    const returned = returnToPool("return", "option", "60");
+    const context = run([
+      source, cancel, { ...amendment, security_id: "option", date: "2022-02-15" }, returned,
+      grant("independent", "option-2", "10", { date: "2022-03-02", stock_plan_id: successor.id }),
+    ], [PLAN, successor]);
+
+    expect(context.result).toContain("complete and found 1 error and 3 checks blocked by it");
+    expect(ofTransactions(context)).toMatchObject([
+      { check: "transaction-type-known", outcome: "failed", subject: amendment },
+      { check: "security-removed", outcome: "blocked", subject: { id: returned.id }, roots: [amendment] },
+      { check: "quantity-returnable", outcome: "blocked", subject: { id: returned.id }, roots: [amendment] },
+    ]);
+    expect(context.snapshots.at(-1)?.stockPlans).toEqual([
+      { id: PLAN.id, reserved: "1000", drawn: "100", defects: { drawn: [amendment] } },
+      { id: successor.id, reserved: "1000", drawn: "10" },
+    ]);
+  });
+
   it("shares one exact return allowance across dates, destinations, and transaction IDs", () => {
     const context = run([
       source, cancel, returnToPool("first", "option", "39.9999999999", { stock_plan_id: "successor" }),
@@ -1113,7 +1133,10 @@ describe("stock issued from a plan", () => {
     for (const nodes of [outstanding, planless]) {
       expect(validate(nodes)).toMatchObject([{ check: "security-removed", outcome: "failed" }]);
     }
-    expect(validate(uncertain)).toMatchObject([{ check: "security-removed", outcome: "blocked", roots: [bad] }]);
+    expect(validate(uncertain)).toMatchObject([
+      { check: "security-removed", outcome: "blocked", roots: [bad] },
+      { check: "quantity-returnable", outcome: "blocked", roots: [bad] },
+    ]);
   });
 });
 

@@ -126,7 +126,7 @@ type Applied = PoolTransaction;
 
 /** Identify the transaction by type and ID. */
 const subjectOf = (transaction: Applied): Subject => ({
-  object_type: transaction.object_type as Subject["object_type"],
+  object_type: transaction.object_type,
   id: transaction.id,
 });
 

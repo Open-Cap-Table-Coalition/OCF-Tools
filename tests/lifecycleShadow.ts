@@ -5,7 +5,7 @@
 import { getNextSnapshot } from "xstate";
 import { lifecycleStep, type LifecycleState } from "../ocf_validator/lifecycle";
 import { passthroughRules, ocfMachine, type OcfMachineEvent } from "../ocf_validator/ocfMachine";
-import { lifecycleFamilies, TX_DESCRIPTORS, type CollectionKey } from "../ocf_validator/validators";
+import { isTxKey, lifecycleFamilies, TX_DESCRIPTORS, type CollectionKey } from "../ocf_validator/validators";
 import { applyTransaction } from "../ocf_validator/nodes";
 import { toValidate, type CheckObject } from "../ocf_validator/validators/checkKit";
 import type { Finding } from "../types/finding";
@@ -44,7 +44,7 @@ export type ShadowRow = {
   removedBy: Transaction | undefined;
   /** The first removal the validator indexed for this security. */
   indexedRemoval?: Pick<Transaction, "date" | "object_type">;
-  /** Whether an earlier transaction of a type the validator does not recognize names this security. */
+  /** Whether an unrecognized transaction names this security on or before this date. */
   afterUnrecognized: boolean;
 };
 
@@ -59,6 +59,17 @@ const securitiesOf = (transaction: Transaction): unknown[] => {
   }
   return [];
 };
+
+/** The removal check scans the whole package, including transactions later in the same day. */
+function firstUnrecognizedDates(transactions: readonly Transaction[]): Map<unknown, string> {
+  const dates = new Map<unknown, string>();
+  for (const { object_type, security_id, date } of transactions) {
+    if (isTxKey(object_type) || security_id == null) continue;
+    const first = dates.get(security_id);
+    if (first === undefined || date < first) dates.set(security_id, date);
+  }
+  return dates;
+}
 
 /** Resume from the holdings the validator kept. A failed transaction leaves those holdings alone. */
 function replay(context: OcfMachineContext, transaction: Transaction, checks: readonly CheckObject<any>[]) {
@@ -82,15 +93,12 @@ export function shadowRows(transactions: readonly Transaction[], run?: Run): Sha
     ocfPackageContent: { ...baseContext().ocfPackageContent, transactions } as unknown as OcfMachineContext["ocfPackageContent"],
   });
   const securities = new Map<unknown, { family: CollectionKey; state: LifecycleState; issuance: Transaction; removedBy?: Transaction }>();
-  const namedByUnrecognized = new Set<unknown>();
+  const unrecognizedDates = firstUnrecognizedDates(transactions);
   const rows: ShadowRow[] = [];
 
   for (const [index, transaction] of transactions.entries()) {
-    if (!Object.hasOwn(TX_DESCRIPTORS, transaction.object_type)) {
-      if ("security_id" in transaction) namedByUnrecognized.add(transaction.security_id);
-      continue;
-    }
-    const descriptor = TX_DESCRIPTORS[transaction.object_type as keyof typeof TX_DESCRIPTORS];
+    if (!isTxKey(transaction.object_type)) continue;
+    const descriptor = TX_DESCRIPTORS[transaction.object_type];
     const actual = run?.visits[index];
     const skipped = run !== undefined && actual === undefined;
     const rules: readonly CheckObject<any>[] = "rules" in descriptor ? descriptor.rules : passthroughRules;
@@ -124,6 +132,7 @@ export function shadowRows(transactions: readonly Transaction[], run?: Run): Sha
         known.state = step.next;
       }
 
+      const firstUnrecognized = unrecognizedDates.get(security);
       rows.push({
         id: transaction.id,
         object_type: transaction.object_type,
@@ -138,7 +147,7 @@ export function shadowRows(transactions: readonly Transaction[], run?: Run): Sha
         issuanceCheck: issuance?.outcome === "failed" && skipped ? "replayed" : issuance?.outcome,
         indexedRemoval: context.removals.get(security),
         removedBy: state === "removed" ? known?.removedBy : undefined,
-        afterUnrecognized: namedByUnrecognized.has(security),
+        afterUnrecognized: firstUnrecognized !== undefined && firstUnrecognized <= transaction.date,
       });
     }
   }

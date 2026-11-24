@@ -1,5 +1,3 @@
-import type { ObjectTypeMap } from "@opencaptablecoalition/ocf-types";
-
 /** How serious a problem the check reports. */
 export type Severity = "error" | "warning";
 
@@ -10,10 +8,10 @@ export type Severity = "error" | "warning";
 export type Outcome = "failed" | "blocked";
 
 /**
- * Identify an OCF object by its schema type and ID. A `transaction-type-known` finding is the one
- * exception: its object_type is the unrecognized string read from the package.
+ * Identify an object by its type and ID from the package. Finding subjects, blocked roots and
+ * snapshot defects preserve the original object_type even when the validator does not recognize it.
  */
-export type Subject = { object_type: keyof ObjectTypeMap; id: string };
+export type Subject = { object_type: string; id: string };
 
 interface FindingFields {
   severity: Severity;

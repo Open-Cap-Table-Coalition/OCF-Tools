@@ -225,11 +225,11 @@ describe("where the chart and the checks disagree", () => {
     expect(disagreements(rows).map(explain)).toEqual(["removed by a transaction the removals index doesn't hold"]);
   });
 
-  it("the chart allows a cancellation after an unrecognized transaction, which no-other-transactions counts", () => {
+  it.each(["2021-03-01", "2021-06-01"])("explains the June cancellation when an amendment is dated %s", (date) => {
     const context = validatePackage(
       [
         { id: "wi-1", object_type: "TX_WARRANT_ISSUANCE", security_id: "war-1", stakeholder_id: "sh-1", date: "2021-01-01" },
-        { id: "amend-1", object_type: "TX_WARRANT_AMENDMENT", security_id: "war-1", date: "2021-03-01" },
+        { id: "amend-1", object_type: "TX_WARRANT_AMENDMENT", security_id: "war-1", date },
         { id: "wc-1", object_type: "TX_WARRANT_CANCELLATION", security_id: "war-1", date: "2021-06-01" },
       ],
       [{ id: "sh-1" }],
@@ -240,6 +240,11 @@ describe("where the chart and the checks disagree", () => {
     expect(rows.map((row) => row.id)).toEqual(["wi-1", "wc-1"]);
     expect(disagreements(rows)).toMatchObject([{ id: "wc-1", state: "outstanding", allowed: true, reported: ["no-other-transactions"], afterUnrecognized: true }]);
     expect(disagreements(rows).map(explain)).toEqual(["named by an unrecognized transaction"]);
+    expect(rows[0].afterUnrecognized).toBe(false);
+    expect(context.findings).toContainEqual(expect.objectContaining({
+      subject: { object_type: "TX_WARRANT_CANCELLATION", id: "wc-1" }, check: "no-other-transactions", outcome: "failed",
+    }));
+    expect(context.snapshots.at(-1)?.warrants).toHaveLength(1);
   });
 
   it("has an explanation written for every kind it names", () => {

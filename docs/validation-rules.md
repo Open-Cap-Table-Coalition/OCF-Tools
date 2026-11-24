@@ -73,7 +73,7 @@ These rules cover a transaction whose `object_type` the validator has no entry f
 - **The security it names can no longer be relied on.** Nothing says what the transaction did to the security in its `security_id`. Its lifecycle and issuance are marked unreliable, whether it is outstanding or removed, and a later check that reads either is blocked and points at the unrecognized transaction.
 - **It runs after the day's other transactions.** A security issued that day then has a record to mark. Other transactions on the security that day are checked before it.
 - **A security with no issuance in the package is not marked.** There is no record to mark, so a later transaction on that security reports the missing issuance itself.
-- **A later removal also fails `no-other-transactions`.** That check allows a fixed list of transaction types before a removal, and an unrecognized type is not on it.
+- **A removal that checks `no-other-transactions` counts an unrecognized transaction on the same security.** It scans the package for transactions dated on or before the removal, including an amendment that runs later that day.
 - **Only `security_id` is read.** A security the transaction names in another field, such as `balance_security_id` or `resulting_security_ids`, is not marked. Neither is a stock plan it names.
 - **An `object_type` that matches one of the run's own event names is unrecognized too.** A transaction typed `RUN_END` is reported like any other, and is not handled as the run's own event.
 

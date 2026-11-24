@@ -29,7 +29,7 @@ const unknown = <T>(): Field<T> => ({ value: undefined, writer: undefined, defec
 
 /** Identify the transaction by type and ID. */
 const subjectOf = (transaction: PoolTransaction): Subject => ({
-  object_type: transaction.object_type as Subject["object_type"],
+  object_type: transaction.object_type,
   id: transaction.id,
 });
 

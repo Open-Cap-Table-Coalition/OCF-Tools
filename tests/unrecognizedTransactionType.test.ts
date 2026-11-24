@@ -3,14 +3,13 @@ import { describe, it, expect } from "vitest";
 import { ocfValidator } from "../ocf_validator";
 import { emptyNodes, applyTransaction, withUnrecognizedChange } from "../ocf_validator/nodes";
 import { TX_DESCRIPTORS } from "../ocf_validator/validators";
-import type { Subject } from "../types/finding";
 import { collection, validatePackage } from "./helpers";
 
 // A transaction whose object_type the validator does not recognize gets one error finding, and the
 // run goes on. If it names a security, that security can no longer be relied on, because nothing
 // says what the transaction did to it.
 
-const subject = (object_type: string, id: string) => ({ object_type, id }) as Subject;
+const subject = (object_type: string, id: string) => ({ object_type, id });
 const notRecognized = (object_type: string, id: string) => ({
   severity: "error",
   outcome: "failed",
@@ -156,6 +155,32 @@ describe("the security an unrecognized transaction names", () => {
         message: "No warrant issuance with security_id war-1 appears in the package.",
       },
     ]);
+  });
+
+  it.each([undefined, null])("leaves a warrant with security_id %s alone when a change names no security", (security_id) => {
+    const change = { object_type: "CE_STAKEHOLDER_STATUS", id: "status", date: amendment.date, security_id };
+    const context = validatePackage([{ ...warrant, security_id }, change, { ...acceptance, security_id }], stakeholders);
+
+    expect(context.findings).toEqual([notRecognized(change.object_type, change.id)]);
+    expect(context.snapshots.at(-1)?.warrants).toEqual(context.snapshots[0].warrants);
+    expect(context.snapshots[0].warrants).toHaveLength(1);
+  });
+
+  it("marks the warrant and convertible when both issuances were withheld for the same security ID", () => {
+    const convertible = { ...warrant, object_type: "TX_CONVERTIBLE_ISSUANCE", id: "ci-1", date: "2023-03-01" };
+    const context = validatePackage([
+      { ...warrant, stakeholder_id: "missing" }, convertible, amendment, acceptance,
+      { ...acceptance, object_type: "TX_CONVERTIBLE_ACCEPTANCE", id: "ca-1" },
+    ], stakeholders);
+
+    const roots = [subject(warrant.object_type, warrant.id), AMENDED];
+    for (const id of [acceptance.id, "ca-1"]) {
+      expect(context.findings.filter((finding) => finding.subject.id === id)).toMatchObject([
+        { check: "issuance-exists", outcome: "blocked", roots },
+      ]);
+    }
+    expect(context.snapshots.at(-1)?.warrants).toEqual([{ defects: { lifecycle: roots, issuance: roots } }]);
+    expect(context.nodes.security.get(warrant.security_id)?.withheldByFamily?.convertibleIssuances?.issuance.defects).toEqual(roots);
   });
 
   it("is left alone while another transaction has only named it", () => {

@@ -1,7 +1,7 @@
 /** The build checks the public finding types. */
 import type { OcfMachineContext } from "./validator";
 import type { BlockedFinding, FailedFinding, Finding, Outcome, Severity, Subject } from "./finding";
-import type { ObjectTypeMap } from "@opencaptablecoalition/ocf-types";
+import type { DefectMark, SnapshotStockPlan } from "./snapshot";
 import type { Expect, Equal } from "./type-assert";
 
 // Pin 1: the findings channel is typed as Finding[].
@@ -23,15 +23,13 @@ type _FailedKeys = Expect<Equal<keyof FailedFinding, keyof Finding>>;
 type _BlockedKeys = Expect<Equal<keyof BlockedFinding, keyof Finding | "roots">>;
 type _FindingIsFailedOrBlocked = Expect<Equal<Finding, FailedFinding | BlockedFinding>>;
 
-// Pin 3b: the subject locator is { object_type, id }, with object_type keyed to
-// the generated OCF schema map (any OCF object, not only transactions).
+// The package can supply any string for object_type, including in blocked roots and snapshot defects.
 type _SubjectKeys = Expect<Equal<keyof Finding["subject"], "object_type" | "id">>;
-type _SubjectObjectType = Expect<
-  Equal<Finding["subject"]["object_type"], keyof ObjectTypeMap>
->;
-
-// Each root identifies a transaction by type and ID.
+type _SubjectObjectType = Expect<Equal<Finding["subject"]["object_type"], string>>;
 type _Roots = Expect<Equal<BlockedFinding["roots"], Subject[]>>;
+type _SecurityDefects = Expect<Equal<DefectMark["defects"][keyof DefectMark["defects"]], Subject[] | undefined>>;
+type PlanDefects = NonNullable<SnapshotStockPlan["defects"]>;
+type _PlanDefects = Expect<Equal<PlanDefects[keyof PlanDefects], Subject[] | undefined>>;
 
 // The date is optional because transaction findings omit it.
 type _FailedRequired = Expect<Equal<Omit<FailedFinding, "date">, Required<Omit<FailedFinding, "date">>>>;
@@ -65,20 +63,6 @@ const _infoFinding: Finding = {
   check: "EXAMPLE_CHECK",
   message: "Example info message",
   subject: { object_type: "TX_STOCK_ISSUANCE", id: "tx_003" },
-};
-
-// Pin 5d: Negative — a non-OCF object_type must be rejected (proves the
-// keyof ObjectTypeMap tightening actually constrains the value).
-const _badSubject: Finding = {
-  severity: "error",
-  outcome: "failed",
-  check: "EXAMPLE_CHECK",
-  message: "Example message",
-  subject: {
-    // @ts-expect-error — "NOT_A_REAL_OBJECT_TYPE" is not a key of ObjectTypeMap
-    object_type: "NOT_A_REAL_OBJECT_TYPE",
-    id: "x_001",
-  },
 };
 
 // A blocked warning keeps warning severity and names the failures that blocked it.
@@ -137,7 +121,6 @@ type _NoLegacyReport = Expect<Equal<Extract<keyof OcfMachineContext, "report" | 
 void _warningFinding;
 void _errorFinding;
 void _infoFinding;
-void _badSubject;
 void _blockedFinding;
 void _blockedNoRoots;
 void _failedWithRoots;
