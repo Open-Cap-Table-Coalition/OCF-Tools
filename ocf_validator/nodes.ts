@@ -298,8 +298,14 @@ function withheld(nodes: NodeMap, descriptor: Descriptor, transaction: Applied, 
  */
 export function withUnrecognizedChange(nodes: NodeMap, securityId: unknown, root: Subject): NodeMap {
   const held = securityById(nodes, securityId);
-  if (!held || (held.lifecycle.value === undefined && held.lifecycle.defects.length === 0)) return nodes;
-  return withSecurity(nodes, markIssuanceDefects(held, [root]));
+  if (!held) return nodes;
+  const hasIssuance = held.lifecycle.value !== undefined || held.lifecycle.defects.length > 0;
+  const marked = hasIssuance ? markIssuanceDefects(held, [root]) : held;
+  if (!held.withheldByFamily) return marked === held ? nodes : withSecurity(nodes, marked);
+  const withheldByFamily = Object.fromEntries(
+    Object.entries(held.withheldByFamily).map(([family, fields]) => [family, markIssuanceDefects(fields, [root])]),
+  );
+  return withSecurity(nodes, { ...marked, withheldByFamily });
 }
 
 // Reading tracked fields
