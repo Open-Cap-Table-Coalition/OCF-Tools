@@ -49,6 +49,8 @@ The day-end stock plan check is different. It records a finding and withholds no
 
 Stock transactions work differently. A failed stock check stops the run. The security ID and earlier-removal checks on a stock issuance report findings, and the other stock checks use the older `report` format. A transaction with an unknown type also stops the run, as does an error that escapes the validator, such as a bug in a stock check. A transaction whose date or type isn't a string stops it before the first transaction is processed.
 
+For the rules the validator applies and the corner cases settled so far, see [Validation rules and corner cases](docs/validation-rules.md).
+
 ### What `ocfValidator` returns
 
 - `result` states whether the package appears valid. A completed run counts failed errors, blocked checks and warnings separately. If the run stops early, `result` identifies the transaction and the failure.
@@ -69,6 +71,8 @@ const stock = outstanding(nodes, "stockIssuances");
 A plan starts with its initial reserve and zero drawn shares. An adjustment replaces the reserve. A grant or stock issuance that names the plan draws shares once. For example, cancelling 40 of a 100-share grant and issuing a 60-share balance leaves 100 drawn. An explicit return of 40 brings that total to 60. The source allowance follows the security across all returns, even when a return credits a successor plan, so a successor can have a negative drawn balance. A transaction that names a plan missing from the package creates a plan row with an unknown reserve.
 
 At the end of each day, the `pool-not-exceeded` check compares drawn shares with the reserve for each plan whose totals changed that day. The finding identifies the plan (`STOCK_PLAN`) and the date. It does not fail or withhold any grant. A defect on either total blocks the check. The check is skipped when the reserve is unknown. A valid adjustment clears reserve defects because it replaces the full reserve. Drawn shares are a running total and keep earlier defects. [Pool check](ocf_validator/validators/stock_plan/pool.ts)
+
+For a worked example of a grant, a partial cancellation, and a return to the pool, see [How the validator counts stock plan shares](docs/stock-plans.md).
 
 ## Limits on main
 
