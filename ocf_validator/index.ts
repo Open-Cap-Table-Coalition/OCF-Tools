@@ -2,7 +2,7 @@ import { createActor, getInitialSnapshot } from "xstate";
 import { OcfPackageContent, readOcfPackage } from "../read_ocf_package";
 import type { Finding } from "../types/finding";
 import { transactionPriority } from "./constants/constants";
-import { errorResult, malformedResult, ocfMachine, type OcfMachineEvent } from "./ocfMachine";
+import { emptyResult, errorResult, malformedResult, ocfMachine, type OcfMachineEvent } from "./ocfMachine";
 import { type OcfMachineContext } from "../types/validator";
 
 export const ocfValidator = (packagePath: string): OcfMachineContext => validateOcfPackage(readOcfPackage(packagePath));
@@ -58,19 +58,15 @@ export const validateOcfPackage = (
     else onFindings?.(snapshot.context.findings.slice(before.context.findings.length));
   };
 
-  let currentDate: any = null;
+  // Load the package before the first transaction. A package with no transactions is loaded too, so
+  // the returned records hold its stock plans.
+  send({ type: "START", data: ocfPackage });
 
-  // For the sorted transactions, we run through the set of transactions for a given day and then at the end of the day (EOD), we run the EOD action before moving onto the next day in the record.
-  for (let i = 0; i < sortedTransactions.length; i++) {
-    const ele = sortedTransactions[i];
-    // First determine if the date has changed. If it has, then we run the EOD action and then move onto the next day.
-    if (ele.date !== currentDate) {
-      if (currentDate === null) {
-        send({ type: "START", data: ocfPackage, date: ele.date });
-      } else {
-        send({ type: "RUN_EOD", date: currentDate });
-      }
-    }
+  // Send each day's transactions in order. When the date changes, close the day that just ended so
+  // the machine checks its stock plans and takes its snapshot.
+  let currentDate: string | undefined;
+  for (const ele of sortedTransactions) {
+    if (currentDate !== undefined && ele.date !== currentDate) send({ type: "RUN_EOD", date: currentDate });
     currentDate = ele.date;
     // Boundary cast: `ele.object_type` and `ele` are read from disk, so TS
     // cannot correlate the runtime `type` with its matching payload in the
@@ -79,11 +75,16 @@ export const validateOcfPackage = (
     send({ type: ele.object_type, data: ele } as OcfMachineEvent, onTransaction);
   }
 
-  send({ type: "RUN_EOD", date: currentDate });
-  send({ type: "RUN_END", date: currentDate });
+  // A package with no transactions has no day to close, so it gets no snapshot.
+  if (currentDate !== undefined) {
+    send({ type: "RUN_EOD", date: currentDate });
+    send({ type: "RUN_END", date: currentDate });
+  }
 
   // The machine is typed via setup(), so getSnapshot().context is OcfMachineContext
   // with no cast needed.
   const { context } = ocfXstateActor.getSnapshot();
-  return thrown === undefined ? context : { ...context, result: thrown };
+  if (thrown !== undefined) return { ...context, result: thrown };
+  // With nothing to count, the result says that no transaction was checked.
+  return currentDate === undefined ? { ...context, result: emptyResult(ocfPackage) } : context;
 };

@@ -1,6 +1,8 @@
 import { afterEach, describe, it, expect, vi } from "vitest";
+import { validateOcfPackage } from "../ocf_validator";
 import { errorResult } from "../ocf_validator/ocfMachine";
 import { TX_DESCRIPTORS } from "../ocf_validator/validators";
+import type { OcfMachineContext } from "../types/validator";
 import { baseContext, validatePackage, collection } from "./helpers";
 
 // ---------------------------------------------------------------------------
@@ -45,12 +47,19 @@ describe("a run that throws", () => {
   });
 
   it("names the control event when the run throws on one", async () => {
-    // A package with no transactions never sends START, so RUN_END throws
-    // reading the issuer from the machine's placeholder manifest. Handling an
-    // empty package is #184's; until then, the run reports that throw.
-    const context = validatePackage([]);
+    // A manifest with no issuer makes RUN_END throw when it builds the result.
+    const context = validateOcfPackage({
+      ...baseContext().ocfPackageContent,
+      manifest: {},
+      stakeholders: [{ id: "sh-1" }],
+      transactions: [
+        { id: "ci-1", object_type: "TX_CONVERTIBLE_ISSUANCE", security_id: "safe-1", stakeholder_id: "sh-1", date: "2021-01-01" },
+      ] as unknown as OcfMachineContext["ocfPackageContent"]["transactions"],
+    });
 
-    expect(context.result).toMatch(/^The validation of the OCF package for Test Co failed on RUN_END: /);
+    expect(context.result).toMatch(/^The validation of the OCF package for undefined failed on RUN_END: TypeError: /);
+    // The day finished before the throw, so its snapshot is kept.
+    expect(context.snapshots.map((s) => s.date)).toEqual(["2021-01-01"]);
     await new Promise((resolve) => setTimeout(resolve));
   });
 });

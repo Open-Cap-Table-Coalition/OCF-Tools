@@ -1,0 +1,14 @@
+{
+  "file_type": "OCF_STOCK_PLANS_FILE",
+  "items": [
+    {
+      "id": "plan-2024",
+      "object_type": "STOCK_PLAN",
+      "plan_name": "2024 Equity Incentive Plan",
+      "board_approval_date": "2024-03-01",
+      "initial_shares_reserved": "1000000",
+      "default_cancellation_behavior": "RETURN_TO_POOL",
+      "stock_class_ids": ["common"]
+    }
+  ]
+}
