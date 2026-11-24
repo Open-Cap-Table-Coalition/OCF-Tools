@@ -1,0 +1,27 @@
+{
+  "ocf_version": "1.2.1-alpha+main",
+  "file_type": "OCF_MANIFEST_FILE",
+  "issuer": {
+    "id": "newlyFormedCo",
+    "comments": [],
+    "object_type": "ISSUER",
+    "legal_name": "Newly Formed Co",
+    "formation_date": "2024-03-01",
+    "country_of_formation": "US",
+    "country_subdivision_of_formation": "DE"
+  },
+  "as_of": "2024-03-01",
+  "generated_at": "2024-03-01T00:00:00.000Z",
+  "stock_plans_files": [{ "filepath": "./StockPlans.ocf.json", "md5": "00000000000000000000000000000000" }],
+  "stock_legend_templates_files": [],
+  "stock_classes_files": [{ "filepath": "./StockClasses.ocf.json", "md5": "00000000000000000000000000000000" }],
+  "transactions_files": [],
+  "stakeholders_files": [{ "filepath": "./Stakeholders.ocf.json", "md5": "00000000000000000000000000000000" }],
+  "vesting_terms_files": [],
+  "valuations_files": [],
+  "comments": [
+    "A company on the day it was formed, before it has issued anything (#184).",
+    "The founders are listed, Common Stock is authorized and the board has adopted an equity plan that reserves 1,000,000 shares.",
+    "The manifest lists no transaction files, so validation has no transaction to check."
+  ]
+}

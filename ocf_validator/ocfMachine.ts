@@ -18,7 +18,7 @@ type TxEvent = {
 
 export type OcfMachineEvent =
   | TxEvent
-  | { type: "START"; data: OcfPackageContent; date: string }
+  | { type: "START"; data: OcfPackageContent }
   | { type: "RUN_EOD"; date: string }
   | { type: "RUN_END"; date: string };
 
@@ -60,6 +60,14 @@ export const malformedResult = (ocfPackageContent: OcfPackageContent, transactio
     text`its date (${date}) and object_type (${object_type}) must both be strings.`,
   );
 };
+
+/**
+ * The `result` of a run over a package with no transactions. It says that nothing was checked.
+ * "Appears valid" would read as though a history had passed, and would hide a manifest that lists no
+ * transaction files by mistake.
+ */
+export const emptyResult = ({ manifest }: OcfPackageContent): string =>
+  text`The validation of the OCF package for ${manifest?.issuer?.legal_name} is complete and found no transactions to check.`;
 
 /**
  * Apply the writes unless an error-level check failed or was blocked. A failure contributes the
