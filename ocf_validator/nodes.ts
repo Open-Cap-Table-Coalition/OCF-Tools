@@ -297,6 +297,7 @@ function withheld(nodes: NodeMap, descriptor: Descriptor, transaction: Applied, 
  * with no record, or one that another transaction has only named, has nothing to mark yet.
  */
 export function withUnrecognizedChange(nodes: NodeMap, securityId: unknown, root: Subject): NodeMap {
+  if (securityId === undefined || securityId === null) return nodes;
   const held = securityById(nodes, securityId);
   if (!held) return nodes;
   const hasIssuance = held.lifecycle.value !== undefined || held.lifecycle.defects.length > 0;
