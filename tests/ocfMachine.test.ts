@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { createActor } from "xstate";
-import { ocfMachine, type OcfMachineEvent } from "../ocf_validator/ocfMachine";
+import { ocfMachine, unrecognizedTransactionOf, type OcfMachineEvent } from "../ocf_validator/ocfMachine";
 import { TX_DESCRIPTORS, type TxKey, type CollectionKey } from "../ocf_validator/validators";
 import * as nodes from "../ocf_validator/nodes";
 import type { OcfMachineContext } from "../types/validator";
@@ -9,6 +9,28 @@ import { baseContext, contextAfterCancellation, startSeeded, ev, collection } fr
 // ---------------------------------------------------------------------------
 // Unrecognized transaction types
 // ---------------------------------------------------------------------------
+
+describe("unrecognizedTransactionOf", () => {
+  const type = "TX_WARRANT_AMENDMENT";
+  const transaction = { object_type: type, id: "amend-1", security_id: "war-1" };
+
+  it("reads the transaction inside an UNRECOGNIZED event", () => {
+    expect(unrecognizedTransactionOf({ type: "UNRECOGNIZED", data: transaction })).toEqual(transaction);
+  });
+
+  it("takes the type from the wildcard event and the IDs from its data", () => {
+    const data = { ...transaction, object_type: "OTHER" };
+    expect(unrecognizedTransactionOf({ type, data })).toEqual(transaction);
+  });
+
+  it("uses the wildcard type alone when data is absent", () => {
+    expect(unrecognizedTransactionOf({ type })).toEqual({ object_type: type });
+  });
+
+  it("ignores string data on a wildcard event", () => {
+    expect(unrecognizedTransactionOf({ type, data: "abc" })).toEqual({ object_type: type });
+  });
+});
 
 describe("unrecognized transaction types", () => {
   const notRecognized = (object_type: string, id?: string) => ({

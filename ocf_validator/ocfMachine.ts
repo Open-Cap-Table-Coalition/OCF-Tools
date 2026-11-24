@@ -39,6 +39,18 @@ const failureMessage = ({ manifest }: OcfPackageContent, subject: unknown, detai
 
 type ValidatorEvent = { type: string; data?: unknown };
 
+function hasTransactionType(data: object): data is UnrecognizedTransaction {
+  return "object_type" in data && typeof data.object_type === "string";
+}
+
+export function unrecognizedTransactionOf({ type, data }: ValidatorEvent): UnrecognizedTransaction {
+  if (typeof data !== "object" || data === null) return { object_type: type };
+
+  // The driver wraps the transaction. A caller sending a wildcard event supplies its type directly.
+  if (type === "UNRECOGNIZED" && hasTransactionType(data)) return data;
+  return { ...data, object_type: type };
+}
+
 /** What a failure message names: the transaction's id, or else the event's type. */
 const subjectOf = (event: ValidatorEvent): unknown =>
   typeof event.data === "object" && event.data !== null && "id" in event.data
@@ -178,10 +190,7 @@ export const ocfMachine = setup({
     // Record that the transaction could not be checked, and stop relying on the security it names.
     // The run continues, so one new transaction type does not hide the rest of the package.
     reportUnrecognizedType: assign(({ context, event }) => {
-      // A caller that drives the machine itself can also send an unlisted type as the event type,
-      // with or without a transaction. That type is then the object_type the finding names.
-      const transaction: UnrecognizedTransaction =
-        event.type === "UNRECOGNIZED" ? event.data : { ...(event as { data?: object }).data, object_type: event.type };
+      const transaction = unrecognizedTransactionOf(event);
       const found = validateUnrecognized(context, transaction);
       const nodes = withUnrecognizedChange(context.nodes, transaction.security_id, found[0].subject);
       return {
@@ -238,7 +247,7 @@ export const ocfMachine = setup({
           actions: assign(({ context, event }) => {
             const found = endOfDayFindings(context, context.nodesAtStartOfDay, event.date);
             return {
-              ...(found.length === 0 ? {} : { findings: [...context.findings, ...found] }),
+              ...(found.length > 0 && { findings: [...context.findings, ...found] }),
               snapshots: [...context.snapshots, run_EOD(context, event)],
               nodesAtStartOfDay: context.nodes,
             };
