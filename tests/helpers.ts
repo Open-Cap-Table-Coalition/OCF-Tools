@@ -84,6 +84,7 @@ export const validatePackageWith = <T>(validate: (dir: string) => T) => (
   stakeholders: { id: string }[] = [],
   stockClasses: { id: string }[] = [],
   stockPlans: Record<string, unknown>[] = [],
+  { stockLegends = [], vestingTerms = [] }: { stockLegends?: { id: string }[]; vestingTerms?: { id: string }[] } = {},
 ) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ocf-tools-test-"));
   try {
@@ -92,15 +93,17 @@ export const validatePackageWith = <T>(validate: (dir: string) => T) => (
     write("Stakeholders.ocf.json", { items: stakeholders });
     write("StockClasses.ocf.json", { items: stockClasses });
     if (stockPlans.length) write("StockPlans.ocf.json", { items: stockPlans });
+    if (stockLegends.length) write("StockLegends.ocf.json", { items: stockLegends });
+    if (vestingTerms.length) write("VestingTerms.ocf.json", { items: vestingTerms });
     write("Transactions.ocf.json", { items: transactions });
     write("Manifest.ocf.json", {
       issuer: { legal_name: "Test Co" },
       stakeholders_files: [{ filepath: "Stakeholders.ocf.json" }],
       transactions_files: [{ filepath: "Transactions.ocf.json" }],
       stock_classes_files: [{ filepath: "StockClasses.ocf.json" }],
-      vesting_terms_files: [],
+      vesting_terms_files: vestingTerms.length ? [{ filepath: "VestingTerms.ocf.json" }] : [],
       stock_plans_files: stockPlans.length ? [{ filepath: "StockPlans.ocf.json" }] : [],
-      stock_legend_templates_files: [],
+      stock_legend_templates_files: stockLegends.length ? [{ filepath: "StockLegends.ocf.json" }] : [],
       valuations_files: [],
     });
     return validate(dir);

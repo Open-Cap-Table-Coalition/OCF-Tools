@@ -30,7 +30,7 @@ These rules cover the stock a transfer, cancellation, repurchase, conversion or 
 - **With a split, the quantities are not compared.** The split changes the share count.
 - **The split must be real.** It must be a `TX_STOCK_CLASS_SPLIT` in the package, dated the same day as the reissuance, for the same stock class as the original stock.
 - **Results keep the class and the holder.** Each result has the same stock class and stakeholder as the original, and the reissuance date.
-- **Nothing else may use the security.** Only its issuance, an acceptance and this reissuance may name it.
+- **Nothing else may use the security.** Only its issuance, an acceptance, its vesting transactions and this reissuance may name it.
 
 ## Stock conversion
 
@@ -49,6 +49,15 @@ These rules cover the stock a transfer, cancellation, repurchase, conversion or 
 - **The retired quantity** is above zero and no more than the original quantity.
 - **Retired and balance add up to the original.** With no balance, the whole quantity is retired.
 - **Stock issued from a plan** may also be named by a later return to the pool. See [How the validator counts stock plan shares](stock-plans.md).
+
+## Stock that vests
+
+OCF has no separate object for a restricted stock award (RSA). It is a `TX_STOCK_ISSUANCE`, and OCF records a forfeiture as a cancellation or repurchase of the unvested shares. The tests are in [`restrictedStockVesting.test.ts`](../tests/restrictedStockVesting.test.ts).
+
+- **Vesting never conflicts with a removal.** A `TX_VESTING_START`, `TX_VESTING_EVENT` or `TX_VESTING_ACCELERATION` that names stock does not make the stock's cancellation, repurchase, conversion or reissuance fail, whatever its date. (#250)
+- **Vesting dated after a removal fails on the vesting transaction.** It fails `no-earlier-removal`, and the removal stays valid.
+- **After a partial cancellation or repurchase, vesting continues on the balance.** The transaction removes the original `security_id` even when shares remain, as OCF's [Traversing Transactions](https://github.com/Open-Cap-Table-Coalition/Open-Cap-Format-OCF/blob/main/docs/explainers/TraversingTransactions.md) explainer describes. Later vesting must name the stock in `balance_security_id`. Vesting that still names the original fails `no-earlier-removal`.
+- **Nothing checks the vesting itself.** The validator does not compare vesting transactions with the stock's vesting terms, its `vestings` list or the quantities cancelled.
 
 ## Removed securities
 
