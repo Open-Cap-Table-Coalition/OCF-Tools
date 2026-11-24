@@ -26,6 +26,6 @@
     "prettier": "~3.3.3",
     "tsconfig-paths": "~4.2.0",
     "volta": "~0.0.0",
-    "xstate": "~5.18.2"
+    "xstate": "~5.33.4"
   }
 }
