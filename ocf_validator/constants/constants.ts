@@ -1,4 +1,4 @@
-import type { TxKey } from "../ocfMachine";
+import type { TxKey } from "../validators";
 
 const transactionOrder = [
   'TX_STOCK_ISSUANCE',

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { lifecycleFamilies, TX_DESCRIPTORS, type CollectionKey, type TxKey } from "../ocf_validator/ocfMachine";
+import { lifecycleFamilies, TX_DESCRIPTORS, type CollectionKey, type TxKey } from "../ocf_validator/validators";
 import type { LifecycleWord } from "../types/validator";
 
 // Lifecycle change for the input security

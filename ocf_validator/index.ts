@@ -2,7 +2,8 @@ import { createActor, getInitialSnapshot } from "xstate";
 import { OcfPackageContent, readOcfPackage } from "../read_ocf_package";
 import type { Finding } from "../types/finding";
 import { transactionPriority } from "./constants/constants";
-import { errorResult, malformedResult, ocfMachine, type OcfMachineContext, type OcfMachineEvent } from "./ocfMachine";
+import { errorResult, malformedResult, ocfMachine, type OcfMachineEvent } from "./ocfMachine";
+import { type OcfMachineContext } from "../types/validator";
 
 export const ocfValidator = (packagePath: string): OcfMachineContext => validateOcfPackage(readOcfPackage(packagePath));
 

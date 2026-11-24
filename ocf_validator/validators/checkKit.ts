@@ -9,7 +9,7 @@ import type {
   OcfMachineContext,
   PoolEffect,
 } from "../../types/validator";
-import type { CollectionKey, TxKey } from "../ocfMachine";
+import type { CollectionKey, TxKey } from "../validators";
 
 /**
  * Define each check once with an ID, severity, description and optional run function. Return one
@@ -23,15 +23,20 @@ import type { CollectionKey, TxKey } from "../ocfMachine";
  * as a function property so TypeScript checks parameter compatibility.
  */
 export type CheckObject<P = unknown> = Pick<Check, "id" | "severity" | "description"> & {
-  reads?: (data: DeepReadonly<P>, context: DeepReadonly<CheckContext>) => readonly FieldRef[];
-  run?: (context: DeepReadonly<CheckContext>, data: DeepReadonly<P>, read: ReadField) => string[];
+  /** Run separately for each named reference so one blocked read cannot hide another failure. */
+  references?: (data: DeepReadonly<P>) => readonly (string | undefined)[];
+  reads?: (data: DeepReadonly<P>, context: DeepReadonly<CheckContext>, reference?: string) => readonly FieldRef[];
+  run?: (context: DeepReadonly<CheckContext>, data: DeepReadonly<P>, read: ReadField, reference?: string) => string[];
 };
 
 /** Checks use declared reads for derived state. */
 export type CheckContext = Pick<OcfMachineContext, "ocfPackageContent" | "removals">;
 
 /** Read a declared field. A missing or unknown value produces undefined. An undeclared read throws. */
-export type ReadField = <R extends FieldRef>(ref: R) => DeepReadonly<FieldRefValue<R>> | undefined;
+export type ReadField = {
+  <R extends FieldRef>(ref: R): DeepReadonly<FieldRefValue<R>> | undefined;
+  writer(ref: FieldRef): DeepReadonly<Subject> | undefined;
+};
 
 const show = (value: unknown): string => {
   try {
@@ -154,41 +159,44 @@ export const toValidate =
     const findings: Finding[] = [];
     for (const check of checks) {
       if (!check.run) continue;
-      let severity = check.severity;
-      let messages: string[];
+      const failure = (error: unknown) => {
+        findings.push({ subject, check: check.id, severity: "error", outcome: "failed", message: text`The check threw ${error}` });
+      };
+      let references;
       try {
-        const refs = check.reads?.(data, checkContext) ?? [];
-        const { roots, ref } = defectsOn(nodes, refs);
-        if (ref !== undefined) {
-          findings.push({
-            severity,
-            outcome: "blocked",
-            check: check.id,
-            message: `Not checked: it reads ${describeField(ref)}, which can't be relied on because ${namesOf(roots)} failed.`,
-            subject,
-            roots,
-          });
-          continue;
-        }
-        const read: ReadField = (wanted) => {
-          if (!refs.some((declared) => sameField(declared, wanted))) {
-            throw new Error(`It read ${describeField(wanted)}, which it doesn't declare in its reads.`);
-          }
-          return fieldAt(nodes, wanted, removals)?.value as DeepReadonly<FieldRefValue<typeof wanted>> | undefined;
-        };
-        messages = check.run(checkContext, data, read);
+        references = check.references?.(data) ?? [undefined];
       } catch (error) {
-        severity = "error";
-        messages = [text`The check threw ${error}`];
+        failure(error);
+        continue;
       }
-      for (const message of messages) {
-        findings.push({
-          severity,
-          outcome: "failed",
-          check: check.id,
-          message,
-          subject,
-        });
+      for (const reference of references) {
+        try {
+          const refs = check.reads?.(data, checkContext, reference) ?? [];
+          const { roots, ref } = defectsOn(nodes, refs);
+          if (ref !== undefined) {
+            const label = reference === undefined ? "Not checked" : text`Not checked for ${reference}`;
+            findings.push({
+              severity: check.severity, outcome: "blocked", check: check.id, subject, roots,
+              message: `${label}: it reads ${describeField(ref)}, which can't be relied on because ${namesOf(roots)} failed.`,
+            });
+            continue;
+          }
+          const declaredField = <R extends FieldRef>(wanted: R) => {
+            if (!refs.some((declared) => sameField(declared, wanted))) {
+              throw new Error(`It read ${describeField(wanted)}, which it doesn't declare in its reads.`);
+            }
+            return fieldAt(nodes, wanted, removals);
+          };
+          const read: ReadField = Object.assign(
+            <R extends FieldRef>(ref: R) => declaredField(ref)?.value as DeepReadonly<FieldRefValue<R>> | undefined,
+            { writer: (ref: FieldRef) => declaredField(ref)?.writer },
+          );
+          for (const message of check.run(checkContext, data, read, reference)) {
+            findings.push({ subject, severity: check.severity, outcome: "failed", check: check.id, message });
+          }
+        } catch (error) {
+          failure(error);
+        }
       }
     }
     return findings;

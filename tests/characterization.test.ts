@@ -14,7 +14,7 @@ import { collection } from "./helpers";
 const testPackagePath = path.resolve(__dirname, "..", "testing_scripts", "testPackage");
 
 describe("ocfValidator over testPackage", () => {
-  it("produces a stable validation result and report", () => {
+  it("produces a stable validation result and snapshots", () => {
     const context = ocfValidator(testPackagePath);
 
     // Record the validator's results. Omit the input package, its removal index and the two internal

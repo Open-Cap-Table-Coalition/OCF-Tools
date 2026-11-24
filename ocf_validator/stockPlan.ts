@@ -1,6 +1,6 @@
 import type { Subject } from "../types/finding";
 import type { PoolEffect } from "../types/validator";
-import type { Descriptor, CollectionKey } from "./ocfMachine";
+import type { Descriptor, CollectionKey } from "./validators";
 import { withNodeField, type Field, type FieldKey } from "./node";
 import { currentName } from "./constants/constants";
 import type { LifecycleState } from "./lifecycle";

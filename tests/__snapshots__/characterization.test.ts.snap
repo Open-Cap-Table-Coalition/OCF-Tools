@@ -1,6 +1,6 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
-exports[`ocfValidator over testPackage > produces a stable validation result and report 1`] = `
+exports[`ocfValidator over testPackage > produces a stable validation result and snapshots 1`] = `
 {
   "convertibleIssuances": [],
   "equityCompensation": [
@@ -35,8 +35,6 @@ exports[`ocfValidator over testPackage > produces a stable validation result and
     },
   ],
   "findings": [],
-  "lastErrorFindings": [],
-  "report": [],
   "result": "The validation of the OCF package for Acme Holdings Limited is complete and the package appears valid.",
   "snapshots": [
     {

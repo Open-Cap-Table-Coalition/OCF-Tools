@@ -7,7 +7,7 @@ import {
   type LifecycleContext,
   type LifecycleState,
 } from "../ocf_validator/lifecycle";
-import { TX_DESCRIPTORS, type CollectionKey, type Descriptor } from "../ocf_validator/ocfMachine";
+import { TX_DESCRIPTORS, type CollectionKey, type Descriptor } from "../ocf_validator/validators";
 
 const FAMILIES: CollectionKey[] = ["stockIssuances", "convertibleIssuances", "warrantIssuances", "equityCompensation"];
 const STATES: LifecycleState[] = ["notIssued", "outstanding", "removed"];

@@ -4,7 +4,7 @@ import type { Subject } from "../types/finding";
 import { type FieldKey, type FieldValue, withNodeField, type Field, type NodeBase, type NodeMaps } from "./node";
 export type { Field, NodeBase } from "./node";
 import type { LifecycleState } from "./lifecycle";
-import type { CollectionElement, CollectionKey, Descriptor } from "./ocfMachine";
+import type { CollectionElement, CollectionKey, Descriptor } from "./validators";
 
 import { isStockPlanId, poolWrites, type PoolTransaction, type Draw } from "./stockPlan";
 export { withPlans, type Draw } from "./stockPlan";

@@ -1,6 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { TX_DESCRIPTORS } from "../ocf_validator/ocfMachine";
-import validators from "../ocf_validator/validators";
+import { TX_DESCRIPTORS } from "../ocf_validator/validators";
 import type { OcfMachineContext } from "../types/validator";
 import {
   baseContext,
@@ -982,9 +981,6 @@ describe("declared and emitted checks stay consistent across the family", () => 
   it("carries warrant exercise on the graded convention with no legacy validator", () => {
     expect("validate" in TX_DESCRIPTORS.TX_WARRANT_EXERCISE).toBe(true);
     expect("legacyValidate" in TX_DESCRIPTORS.TX_WARRANT_EXERCISE).toBe(false);
-    // The legacy validator index lists its modules by hand, so the exercise's
-    // entry has to be deleted there too; check it's gone.
-    expect("valid_tx_warrant_exercise" in validators).toBe(false);
   });
 });
 
@@ -993,7 +989,7 @@ describe("declared and emitted checks stay consistent across the family", () => 
 // ---------------------------------------------------------------------------
 
 describe("warrant family findings migrate to the findings channel", () => {
-  it("routes an invalid warrant transaction to findings, leaves report clear, and counts the errors in the result", () => {
+  it("routes an invalid warrant transaction to findings, and counts the errors in the result", () => {
     const actor = startSeeded(baseContext());
     // No stakeholder matches, so the issuance is invalid.
     actor.send(ev("TX_WARRANT_ISSUANCE", {
@@ -1010,9 +1006,7 @@ describe("warrant family findings migrate to the findings channel", () => {
     // The errors landed on findings…
     expect(context.findings.length).toBeGreaterThan(0);
     expect(context.findings.every((f) => f.severity === "error")).toBe(true);
-    // …no report entry was written for a migrated warrant type…
-    const migrated = MIGRATED_KEYS as readonly string[];
-    expect(context.report.some((entry: any) => migrated.includes(entry?.transaction_type))).toBe(false);
+    expect(context).not.toHaveProperty("report");
     // …and the result, written when the run ends, counts them.
     actor.send({ type: "RUN_END", date: "2021-01-01" });
     expect(actor.getSnapshot().context.result).toBe(

@@ -1,19 +1,9 @@
-import { afterEach, describe, it, expect, vi } from "vitest";
+import { describe, it, expect } from "vitest";
 import { createActor } from "xstate";
-import {
-  nodesUpdate,
-  isValidOutcome,
-  outcomeUpdate,
-  failureResult,
-  ocfMachine,
-  TX_DESCRIPTORS,
-  type OcfMachineEvent,
-  type TxKey,
-  type CollectionKey,
-} from "../ocf_validator/ocfMachine";
+import { ocfMachine, type OcfMachineEvent } from "../ocf_validator/ocfMachine";
+import { TX_DESCRIPTORS, type TxKey, type CollectionKey } from "../ocf_validator/validators";
 import * as nodes from "../ocf_validator/nodes";
-import type { Finding } from "../types/finding";
-import type { GradedValidator, OcfMachineContext } from "../types/validator";
+import type { OcfMachineContext } from "../types/validator";
 import { baseContext, contextAfterCancellation, startSeeded, ev, collection } from "./helpers";
 
 // ---------------------------------------------------------------------------
@@ -84,7 +74,6 @@ describe("passthrough transaction types are no-ops unless their security was rem
       convertibleIssuances: [{ id: "ci", security_id: "c" }] as any,
       warrantIssuances: [{ id: "wi", security_id: "w" }] as any,
       equityCompensation: [{ id: "ec", security_id: "e" }] as any,
-      report: [{ marker: "pre-existing report" }],
       findings: [
         { severity: "error", outcome: "failed", check: "demo", message: "m", subject: { object_type: "TX_STOCK_ISSUANCE", id: "x" } },
       ],
@@ -105,10 +94,10 @@ describe("passthrough transaction types are no-ops unless their security was rem
     expect(after.context).toEqual(before);
   });
 
-  it("produces NO report entry for TX_VESTING_START (the fixture case)", () => {
+  it("produces no finding for TX_VESTING_START (the fixture case)", () => {
     const actor = startSeeded(baseContext());
     actor.send(ev("TX_VESTING_START", { id: "vs", security_id: "s" }));
-    expect(actor.getSnapshot().context.report).toHaveLength(0);
+    expect(actor.getSnapshot().context.findings).toHaveLength(0);
     expect(actor.getSnapshot().value).toBe("capTable");
   });
 
@@ -125,8 +114,8 @@ describe("passthrough transaction types are no-ops unless their security was rem
 // Stock retraction
 // ---------------------------------------------------------------------------
 
-describe("stock retraction reports retraction-specific content", () => {
-  it("reports the retraction validator's output on the valid branch, not the issuance validator's", () => {
+describe("stock retraction", () => {
+  it("removes the stock when its checks pass", () => {
     // Seed a prior matching stock issuance (in the live collection AND the package
     // transaction history) so valid_tx_stock_retraction(..., true) passes.
     const seeded = baseContext({
@@ -147,11 +136,7 @@ describe("stock retraction reports retraction-specific content", () => {
     const snapshot = actor.getSnapshot();
     // Valid branch keeps the machine in capTable.
     expect(snapshot.value).toBe("capTable");
-    const entry = snapshot.context.report.at(-1);
-    expect(entry.transaction_type).toBe("TX_STOCK_RETRACTION");
-    // A retraction-only field the issuance validator never emits.
-    expect(entry).toHaveProperty("incoming_stockIssuance_validity");
-    expect(entry).not.toHaveProperty("stockClass_validity");
+    expect(snapshot.context.findings).toEqual([]);
     // And the security was removed from the live collection (remove op).
     expect(collection(snapshot.context, "stockIssuances").some((s: any) => s.security_id === "sec1")).toBe(false);
   });
@@ -254,8 +239,8 @@ describe("per-type collection placement", () => {
     if (!("collection" in descriptor)) {
       // An effect of "none" records validation without changing a collection.
       expect(descriptor.effect).toBe("none");
-      const result = nodesUpdate(baseContext(), ev(key, { id: "incoming", security_id: "SEC", object_type: key }));
-      expect(Object.keys(result)).toHaveLength(0);
+      const before = baseContext().nodes;
+      expect(nodes.applyTransaction(before, descriptor, { id: "incoming", security_id: "SEC", object_type: key })).toBe(before);
       return;
     }
 
@@ -266,11 +251,10 @@ describe("per-type collection placement", () => {
 
     // Issue a new security or remove the one supplied by the test.
     const data = { id: "incoming", security_id: descriptor.effect === "append" ? "NEW" : "SEC", object_type: key };
-    const result = nodesUpdate(ctx, ev(key, data));
+    const updated = nodes.applyTransaction(ctx.nodes, descriptor, data);
 
     // Only the descriptor's family should gain a security.
-    expect(Object.keys(result)).toEqual(["nodes"]);
-    const after = { ...ctx, ...result };
+    const after = { ...ctx, nodes: updated };
     for (const family of FAMILIES) {
       if (family !== fam) expect(collection(after, family)).toEqual([]);
     }
@@ -294,8 +278,10 @@ describe("per-type collection placement", () => {
   });
 
   it("a passthrough type changes no security", () => {
-    const result = nodesUpdate(baseContext({ equityCompensation: [{ id: "ec", security_id: "s" }] }), ev("TX_VESTING_START", { security_id: "s" }));
-    expect(Object.keys(result)).toHaveLength(0);
+    const before = baseContext({ equityCompensation: [{ id: "ec", security_id: "s" }] }).nodes;
+    expect(nodes.applyTransaction(before, TX_DESCRIPTORS.TX_VESTING_START, {
+      object_type: "TX_VESTING_START", id: "vest", security_id: "s",
+    })).toBe(before);
   });
 });
 
@@ -390,197 +376,5 @@ describe("family collections end holding only the surviving issuance", () => {
     expect(snapshot.value).toBe("capTable");
     expect(snapshot.context.findings).toEqual([]);
     expect(collection(snapshot.context, "warrantIssuances")).toEqual([issueA]);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Graded validators through the dispatch helpers
-// ---------------------------------------------------------------------------
-
-// These drive the exported dispatch helpers directly with synthetic descriptors,
-// isolating the graded dispatch shape from any single family's validator. The
-// convertible family now carries graded `validate` in the real table, with its
-// own machine-actor coverage; the legacy describe below still pins the report
-// convention the unmigrated families use.
-
-/** A synthetic `none` descriptor carrying a graded validator and (empty) checks. */
-const gradedDescriptor = (validate: GradedValidator<any>) =>
-  ({ effect: "none", lifecycle: "stays", families: [], validate, checks: [] }) as const;
-
-/** A minimal finding; `check` doubles as the distinguishing label. */
-const finding = (severity: Finding["severity"], check: string): Finding => ({
-  severity,
-  outcome: "failed",
-  check,
-  message: `${check} message`,
-  subject: { object_type: "TX_STOCK_ISSUANCE", id: "si1" },
-});
-
-describe("graded validators through the dispatch helpers", () => {
-  it("passes the transaction payload, not the event wrapper, to the validator", () => {
-    const received: unknown[] = [];
-    const descriptor = gradedDescriptor((_context, data) => {
-      received.push(data);
-      return [];
-    });
-    const data = { id: "si1", security_id: "sec1" };
-
-    isValidOutcome(descriptor, baseContext(), ev("TX_STOCK_ISSUANCE", data));
-
-    expect(received).toHaveLength(1);
-    expect(received[0]).toBe(data);
-  });
-
-  it("warnings alone leave the transaction valid and land on findings, never report", () => {
-    const warning = finding("warning", "advisory");
-    const descriptor = gradedDescriptor(() => [warning]);
-    const earlierFinding = finding("warning", "from-an-earlier-transaction");
-    const context = baseContext({
-      report: [{ marker: "pre-existing report" }],
-      findings: [earlierFinding],
-    });
-    const event = ev("TX_STOCK_ISSUANCE", { id: "si1", security_id: "sec1" });
-
-    expect(isValidOutcome(descriptor, context, event)).toBe(true);
-
-    const update = outcomeUpdate(descriptor, context, event);
-    // The update touches the findings channel and the error stash — no report write…
-    expect(Object.keys(update)).toEqual(["findings", "lastErrorFindings"]);
-    // …appending the new findings after the accumulated ones…
-    expect(update.findings).toEqual([earlierFinding, warning]);
-    // …and stashing no error findings for a warnings-only outcome.
-    expect(update.lastErrorFindings).toEqual([]);
-    // The helper is pure: neither input channel was mutated.
-    expect(context.report).toEqual([{ marker: "pre-existing report" }]);
-    expect(context.findings).toEqual([earlierFinding]);
-  });
-
-  it("an error finding makes the transaction invalid while recording every finding, warnings included", () => {
-    const descriptor = gradedDescriptor(() => [finding("warning", "advisory"), finding("error", "hard-failure")]);
-    const context = baseContext({ report: [{ marker: "pre-existing report" }] });
-    const event = ev("TX_STOCK_ISSUANCE", { id: "si1", security_id: "sec1" });
-
-    expect(isValidOutcome(descriptor, context, event)).toBe(false);
-
-    const update = outcomeUpdate(descriptor, context, event);
-    // Errors and warnings are both recorded, on findings only — the invalid
-    // branch writes no report entry either.
-    expect(Object.keys(update)).toEqual(["findings", "lastErrorFindings"]);
-    expect(update.findings).toEqual([finding("warning", "advisory"), finding("error", "hard-failure")]);
-    // Only the error slice is stashed for the failure branch.
-    expect(update.lastErrorFindings).toEqual([finding("error", "hard-failure")]);
-    expect(context.report).toEqual([{ marker: "pre-existing report" }]);
-  });
-
-  it("serializes only this transaction's error findings, in return order, in the failure result", () => {
-    const firstError = finding("error", "first-error");
-    const warning = finding("warning", "advisory");
-    const secondError = finding("error", "second-error");
-    let invocations = 0;
-    const descriptor = gradedDescriptor(() => {
-      invocations += 1;
-      return [firstError, warning, secondError];
-    });
-    // Decoys on both channels: an exact-match assertion proves the detail comes
-    // from the record stash, not from the report tail or the findings
-    // accumulator.
-    const context = baseContext({
-      report: [{ marker: "pre-existing report" }],
-      findings: [finding("error", "from-an-earlier-transaction")],
-    });
-    const event = ev("TX_STOCK_ISSUANCE", { id: "si1", security_id: "sec1" });
-
-    // Mirror the machine's invalid branch: record first, then build the result.
-    const recorded = { ...context, ...outcomeUpdate(descriptor, context, event) };
-
-    expect(failureResult(descriptor, recorded, event)).toBe(
-      `The validation of the OCF package for Test Co failed on si1: ${JSON.stringify([firstError, secondError], null, 2)}`,
-    );
-    // The failure detail comes from the stash; the validator ran only at record time.
-    expect(invocations).toBe(1);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Legacy validators through the machine
-// ---------------------------------------------------------------------------
-
-// These pin the old convention while table entries still carry it; they are
-// deleted with `legacyValidate` when the last family migrates.
-
-describe("legacy validators through the machine", () => {
-  afterEach(() => vi.restoreAllMocks());
-
-  const seededWithStakeholder = () =>
-    baseContext({
-      ocfPackageContent: {
-        ...baseContext().ocfPackageContent,
-        stakeholders: [{ id: "sh1" }],
-        stockClasses: [{ id: "sc1" }],
-      } as OcfMachineContext["ocfPackageContent"],
-    });
-
-  // A stock issuance the legacy validator accepts: a known stakeholder, a known
-  // stock class, and no stock legends to resolve.
-  const stockIssuance = (overrides: Record<string, unknown> = {}) => ({
-    id: "si1",
-    security_id: "s-sec1",
-    stakeholder_id: "sh1",
-    stock_class_id: "sc1",
-    stock_legend_ids: [],
-    ...overrides,
-  });
-
-  it("records a validated transaction's report entry and leaves findings empty", () => {
-    const actor = startSeeded(seededWithStakeholder());
-    actor.send(ev("TX_STOCK_ISSUANCE", stockIssuance()));
-
-    const snapshot = actor.getSnapshot();
-    expect(snapshot.value).toBe("capTable");
-    expect(snapshot.context.report).toHaveLength(1);
-    expect(snapshot.context.report[0]).toMatchObject({
-      transaction_type: "TX_STOCK_ISSUANCE",
-      transaction_id: "si1",
-      stakeholder_validity: true,
-    });
-    expect(snapshot.context.findings).toEqual([]);
-  });
-
-  it("issues stock without scanning outstanding holdings for either validation or reporting", () => {
-    const actor = startSeeded({
-      ...seededWithStakeholder(),
-      warrantIssuances: [{ id: "wi1", security_id: "w1", object_type: "TX_WARRANT_ISSUANCE" }],
-    });
-    const holdings = vi.spyOn(nodes, "outstanding");
-    actor.send(ev("TX_STOCK_ISSUANCE", stockIssuance()));
-
-    expect(actor.getSnapshot().context.report.at(-1)?.transaction_id).toBe("si1");
-    expect(holdings).not.toHaveBeenCalled();
-  });
-
-  it("builds the holdings list once when a transfer reads it several times", () => {
-    const context = baseContext({
-      stockIssuances: [stockIssuance({ object_type: "TX_STOCK_ISSUANCE", quantity: "10" })],
-    });
-    const holdings = vi.spyOn(nodes, "outstanding");
-    const transfer = ev("TX_STOCK_TRANSFER", { id: "transfer", security_id: "s-sec1", resulting_security_ids: [] });
-    const update = outcomeUpdate(TX_DESCRIPTORS.TX_STOCK_TRANSFER, context, transfer);
-
-    expect(update.report?.at(-1)?.incoming_stockIssuance_validity).toBe(true);
-    expect(holdings).toHaveBeenCalledTimes(1);
-  });
-
-  it("fails an invalid transaction with the report entry serialized in the result and findings still empty", () => {
-    const actor = startSeeded(seededWithStakeholder());
-    // No such stakeholder — the stock issuance validator rejects it.
-    actor.send(ev("TX_STOCK_ISSUANCE", stockIssuance({ stakeholder_id: "nobody" })));
-
-    const snapshot = actor.getSnapshot();
-    expect(snapshot.value).toBe("validationError");
-    expect(snapshot.context.report).toHaveLength(1);
-    expect(snapshot.context.result).toBe(
-      `The validation of the OCF package for Test Co failed on si1: ${JSON.stringify(snapshot.context.report[0], null, 2)}`,
-    );
-    expect(snapshot.context.findings).toEqual([]);
   });
 });

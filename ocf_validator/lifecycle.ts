@@ -1,6 +1,6 @@
 import { getNextSnapshot, setup } from "xstate";
 import type { LifecycleWord } from "../types/validator";
-import { lifecycleFamilies, TX_DESCRIPTORS, type CollectionKey, type Descriptor } from "./ocfMachine";
+import { lifecycleFamilies, TX_DESCRIPTORS, type CollectionKey, type Descriptor } from "./validators";
 import { isStockPlanId } from "./stockPlan";
 
 // Build one chart per family from the descriptors. Exercise removes a warrant but leaves an equity
