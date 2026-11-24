@@ -291,6 +291,17 @@ function withheld(nodes: NodeMap, descriptor: Descriptor, transaction: Applied, 
   return updated === held ? nodes : withSecurity(nodes, updated);
 }
 
+/**
+ * Nothing says what a transaction of an unrecognized type did to the security it names. Mark that
+ * security's lifecycle and issuance as unreliable, whether it is outstanding or removed. A security
+ * with no record, or one that another transaction has only named, has nothing to mark yet.
+ */
+export function withUnrecognizedChange(nodes: NodeMap, securityId: unknown, root: Subject): NodeMap {
+  const held = securityById(nodes, securityId);
+  if (!held || (held.lifecycle.value === undefined && held.lifecycle.defects.length === 0)) return nodes;
+  return withSecurity(nodes, markIssuanceDefects(held, [root]));
+}
+
 // Reading tracked fields
 
 /**

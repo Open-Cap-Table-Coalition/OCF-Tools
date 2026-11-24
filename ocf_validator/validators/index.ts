@@ -146,5 +146,11 @@ export const TX_DESCRIPTORS = {
   TX_ISSUER_AUTHORIZED_SHARES_ADJUSTMENT: { effect: "passthrough", lifecycle: "stays", families: [] },
 } satisfies DescriptorTable;
 
+/**
+ * Whether the table lists this object_type. A name every JavaScript object inherits, such as
+ * "constructor", is not listed.
+ */
+export const isTxKey = (type: unknown): type is TxKey => typeof type === "string" && Object.hasOwn(TX_DESCRIPTORS, type);
+
 export const lifecycleFamilies = (descriptor: Descriptor): readonly CollectionKey[] =>
   "collection" in descriptor ? [descriptor.collection] : descriptor.families;

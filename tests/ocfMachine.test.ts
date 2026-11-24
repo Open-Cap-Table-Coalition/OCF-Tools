@@ -7,26 +7,52 @@ import type { OcfMachineContext } from "../types/validator";
 import { baseContext, contextAfterCancellation, startSeeded, ev, collection } from "./helpers";
 
 // ---------------------------------------------------------------------------
-// Unknown transaction types
+// Unrecognized transaction types
 // ---------------------------------------------------------------------------
 
-describe("unknown transaction types", () => {
-  it("drives the machine to validationError with the offending type in result", () => {
-    const actor = startSeeded(baseContext());
-    actor.send(ev("TX_NOT_A_REAL_TYPE"));
-
-    const snapshot = actor.getSnapshot();
-    expect(snapshot.value).toBe("validationError");
-    expect(snapshot.context.result).toContain("TX_NOT_A_REAL_TYPE");
-    expect(snapshot.context.result).toContain("not a valid TX type");
+describe("unrecognized transaction types", () => {
+  const notRecognized = (object_type: string, id?: string) => ({
+    severity: "error",
+    outcome: "failed",
+    check: "transaction-type-known",
+    message: `The validator does not recognize object_type ${object_type}, so it did not check this transaction or apply any change it makes.`,
+    subject: { object_type, id },
   });
 
-  it("builds its message without assuming event.data exists", () => {
+  it("records a finding for the transaction the driver could not send under its own type, and stays ready for the next", () => {
+    const actor = startSeeded(baseContext());
+    actor.send({ type: "UNRECOGNIZED", data: { id: "tx-1", object_type: "TX_NOT_A_REAL_TYPE" } });
+
+    const snapshot = actor.getSnapshot();
+    expect(snapshot.status).toBe("active");
+    expect(snapshot.value).toBe("capTable");
+    expect(snapshot.context.findings).toEqual([notRecognized("TX_NOT_A_REAL_TYPE", "tx-1")]);
+    // Only RUN_END writes the result.
+    expect(snapshot.context.result).toBe("Incomplete");
+  });
+
+  it("records the same finding for an event type the machine has no entry for", () => {
+    const actor = startSeeded(baseContext());
+    actor.send(ev("TX_NOT_A_REAL_TYPE", { id: "tx-1" }));
+
+    expect(actor.getSnapshot().context.findings).toEqual([notRecognized("TX_NOT_A_REAL_TYPE", "tx-1")]);
+  });
+
+  it("builds its finding without assuming event.data exists", () => {
     const actor = startSeeded(baseContext());
     // No `data` on the event at all — the wildcard must not throw.
     actor.send({ type: "WHO_KNOWS" } as unknown as OcfMachineEvent);
-    expect(actor.getSnapshot().value).toBe("validationError");
-    expect(actor.getSnapshot().context.result).toContain("WHO_KNOWS");
+
+    expect(actor.getSnapshot().status).toBe("active");
+    expect(actor.getSnapshot().context.findings).toEqual([notRecognized("WHO_KNOWS")]);
+  });
+
+  it("counts it as an error when the run ends", () => {
+    const actor = startSeeded(baseContext());
+    actor.send({ type: "UNRECOGNIZED", data: { id: "tx-1", object_type: "TX_NOT_A_REAL_TYPE" } });
+    actor.send({ type: "RUN_END", date: "2021-01-01" });
+
+    expect(actor.getSnapshot().context.result).toBe("The validation of the OCF package for Test Co is complete and found 1 error.");
   });
 });
 
@@ -50,14 +76,6 @@ describe("results render an issuer name that isn't a string", () => {
     actor.send({ type: "RUN_END", date: "2021-01-01" });
     expect(actor.getSnapshot().context.result).toBe(
       'The validation of the OCF package for {"toString":null} is complete and the package appears valid.',
-    );
-  });
-
-  it("in the unknown-type result", () => {
-    const actor = startSeeded(withIssuer());
-    actor.send(ev("TX_NOT_A_REAL_TYPE"));
-    expect(actor.getSnapshot().context.result).toBe(
-      'The validation of the OCF package for {"toString":null} failed on TX_NOT_A_REAL_TYPE because it is not a valid TX type.',
     );
   });
 });

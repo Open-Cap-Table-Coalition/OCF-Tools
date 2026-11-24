@@ -9,7 +9,10 @@ export type Severity = "error" | "warning";
  */
 export type Outcome = "failed" | "blocked";
 
-/** Identify an OCF object by its schema type and ID. */
+/**
+ * Identify an OCF object by its schema type and ID. A `transaction-type-known` finding is the one
+ * exception: its object_type is the unrecognized string read from the package.
+ */
 export type Subject = { object_type: keyof ObjectTypeMap; id: string };
 
 interface FindingFields {

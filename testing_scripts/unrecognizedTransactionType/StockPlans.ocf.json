@@ -1,0 +1,12 @@
+{
+  "file_type": "OCF_STOCK_PLANS_FILE",
+  "items": [
+    {
+      "id": "plan-2023",
+      "object_type": "STOCK_PLAN",
+      "plan_name": "2023 Equity Incentive Plan",
+      "initial_shares_reserved": "1000000",
+      "stock_class_ids": ["common"]
+    }
+  ]
+}

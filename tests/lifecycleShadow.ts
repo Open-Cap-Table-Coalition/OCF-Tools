@@ -44,6 +44,8 @@ export type ShadowRow = {
   removedBy: Transaction | undefined;
   /** The first removal the validator indexed for this security. */
   indexedRemoval?: Pick<Transaction, "date" | "object_type">;
+  /** Whether an earlier transaction of a type the validator does not recognize names this security. */
+  afterUnrecognized: boolean;
 };
 
 /**
@@ -72,18 +74,22 @@ function replay(context: OcfMachineContext, transaction: Transaction, checks: re
 }
 
 /**
- * Compare each named security in processing order. Skip unknown transaction types because there is
- * no chart entry for them.
+ * Compare each named security in processing order. Skip unrecognized transaction types because
+ * there is no chart entry for them, and remember which securities they name.
  */
 export function shadowRows(transactions: readonly Transaction[], run?: Run): ShadowRow[] {
   let context = run?.context ?? baseContext({
     ocfPackageContent: { ...baseContext().ocfPackageContent, transactions } as unknown as OcfMachineContext["ocfPackageContent"],
   });
   const securities = new Map<unknown, { family: CollectionKey; state: LifecycleState; issuance: Transaction; removedBy?: Transaction }>();
+  const namedByUnrecognized = new Set<unknown>();
   const rows: ShadowRow[] = [];
 
   for (const [index, transaction] of transactions.entries()) {
-    if (!Object.hasOwn(TX_DESCRIPTORS, transaction.object_type)) continue;
+    if (!Object.hasOwn(TX_DESCRIPTORS, transaction.object_type)) {
+      if ("security_id" in transaction) namedByUnrecognized.add(transaction.security_id);
+      continue;
+    }
     const descriptor = TX_DESCRIPTORS[transaction.object_type as keyof typeof TX_DESCRIPTORS];
     const actual = run?.visits[index];
     const skipped = run !== undefined && actual === undefined;
@@ -132,6 +138,7 @@ export function shadowRows(transactions: readonly Transaction[], run?: Run): Sha
         issuanceCheck: issuance?.outcome === "failed" && skipped ? "replayed" : issuance?.outcome,
         indexedRemoval: context.removals.get(security),
         removedBy: state === "removed" ? known?.removedBy : undefined,
+        afterUnrecognized: namedByUnrecognized.has(security),
       });
     }
   }
@@ -177,12 +184,23 @@ export const EXPLANATIONS = {
    */
   "removed by a transaction the removals index doesn't hold":
     "The chart removed the security on a consolidation, which no-earlier-removal's index leaves out.",
+
+  /**
+   * The check allows a fixed list of transaction types on a security before its removal, so it
+   * counts a type the validator does not recognize (#186). The chart has no arrow for that type and
+   * passes over the transaction.
+   */
+  "named by an unrecognized transaction":
+    "no-other-transactions counts a transaction whose type the validator does not recognize; the chart skips it.",
 } as const;
 
 export type Explanation = keyof typeof EXPLANATIONS;
 
 /** Identify a known difference so tests can report any new one. */
 export function explain(row: ShadowRow): Explanation | undefined {
+  if (row.allowed && row.afterUnrecognized && row.reported.length === 1 && row.reported[0] === NO_OTHER_TRANSACTIONS) {
+    return "named by an unrecognized transaction";
+  }
   const refusedInSilence = !row.allowed && row.reported.length === 0;
   if (refusedInSilence && (row.blocked || (row.runs.length === 0 && row.issuanceCheck === "blocked"))) {
     return "an earlier failure blocked the check";

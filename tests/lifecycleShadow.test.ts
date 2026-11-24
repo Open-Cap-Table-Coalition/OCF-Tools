@@ -16,6 +16,16 @@ const shadow = (transactions: Record<string, unknown>[], stakeholders = [{ id: "
 /** Find the results for all securities named by this transaction. */
 const rowsOf = (rows: ShadowRow[], id: string) => rows.filter((row) => row.id === id);
 
+/**
+ * A warrant issuance on a security of its own. After stopOnIt, its validator throws, which stops the
+ * run there and leaves the comparison to replay the transactions that follow.
+ */
+const stopper = { id: "bad", object_type: "TX_WARRANT_ISSUANCE", security_id: "other", stakeholder_id: "sh-1" };
+const stopOnIt = () =>
+  vi.spyOn(TX_DESCRIPTORS.TX_WARRANT_ISSUANCE, "validate").mockImplementation(() => {
+    throw new Error("validator bug");
+  });
+
 const fixture = (...segments: string[]) => path.resolve(__dirname, "..", ...segments);
 
 // Package fixtures
@@ -110,6 +120,8 @@ describe("where the chart and the checks agree", () => {
 // Known differences
 
 describe("where the chart and the checks disagree", () => {
+  afterEach(() => vi.restoreAllMocks());
+
   const grant = { id: "eci-1", object_type: "TX_EQUITY_COMPENSATION_ISSUANCE", security_id: "opt-1", stakeholder_id: "sh-1", quantity: "100", date: "2020-01-01" };
   const grantCancellation = { id: "can-1", object_type: "TX_EQUITY_COMPENSATION_CANCELLATION", security_id: "opt-1", quantity: "100", date: "2021-01-01" };
 
@@ -127,20 +139,24 @@ describe("where the chart and the checks disagree", () => {
     ]);
   });
 
-  const invalid = { ...grant, object_type: "TX_UNKNOWN", id: "bad", security_id: "other", stock_legend_ids: [], stakeholder_id: "missing" };
   const accept = { ...grant, id: "accept", object_type: "TX_EQUITY_COMPENSATION_ACCEPTANCE", date: "2020-02-01" };
   const retract = { ...grantCancellation, object_type: "TX_EQUITY_COMPENSATION_RETRACTION" };
 
   it.each([false, true])("keeps the grant when retraction fails (earlier error: %s)", (earlierError) => {
-    const history = [grant, accept, retract, reprice];
-    if (earlierError) history.unshift({ ...invalid, date: "2019-01-01" });
+    const history: Record<string, unknown>[] = [grant, accept, retract, reprice];
+    if (earlierError) {
+      stopOnIt();
+      history.unshift({ ...stopper, date: "2019-01-01" });
+    }
     const context = validatePackage(history, [{ id: "sh-1" }]);
     expect(rowsOf(context.shadow, reprice.id)[0]).toMatchObject({ state: "removed", issuanceCheck: "blocked" });
     if (!earlierError) expect(collection(context, "equityCompensation")).toEqual([grant]);
   });
 
   it("removes a retained grant when a later cancellation passes during replay", () => {
-    const context = validatePackage([grant, { ...invalid, date: "2020-02-01" }, grantCancellation, reprice], [{ id: "sh-1" }]);
+    stopOnIt();
+    const context = validatePackage([grant, { ...stopper, date: "2020-02-01" }, grantCancellation, reprice], [{ id: "sh-1" }]);
+    expect(context.result).toContain("failed on bad: Error: validator bug");
     expect(collection(context, "equityCompensation").map((item) => item.id)).toEqual([grant.id]);
     expect(rowsOf(context.shadow, reprice.id)[0].issuanceCheck).toBe("replayed");
   });
@@ -209,6 +225,23 @@ describe("where the chart and the checks disagree", () => {
     expect(disagreements(rows).map(explain)).toEqual(["removed by a transaction the removals index doesn't hold"]);
   });
 
+  it("the chart allows a cancellation after an unrecognized transaction, which no-other-transactions counts", () => {
+    const context = validatePackage(
+      [
+        { id: "wi-1", object_type: "TX_WARRANT_ISSUANCE", security_id: "war-1", stakeholder_id: "sh-1", date: "2021-01-01" },
+        { id: "amend-1", object_type: "TX_WARRANT_AMENDMENT", security_id: "war-1", date: "2021-03-01" },
+        { id: "wc-1", object_type: "TX_WARRANT_CANCELLATION", security_id: "war-1", date: "2021-06-01" },
+      ],
+      [{ id: "sh-1" }],
+    );
+    const rows = context.shadow;
+
+    // The chart has no row for the amendment. The warrant is still outstanding when it is cancelled.
+    expect(rows.map((row) => row.id)).toEqual(["wi-1", "wc-1"]);
+    expect(disagreements(rows)).toMatchObject([{ id: "wc-1", state: "outstanding", allowed: true, reported: ["no-other-transactions"], afterUnrecognized: true }]);
+    expect(disagreements(rows).map(explain)).toEqual(["named by an unrecognized transaction"]);
+  });
+
   it("has an explanation written for every kind it names", () => {
     for (const reason of Object.values(EXPLANATIONS)) expect(reason).not.toBe("");
   });
@@ -265,8 +298,8 @@ describe("a disagreement nothing explains", () => {
       ...original, checks: [exists, { ...history, run: () => ["The rule changed."] }],
     });
     try {
-      const invalid = { ...issuance, object_type: "TX_UNKNOWN", id: "bad", security_id: "other", stock_legend_ids: [], stakeholder_id: "missing", date: "2020-01-01" };
-      expect(() => validatePackage([invalid, issuance, cancellation], [{ id: "sh-1" }])).toThrow(/the chart allows it, and no-other-transactions reported it/);
+      stopOnIt();
+      expect(() => validatePackage([{ ...stopper, date: "2020-01-01" }, issuance, cancellation], [{ id: "sh-1" }])).toThrow(/the chart allows it, and no-other-transactions reported it/);
     } finally {
       TX_DESCRIPTORS.TX_CONVERTIBLE_CANCELLATION = original;
     }
