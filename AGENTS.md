@@ -22,6 +22,10 @@ Each tracked field has a value, its last writer and the failures that make it un
 
 For stock plans, use `numeric.ts` for exact decimal arithmetic. A new grant draws shares once. A balance grant or resulting grant carries shares already drawn by its source. Test both orders when two transactions refer to one another on the same day. Check limits on the day's final balance. The end-of-day pool check only records a finding. It withholds no grant and marks no field, because the excess belongs to the plan's total and not to one transaction. A valid adjustment replaces the reserve and can restore its reliability. A running total still depends on earlier transactions.
 
+## Keep inline logic focused on one decision
+
+Use a ternary or conditional spread when the condition and its result are easy to read together. When an expression combines branching, type assertions, and data transformation, break it into named values or early returns. Extract a function when you can name the operation it performs. For data from files or events, use a runtime check before relying on its shape.
+
 ## Test the behavior a caller sees
 
 Use the Node version in `.nvmrc` and install dependencies with `npm ci`. Run `npm run build` for the TypeScript checks, including `types/*.assert.ts`. Run `npm test` for the runtime suite. CI runs the same suite with `npm run test:ci`.
