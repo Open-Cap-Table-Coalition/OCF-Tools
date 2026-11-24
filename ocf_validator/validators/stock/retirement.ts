@@ -1,5 +1,5 @@
 import type { OCFStockIssuance } from "@opencaptablecoalition/ocf-types";
-import { add, exceeds, isQuantity, subtract } from "../../numeric";
+import { add, addsUpTo, exceeds, isQuantity, subtract } from "../../numeric";
 import { isStockPlanId } from "../../stockPlan";
 
 /** Cancellation and repurchase use the same quantity and balance rules. */
@@ -13,5 +13,5 @@ export function retirementQuantities(source: OCFStockIssuance | undefined, retir
   }
   const quantity = parseFloat(retired);
   const original = parseFloat(issued ?? "");
-  return { quantity: quantity > 0 && quantity <= original, reconciles: original === quantity + parseFloat(kept ?? "") };
+  return { quantity: quantity > 0 && quantity <= original, reconciles: addsUpTo([retired, kept], issued) };
 }

@@ -247,6 +247,34 @@ describe("warrant cancellation validity", () => {
     expect(collection(snapshot.context, "warrantIssuances").some((w: any) => w.security_id === "sec2")).toBe(true);
   });
 
+  // A context indexes its package once. A package edited in place needs a new context.
+  const transfer = (security_id: string) => ({ id: "xfer-a", object_type: "TX_WARRANT_TRANSFER", security_id, date: "2020-06-01" });
+  it.each([
+    { edit: "adds a transaction", apply: (transactions: any[]) => { transactions.push(transfer("sec1")); } },
+    { edit: "replaces a transaction, keeping the count", apply: (transactions: any[]) => { transactions[1] = transfer("sec1"); } },
+    { edit: "changes a transaction's security_id", apply: (transactions: any[]) => { transactions[1].security_id = "sec1"; } },
+  ])("sees an in-place edit that $edit when validated with a new context", ({ apply }) => {
+    const transactions: any[] = [issuanceRecord("sec1"), transfer("sec2"), cancellationRecord];
+    const seed = { warrantIssuances: [issuanceRecord("sec1"), issuanceRecord("sec2")] as any, transactions };
+    expect(runValidator("TX_WARRANT_CANCELLATION", contextWith(seed), cancellation())).toEqual([]);
+
+    apply(transactions);
+    expect(runValidator("TX_WARRANT_CANCELLATION", contextWith(seed), cancellation())).toMatchObject([
+      { check: "no-other-transactions", outcome: "failed" },
+    ]);
+  });
+
+  it("reads a different transactions list given to a context it already indexed", () => {
+    const context = contextWith({ warrantIssuances: [issuanceRecord("sec1")] as any, transactions: [issuanceRecord("sec1"), cancellationRecord] });
+    expect(runValidator("TX_WARRANT_CANCELLATION", context, cancellation())).toEqual([]);
+
+    const transactions: any[] = [issuanceRecord("sec1"), transfer("sec1"), cancellationRecord];
+    const swapped = { ...context, ocfPackageContent: { ...context.ocfPackageContent, transactions } };
+    expect(runValidator("TX_WARRANT_CANCELLATION", swapped, cancellation())).toMatchObject([
+      { check: "no-other-transactions", outcome: "failed" },
+    ]);
+  });
+
   it("emits one no-other-transactions finding per past offender, exempting acceptances and itself", () => {
     const context = contextWith({
       warrantIssuances: [issuanceRecord("sec1")] as any,

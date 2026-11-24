@@ -23,7 +23,7 @@ import type { CollectionKey, TxKey } from "../ocfMachine";
  * as a function property so TypeScript checks parameter compatibility.
  */
 export type CheckObject<P = unknown> = Pick<Check, "id" | "severity" | "description"> & {
-  reads?: (data: DeepReadonly<P>) => readonly FieldRef[];
+  reads?: (data: DeepReadonly<P>, context: DeepReadonly<CheckContext>) => readonly FieldRef[];
   run?: (context: DeepReadonly<CheckContext>, data: DeepReadonly<P>, read: ReadField) => string[];
 };
 
@@ -157,7 +157,7 @@ export const toValidate =
       let severity = check.severity;
       let messages: string[];
       try {
-        const refs = check.reads?.(data) ?? [];
+        const refs = check.reads?.(data, checkContext) ?? [];
         const { roots, ref } = defectsOn(nodes, refs);
         if (ref !== undefined) {
           findings.push({

@@ -3,7 +3,7 @@
   CURRENT CHECKS:
     1. Check that stock issuance in incoming security_id reference by transaction exists in current state.
     2. Check to ensure that the date of transaction is the same day or after the date of the incoming stock issuance.
-    3. Check that stock issuance for the balance security_id referenced by transaction exists in current state.
+    3. Check that stock issuance for the balance security_id referenced by transaction exists in current state. It can be removed earlier the same day.
     4. Check to ensure that the date of transaction is the same day as the date of the balance stock issuance.
     5. Check that the stock class of the balance security_id is the sames as the stock class of the incoming security
     6. Check that the quantity of the balance security_id if it exists is greater than 0
@@ -12,6 +12,7 @@
     9. Only issuance, acceptance, this cancellation, and a subsequent return of plan-issued shares may reference the security.
 */
 
+import { namedStock } from "./outputs";
 import { retirementQuantities } from "./retirement";
 import { isStockPlanId } from "../../stockPlan";
 import {LegacyContext} from '../../ocfMachine';
@@ -65,7 +66,8 @@ const valid_tx_stock_cancellation = (
 
   if (event.data.balance_security_id) {
     balance_stockIssuance_validity = false;
-    context.stockIssuances.forEach((ele: any) => {
+    // The balance can be removed earlier the same day and still count.
+    namedStock(context, event.data.balance_security_id, event.data.date).forEach((ele: any) => {
       // 3. Check that stock issuance for the balance security_id referenced by transaction exists in current state.
       if (
         ele.security_id === event.data.balance_security_id &&
@@ -108,7 +110,7 @@ const valid_tx_stock_cancellation = (
   }
   // 7. Check that the sum of the quantities of the cancellation (and the balance issuance if it exists) is equal to the quantity of the incoming security.
   const incoming = context.stockIssuances.find((stock) => stock.security_id === event.data.security_id);
-  const balance = context.stockIssuances.find((stock) => stock.security_id === event.data.balance_security_id);
+  const [balance] = namedStock(context, event.data.balance_security_id, event.data.date);
   const amounts = retirementQuantities(incoming, event.data.quantity, event.data.balance_security_id ? balance?.quantity : "0");
   const cancel_quantity_validity = amounts.quantity;
   const cancel_and_balance_sum_validity = amounts.reconciles;

@@ -1,3 +1,4 @@
+import { namedStock } from "./outputs";
 import { retirementQuantities } from "./retirement";
 import { isStockPlanId } from "../../stockPlan";
 // Reference for tx_stock_cancellation: https://open-cap-table-coalition.github.io/Open-Cap-Format-OCF/schema_markdown/schema/objects/transactions/cancellation/StockCancellation/
@@ -72,7 +73,8 @@ const valid_tx_stock_repurchase = (context: LegacyContext, event: any, isGuard: 
   if (event.data.balance_security_id) {
     // 3. Check that stock issuance for the balance security_id referenced by transaction exists in current state.
     balance_stockIssuance_validity = false;
-    context.stockIssuances.forEach((ele: any) => {
+    // The balance can be removed earlier the same day and still count.
+    namedStock(context, event.data.balance_security_id, event.data.date).forEach((ele: any) => {
       if (
         ele.security_id === event.data.balance_security_id &&
         ele.object_type === 'TX_STOCK_ISSUANCE'
@@ -116,7 +118,7 @@ const valid_tx_stock_repurchase = (context: LegacyContext, event: any, isGuard: 
 
   //7. Check that the sum of the quantities of the repurchase (and the balance issuance if it exists) is equal to the quantity of the incoming security.
   const incoming = context.stockIssuances.find((stock) => stock.security_id === event.data.security_id);
-  const balance = context.stockIssuances.find((stock) => stock.security_id === event.data.balance_security_id);
+  const [balance] = namedStock(context, event.data.balance_security_id, event.data.date);
   const amounts = retirementQuantities(incoming, event.data.quantity, event.data.balance_security_id ? balance?.quantity : "0");
   const repurchase_quantity_validity = amounts.quantity;
   const repurchase_and_balance_sum_validity = amounts.reconciles;

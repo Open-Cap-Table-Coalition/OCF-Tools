@@ -35,10 +35,12 @@ export type SecurityState<C extends CollectionKey> = {
   & (C extends "stockIssuances" ? { carry?: { plan?: string; date?: string }; consolidatedInto?: string } : {});
 
 /**
- * A failed source named this security before its issuance. Keep the plan and date the source
- * expected, so a later issuance or claim that cannot match them ignores the failure.
+ * A source named this security before its issuance. Keep the plan and date the source expected, so a
+ * later issuance or claim that cannot match them ignores it. A failed source lists its failures. A
+ * source that succeeded lists its writer. The list keeps the order in which the sources ran. A lone
+ * successful source needs no list.
  */
-export type PendingCarry = { readonly plan?: string; readonly date?: string; readonly roots: readonly Subject[] };
+export type PendingCarry = { readonly plan?: string; readonly date?: string; readonly roots: readonly Subject[]; readonly writer?: Subject };
 
 /** An issuance withheld in another family has no known values or writers. */
 type WithheldIssuance = { readonly lifecycle: Field<never>; readonly issuance: Field<never> };
@@ -297,8 +299,11 @@ function withheld(nodes: NodeMap, descriptor: Descriptor, transaction: Applied, 
  */
 type Address<N, F> = { readonly kind: "security"; readonly family: F; readonly id: unknown; readonly field: FieldKey<N>; readonly claim?: Claim };
 
-/** The grant and date of a transaction that names a security as its balance, result or settlement. */
-export type Claim = { readonly source: unknown; readonly date: unknown };
+/**
+ * The grant and date of a transaction that names a security as its balance, result or settlement.
+ * Before the security is issued, a check can add the plan and date of the issuance it found ahead.
+ */
+export type Claim = { readonly source: unknown; readonly date: unknown; readonly issuance?: { readonly plan: unknown; readonly date: unknown } };
 type SecurityRef = { [C in CollectionKey]: Address<SecurityNode<C>, C> }[CollectionKey]
   | Address<SecurityNode, undefined>;
 type PlanRef = { readonly kind: "plan"; readonly id: unknown; readonly field: FieldKey<PlanNode> };
@@ -315,12 +320,15 @@ export function securityField<C extends CollectionKey | undefined, P extends Fie
 
 /**
  * Collect the failed references that this plan and date cannot rule out. A reference with an unknown
- * plan or date could match any issuance.
+ * plan or date could match any issuance. A source that succeeded for this plan and date holds the
+ * security, so a failure after it changes nothing.
  */
 export const pendingRoots = (pending: readonly PendingCarry[], plan: unknown, date: unknown): readonly Subject[] => {
   const roots: Subject[] = [];
   for (const reference of pending) {
-    if ((reference.plan === undefined || reference.plan === plan) && (reference.date === undefined || reference.date === date)) {
+    if (reference.writer) {
+      if (reference.plan === plan && reference.date === date) break;
+    } else if ((reference.plan === undefined || reference.plan === plan) && (reference.date === undefined || reference.date === date)) {
       for (const root of reference.roots) addRoot(roots, root);
     }
   }
@@ -331,21 +339,46 @@ export function planField<P extends FieldKey<PlanNode>>(id: unknown, field: P) {
   return { kind: "plan", id, field } as const;
 }
 
+/** The issuance a claim reaches: the security's own, or else the one the check found ahead. */
+const reachedIssuance = (node: SecurityNode, claim: Claim): { readonly plan: unknown; readonly date: unknown } | undefined => {
+  const issued = node.issuance.value;
+  return issued ? { plan: "stock_plan_id" in issued ? issued.stock_plan_id : undefined, date: issued.date } : claim.issuance;
+};
+
 /**
  * Another source's failure on a carried charge matters only to a claim that could reach the same
  * issuance. A grant without a plan carries no charge. A grant with a plan carries it only to an
- * issuance with that plan on the claim's date.
+ * issuance with that plan on the claim's date. A known issuance is read the same way before and
+ * after it runs.
  */
 function claimDefects(nodes: NodeMap, node: SecurityNode, defects: readonly Subject[], claim: Claim): readonly Subject[] {
   const source = securityAt(nodes, "equityCompensation", claim.source)?.issuance.value;
   const plan = source?.stock_plan_id;
   if (source && !isStockPlanId(plan)) return [];
-  if ("pendingCarries" in node && node.pendingCarries) return pendingRoots(node.pendingCarries, plan, claim.date);
-  const issued = node.issuance.value;
-  if (!issued) return defects;
-  const otherPlan = source !== undefined && (!("stock_plan_id" in issued) || issued.stock_plan_id !== plan);
-  const otherDate = claim.date !== undefined && issued.date !== claim.date;
-  return otherPlan || otherDate ? [] : defects;
+  const target = reachedIssuance(node, claim);
+  const otherPlan = target !== undefined && source !== undefined && target.plan !== plan;
+  const otherDate = target !== undefined && claim.date !== undefined && target.date !== claim.date;
+  if (otherPlan || otherDate) return [];
+  if ("pendingCarries" in node && node.pendingCarries) {
+    if (!target) return pendingRoots(node.pendingCarries, plan, claim.date);
+    // Issuing the security keeps only the failures its plan and date cannot rule out.
+    return isStockPlanId(target.plan) ? pendingRoots(node.pendingCarries, target.plan, target.date) : [];
+  }
+  return defects;
+}
+
+/**
+ * Stock records the plan and date each source expected of it. Only a reference that could reach the
+ * same issuance as this claim counts as an earlier claim on the stock.
+ */
+function claimedCarry(nodes: NodeMap, stock: SecurityNode<"stockIssuances">, claim: Claim): { plan?: string; date?: string } | undefined {
+  const target = reachedIssuance(stock, claim);
+  const plan = target ? target.plan : securityAt(nodes, "equityCompensation", claim.source)?.issuance.value?.stock_plan_id;
+  const date = target ? target.date : claim.date;
+  const fits = (reference: { plan?: string; date?: string } | undefined) => reference?.plan === plan && reference?.date === date;
+  if (fits(stock.carry?.value)) return stock.carry?.value;
+  const later = stock.pendingCarries?.find((reference) => reference.writer && fits(reference));
+  return later && { plan: later.plan, date: later.date };
 }
 
 export function fieldAt<R extends FieldRef>(nodes: NodeMap, ref: R, removals?: OcfMachineContext["removals"]): Field<FieldRefValue<R>> | undefined {
@@ -361,8 +394,12 @@ export function fieldAt<R extends FieldRef>(nodes: NodeMap, ref: R, removals?: O
   if (ref.family === undefined && shared && field && node.withheldByFamily) {
     for (const other of Object.values(node.withheldByFamily)) field = markDefects(field, other[shared].defects);
   }
-  if (ref.claim && field?.defects.length && (ref.field === "carry" || ref.field === "provenance")) {
-    field = { ...field, defects: claimDefects(nodes, node, field.defects, ref.claim) };
+  if (ref.claim && field && (ref.field === "carry" || ref.field === "provenance")) {
+    field = {
+      ...field,
+      ...(ref.field === "carry" && node.family === "stockIssuances" && { value: claimedCarry(nodes, node, ref.claim) }),
+      defects: field.defects.length ? claimDefects(nodes, node, field.defects, ref.claim) : field.defects,
+    };
   }
   // Older saved records identify the applied removal by its lifecycle writer.
   if (ref.field === "removal" && !field && node.lifecycle.value === "removed") {

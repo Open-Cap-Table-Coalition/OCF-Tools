@@ -1,4 +1,6 @@
 import {LegacyContext} from '../../ocfMachine';
+import { addsUpTo } from "../../numeric";
+import { namedStock } from "./outputs";
 
 /*
 CURRENT CHECKS:
@@ -8,7 +10,7 @@ CURRENT CHECKS:
 4. The dates of any stock issuances referred to in the resulting_security_ids variable must have a date equal to the date of the stock reissuance
 5. The security_id of the stock issuance referred to in the security_id variable must not be the security_id related to any other transactions with the exception of a stock acceptance transaction.
 6. The quantity of the stock issuance referred to in the security_id variable must equal the sum of the quantities of any stock issuances
-   referred to in the resulting_security_ids variable (EXCEPT split transaction id supplied)
+   referred to in the resulting_security_ids variable (EXCEPT split transaction id supplied). A result can be removed earlier the same day.
 7. The stock_class_id of the stock issuance referred to in the security_id variable must equal the stock_class_id of any stock issuances referred to in the resulting_security_ids variable
 8. The stakeholder_id of the stock issuance referred to in the security_id variable must equal the stakeholder_id of any stock issuances referred to in the resulting_security_ids variable
 9. Split_transaction_id when provided exists as a TX_STOCK_CLASS_SPLIT transaction
@@ -71,6 +73,8 @@ const valid_tx_stock_reissuance = (context: LegacyContext, event: any, isGuard: 
     });
     if (!resulting_stockIssuances_validity) {
       report.resulting_stockIssuances_validity = false;
+      // Every resulting security must pass, not only the last one named.
+      break;
     }
   }
 
@@ -89,6 +93,8 @@ const valid_tx_stock_reissuance = (context: LegacyContext, event: any, isGuard: 
     });
     if (!resulting_dates_validity) {
       report.resulting_dates_validity = false;
+      // Every resulting security must pass, not only the last one named.
+      break;
     }
   }
 
@@ -112,22 +118,24 @@ const valid_tx_stock_reissuance = (context: LegacyContext, event: any, isGuard: 
   // 6. The quantity of the stock issuance referred to in the security_id variable must equal the sum of the quantities of any stock issuances
   //    referred to in the resulting_security_ids variable (EXCEPT split transaction id supplied)
   let outgoing_resulting_sum_validity = true;
-  if (event.data.split_transaction_id === null) {
-    let outgoing_resulting_sum = 0;
+  // A reissuance with no split can leave the field out or set it to null.
+  if (!event.data.split_transaction_id) {
+    const outgoing_quantities: unknown[] = [];
     for (let i = 0; i < event.data.resulting_security_ids.length; i++) {
       const res = event.data.resulting_security_ids[i];
-      context.stockIssuances.map((ele: any) => {
+      // A result can be removed earlier the same day and still count.
+      namedStock(context, res, event.data.date).map((ele: any) => {
         if (
           ele.security_id === res &&
           ele.object_type === 'TX_STOCK_ISSUANCE'
         ) {
-          outgoing_resulting_sum += parseFloat(ele.quantity);
+          outgoing_quantities.push(ele.quantity);
         }
       });
     }
 
     outgoing_resulting_sum_validity = false;
-    if (outgoing_resulting_sum === incoming_quantity) {
+    if (addsUpTo(outgoing_quantities, incoming_quantity)) {
       outgoing_resulting_sum_validity = true;
       report.outgoing_resulting_sum_validity = true;
     }
@@ -152,6 +160,8 @@ const valid_tx_stock_reissuance = (context: LegacyContext, event: any, isGuard: 
     });
     if (!resulting_stock_class_validity) {
       report.resulting_stock_class_validity = false;
+      // Every resulting security must pass, not only the last one named.
+      break;
     }
   }
   // 8. The stakeholder_id of the stock issuance referred to in the security_id variable must equal the stakeholder_id of any stock issuances referred to in the resulting_security_ids variable
@@ -169,6 +179,8 @@ const valid_tx_stock_reissuance = (context: LegacyContext, event: any, isGuard: 
     });
     if (!resulting_stakeholder_validity) {
       report.resulting_stakeholder_validity = false;
+      // Every resulting security must pass, not only the last one named.
+      break;
     }
   }
 

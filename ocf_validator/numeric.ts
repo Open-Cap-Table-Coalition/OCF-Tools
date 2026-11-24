@@ -41,3 +41,12 @@ export const isNegative = (value: string): boolean => toScaled(value) < 0n;
 
 /** Validate quantities before adding them to a pool or a return allowance. */
 export const isQuantity = (value: unknown): value is string => isNumeric(value) && !isNegative(value);
+
+/**
+ * Check that the parts add up to the whole. Decimal strings add exactly. Any other value is read as a
+ * float, as the stock checks did before.
+ */
+export const addsUpTo = (parts: readonly unknown[], whole: unknown): boolean => {
+  if (isNumeric(whole) && parts.every(isNumeric)) return subtract(parts.reduce(add, "0"), whole) === "0";
+  return parts.reduce((sum: number, part) => sum + parseFloat(part as string), 0) === parseFloat(whole as string);
+};

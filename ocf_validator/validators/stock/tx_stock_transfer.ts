@@ -1,4 +1,6 @@
 import {LegacyContext} from '../../ocfMachine';
+import { addsUpTo } from "../../numeric";
+import { namedStock } from "./outputs";
 // Reference for tx_stock_transfer transaction: https://open-cap-table-coalition.github.io/Open-Cap-Format-OCF/schema_markdown/schema/objects/transactions/transfer/StockTransfer/
 
 /*
@@ -8,7 +10,7 @@ import {LegacyContext} from '../../ocfMachine';
     3. Is the quantity of transfer equal to or less than the quantity of the incoming issuance?
     4. Do all of resulting security_ids referenced by transaction exist in current cap table state?
     5. Is the date of transaction the same as all of the resulting issuances?
-    6. If there is a balance issuance, does the balance security_id referenced by transaction exist in current cap table state?
+    6. If there is a balance issuance, does the balance security_id referenced by transaction exist in current cap table state? It can be removed earlier the same day.
     7. If there is a balance issuance, is the date of transaction the same day as the date of the balance issuance?
     8. Does the sum of the quantities of the resulting issuances equal to the quantity of the transfer?
     9. Does the sum of the quantities of the resulting issuances (and the balance issuance if it exists) equal the quantity of the incoming issuance?
@@ -83,6 +85,8 @@ const valid_tx_stock_transfer = (context: LegacyContext, event: any, isGuard: Bo
     });
     if (!resulting_stockIssuances_validity) {
       report.resulting_stockIssuances_validity = false;
+      // Every resulting security must pass, not only the last one named.
+      break;
     }
   }
 
@@ -101,6 +105,8 @@ const valid_tx_stock_transfer = (context: LegacyContext, event: any, isGuard: Bo
     });
     if (!resulting_dates_validity) {
       report.resulting_dates_validity = false;
+      // Every resulting security must pass, not only the last one named.
+      break;
     }
   }
 
@@ -111,7 +117,8 @@ const valid_tx_stock_transfer = (context: LegacyContext, event: any, isGuard: Bo
   if (event.data.balance_security_id) {
     // Check that stock issuance for the balance security_id referenced by transaction exists in current state.
     balance_stockIssuance_validity = false;
-    context.stockIssuances.map((ele: any) => {
+    // The balance or a result can be removed earlier the same day and still count.
+    namedStock(context, event.data.balance_security_id, event.data.date).map((ele: any) => {
       if (
         ele.security_id === event.data.balance_security_id &&
         ele.object_type === 'TX_STOCK_ISSUANCE'
@@ -145,18 +152,19 @@ const valid_tx_stock_transfer = (context: LegacyContext, event: any, isGuard: Bo
   }
 
   // Check that the sum of the quantities of the resulting issuance (and the balance issuance if it exists) equal to the quantity of the transfer.
-  let outgoing_resulting_sum = 0;
+  // Add the quantities exactly, so fractional shares do not round.
+  const outgoing_quantities: unknown[] = [];
   for (let i = 0; i < event.data.resulting_security_ids.length; i++) {
     const res = event.data.resulting_security_ids[i];
-    context.stockIssuances.map((ele: any) => {
+    namedStock(context, res, event.data.date).map((ele: any) => {
       if (ele.security_id === res && ele.object_type === 'TX_STOCK_ISSUANCE') {
-        outgoing_resulting_sum += parseFloat(ele.quantity);
+        outgoing_quantities.push(ele.quantity);
       }
     });
   }
 
   let outgoing_resulting_sum_validity = false;
-  if (outgoing_resulting_sum === parseFloat(event.data.quantity)) {
+  if (addsUpTo(outgoing_quantities, event.data.quantity)) {
     outgoing_resulting_sum_validity = true;
     report.outgoing_resulting_sum_validity = true;
   }
@@ -166,14 +174,13 @@ const valid_tx_stock_transfer = (context: LegacyContext, event: any, isGuard: Bo
   }
 
   // Check that the sum of the quantities of the resulting issuance (and the balance issuance if it exists) is equal to the quantity of the incoming issuance.
-  let outgoing_total_sum = outgoing_resulting_sum;
   if (event.data.balance_security_id) {
-    context.stockIssuances.map((ele: any) => {
+    namedStock(context, event.data.balance_security_id, event.data.date).map((ele: any) => {
       if (
         ele.security_id === event.data.balance_security_id &&
         ele.object_type === 'TX_STOCK_ISSUANCE'
       ) {
-        outgoing_total_sum += parseFloat(ele.quantity);
+        outgoing_quantities.push(ele.quantity);
       }
     });
   }
@@ -184,7 +191,7 @@ const valid_tx_stock_transfer = (context: LegacyContext, event: any, isGuard: Bo
       ele.security_id === event.data.security_id &&
       ele.object_type === 'TX_STOCK_ISSUANCE'
     ) {
-      if (outgoing_total_sum === parseFloat(ele.quantity)) {
+      if (addsUpTo(outgoing_quantities, ele.quantity)) {
         outgoing_total_sum_validity = true;
         report.outgoing_total_sum_validity = true;
       }
