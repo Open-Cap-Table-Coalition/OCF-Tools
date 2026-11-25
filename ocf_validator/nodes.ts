@@ -349,10 +349,16 @@ export function securityField<C extends CollectionKey | undefined, P extends Fie
  */
 export const pendingRoots = (pending: readonly PendingCarry[], plan: unknown, date: unknown): readonly Subject[] => {
   const roots: Subject[] = [];
+  const claimedPlans = new Set<string>();
   for (const reference of pending) {
+    if (reference.date !== undefined && reference.date !== date) continue;
+    if (plan !== undefined && reference.plan !== undefined && reference.plan !== plan) continue;
     if (reference.writer) {
-      if (reference.plan === plan && reference.date === date) break;
-    } else if ((reference.plan === undefined || reference.plan === plan) && (reference.date === undefined || reference.date === date)) {
+      if (reference.date !== date || reference.plan === undefined) continue;
+      if (reference.plan === plan) break;
+      // With an unknown plan, a prior writer settles only the plan it claimed.
+      claimedPlans.add(reference.plan);
+    } else if (reference.plan === undefined || !claimedPlans.has(reference.plan)) {
       for (const root of reference.roots) addRoot(roots, root);
     }
   }
@@ -363,10 +369,20 @@ export function planField<P extends FieldKey<PlanNode>>(id: unknown, field: P) {
   return { kind: "plan", id, field } as const;
 }
 
+/** A reliable issuance names a plan or has none (null). A missing or defective issuance leaves the plan unknown. */
+export function issuancePlan(field: Field<Issuance> | undefined): string | null | undefined {
+  if (!field?.value || field.defects.length) return undefined;
+  const id = "stock_plan_id" in field.value ? field.value.stock_plan_id : undefined;
+  return isStockPlanId(id) ? id : null;
+}
+
 /** The issuance a claim reaches: the security's own, or else the one the check found ahead. */
 const reachedIssuance = (node: SecurityNode, claim: Claim): { readonly plan: unknown; readonly date: unknown } | undefined => {
   const issued = node.issuance.value;
-  return issued ? { plan: "stock_plan_id" in issued ? issued.stock_plan_id : undefined, date: issued.date } : claim.issuance;
+  if (issued) return { plan: issuancePlan(node.issuance), date: issued.date };
+  if (!claim.issuance) return undefined;
+  const { plan, date } = claim.issuance;
+  return { plan: isStockPlanId(plan) ? plan : null, date };
 };
 
 /**
@@ -376,17 +392,15 @@ const reachedIssuance = (node: SecurityNode, claim: Claim): { readonly plan: unk
  * after it runs.
  */
 function claimDefects(nodes: NodeMap, node: SecurityNode, defects: readonly Subject[], claim: Claim): readonly Subject[] {
-  const source = securityAt(nodes, "equityCompensation", claim.source)?.issuance.value;
-  const plan = source?.stock_plan_id;
-  if (source && !isStockPlanId(plan)) return [];
+  const plan = issuancePlan(securityAt(nodes, "equityCompensation", claim.source)?.issuance);
+  if (plan === null) return [];
   const target = reachedIssuance(node, claim);
-  const otherPlan = target !== undefined && source !== undefined && target.plan !== plan;
+  if (target?.plan === null) return [];
+  const otherPlan = target?.plan !== undefined && plan !== undefined && target.plan !== plan;
   const otherDate = target !== undefined && claim.date !== undefined && target.date !== claim.date;
   if (otherPlan || otherDate) return [];
   if ("pendingCarries" in node && node.pendingCarries) {
-    if (!target) return pendingRoots(node.pendingCarries, plan, claim.date);
-    // Issuing the security keeps only the failures its plan and date cannot rule out.
-    return isStockPlanId(target.plan) ? pendingRoots(node.pendingCarries, target.plan, target.date) : [];
+    return pendingRoots(node.pendingCarries, target?.plan ?? plan, target?.date ?? claim.date);
   }
   return defects;
 }
@@ -397,7 +411,9 @@ function claimDefects(nodes: NodeMap, node: SecurityNode, defects: readonly Subj
  */
 function claimedCarry(nodes: NodeMap, stock: SecurityNode<"stockIssuances">, claim: Claim): { plan?: string; date?: string } | undefined {
   const target = reachedIssuance(stock, claim);
-  const plan = target ? target.plan : securityAt(nodes, "equityCompensation", claim.source)?.issuance.value?.stock_plan_id;
+  if (target?.plan === null) return undefined;
+  const plan = target?.plan ?? issuancePlan(securityAt(nodes, "equityCompensation", claim.source)?.issuance);
+  if (plan === undefined || plan === null) return undefined;
   const date = target ? target.date : claim.date;
   const fits = (reference: { plan?: string; date?: string } | undefined) => reference?.plan === plan && reference?.date === date;
   if (fits(stock.carry?.value)) return stock.carry?.value;
