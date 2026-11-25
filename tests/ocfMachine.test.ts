@@ -33,7 +33,7 @@ describe("unrecognizedTransactionOf", () => {
 });
 
 describe("unrecognized transaction types", () => {
-  const notRecognized = (object_type: string, id?: string) => ({
+  const notRecognized = (object_type: string, id?: unknown) => ({
     severity: "error",
     outcome: "failed",
     check: "transaction-type-known",
@@ -67,6 +67,12 @@ describe("unrecognized transaction types", () => {
 
     expect(actor.getSnapshot().status).toBe("active");
     expect(actor.getSnapshot().context.findings).toEqual([notRecognized("WHO_KNOWS")]);
+  });
+
+  it.each([42, null, { malformed: true }])("preserves the malformed transaction ID %j", (id) => {
+    const actor = startSeeded(baseContext());
+    actor.send({ type: "UNRECOGNIZED", data: { id, object_type: "TX_UNKNOWN" } });
+    expect(actor.getSnapshot().context.findings).toEqual([notRecognized("TX_UNKNOWN", id)]);
   });
 
   it("counts it as an error when the run ends", () => {

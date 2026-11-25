@@ -1,7 +1,7 @@
 import * as path from "path";
 import { describe, it, expect } from "vitest";
 import { ocfValidator } from "../ocf_validator";
-import { emptyNodes, applyTransaction, withUnrecognizedChange } from "../ocf_validator/nodes";
+import { emptyNodes, applyTransaction, fieldAt, securityField, withUnrecognizedChange } from "../ocf_validator/nodes";
 import { TX_DESCRIPTORS } from "../ocf_validator/validators";
 import { collection, validatePackage } from "./helpers";
 
@@ -164,6 +164,27 @@ describe("the security an unrecognized transaction names", () => {
     expect(context.findings).toEqual([notRecognized(change.object_type, change.id)]);
     expect(context.snapshots.at(-1)?.warrants).toEqual(context.snapshots[0].warrants);
     expect(context.snapshots[0].warrants).toHaveLength(1);
+  });
+
+  it("blocks a different family's issuance check even when only the warrant has a record", () => {
+    const convertible = { ...acceptance, object_type: "TX_CONVERTIBLE_ACCEPTANCE" };
+    const other = { ...convertible, id: "other", security_id: "unissued" };
+    const context = validatePackage([warrant, amendment, convertible, other], stakeholders);
+
+    expect(context.findings).toMatchObject([
+      { subject: AMENDED, check: "transaction-type-known", outcome: "failed" },
+      { subject: { id: convertible.id }, check: "issuance-exists", outcome: "blocked", roots: [AMENDED] },
+      { subject: { id: other.id }, check: "issuance-exists", outcome: "failed" },
+    ]);
+    expect(context.snapshots.at(-1)?.convertibles).toEqual([]);
+    const nodes = structuredClone(context.nodes);
+    for (const family of ["stockIssuances", "convertibleIssuances", "equityCompensation"] as const) {
+      for (const field of ["issuance", "lifecycle"] as const) {
+        expect(fieldAt(nodes, securityField(family, warrant.security_id, field))).toEqual({
+          value: undefined, writer: undefined, defects: [AMENDED],
+        });
+      }
+    }
   });
 
   it("marks the warrant and convertible when both issuances were withheld for the same security ID", () => {

@@ -11,7 +11,11 @@ export type Outcome = "failed" | "blocked";
  * Identify an object by its type and ID from the package. Finding subjects, blocked roots and
  * snapshot defects preserve the original object_type even when the validator does not recognize it.
  */
-export type Subject = { object_type: string; id: string };
+export type Subject = {
+  object_type: string;
+  /** The supplied ID, including a malformed value, or undefined when the object has no ID. */
+  id: unknown;
+};
 
 interface FindingFields {
   severity: Severity;

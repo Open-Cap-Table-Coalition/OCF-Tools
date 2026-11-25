@@ -50,6 +50,8 @@ type WithheldByFamily = Readonly<Partial<Record<CollectionKey, WithheldIssuance>
 type SecuritiesByFamily = {
   [F in CollectionKey]: NodeBase<"security", SecurityState<F>> & {
     readonly family: F;
+    /** Unknown transactions also block reads from a family with no recorded issuance. */
+    readonly unrecognizedRoots?: readonly Subject[];
     /** Other families that attempted issuance while this ID was uncertain. Snapshots list the ID once. */
     readonly withheldByFamily?: WithheldByFamily;
   } & (F extends "equityCompensation" | "stockIssuances" ? {
@@ -227,6 +229,7 @@ function applied(nodes: NodeMap, descriptor: Descriptor, transaction: Applied, w
       family,
       lifecycle: written<LifecycleState>("outstanding", writer, previous?.lifecycle),
       issuance: written(transaction as unknown as Issuance, writer, previous?.issuance),
+      ...(held?.unrecognizedRoots && { unrecognizedRoots: held.unrecognizedRoots }),
       ...(withheldByFamily && { withheldByFamily }),
     } as SecurityNode;
     return withSecurity(nodes, node);
@@ -302,11 +305,14 @@ export function withUnrecognizedChange(nodes: NodeMap, securityId: unknown, root
   if (!held) return nodes;
   const hasIssuance = held.lifecycle.value !== undefined || held.lifecycle.defects.length > 0;
   const marked = hasIssuance ? markIssuanceDefects(held, [root]) : held;
-  if (!held.withheldByFamily) return marked === held ? nodes : withSecurity(nodes, marked);
+  if (!hasIssuance && !held.withheldByFamily) return nodes;
+  const unrecognizedRoots = [...(held.unrecognizedRoots ?? [])];
+  addRoot(unrecognizedRoots, root);
+  if (!held.withheldByFamily) return withSecurity(nodes, { ...marked, unrecognizedRoots });
   const withheldByFamily = Object.fromEntries(
     Object.entries(held.withheldByFamily).map(([family, fields]) => [family, markIssuanceDefects(fields, [root])]),
   );
-  return withSecurity(nodes, { ...marked, withheldByFamily });
+  return withSecurity(nodes, { ...marked, unrecognizedRoots, withheldByFamily });
 }
 
 // Reading tracked fields
@@ -405,10 +411,14 @@ export function fieldAt<R extends FieldRef>(nodes: NodeMap, ref: R, removals?: O
   if (!node) return;
   const shared = ref.field === "lifecycle" || ref.field === "issuance" ? ref.field : undefined;
   if (ref.family !== undefined && node.family !== ref.family) {
-    return shared ? node.withheldByFamily?.[ref.family]?.[shared] : undefined;
+    if (!shared) return;
+    const field = node.withheldByFamily?.[ref.family]?.[shared];
+    if (!node.unrecognizedRoots?.length) return field;
+    return markDefects(field ?? unknown(), node.unrecognizedRoots);
   }
   const fields: Partial<Record<SecurityRef["field"], Field<unknown>>> = node;
   let field = fields[ref.field];
+  if (shared && field && node.unrecognizedRoots) field = markDefects(field, node.unrecognizedRoots);
   if (ref.family === undefined && shared && field && node.withheldByFamily) {
     for (const other of Object.values(node.withheldByFamily)) field = markDefects(field, other[shared].defects);
   }

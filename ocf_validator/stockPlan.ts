@@ -4,7 +4,7 @@ import type { Descriptor, CollectionKey } from "./validators";
 import { withNodeField, type Field, type FieldKey } from "./node";
 import { currentName } from "./constants/constants";
 import type { LifecycleState } from "./lifecycle";
-import { isSecurityFamily, markDefects, pendingRoots, planById, securityById, withPlanNodes, withSecurity, written, type NodeMap, type PendingCarry, type PlanNode, type SecurityNode } from "./nodes";
+import { fieldAt, securityField, isSecurityFamily, markDefects, pendingRoots, planById, securityById, withPlanNodes, withSecurity, written, type NodeMap, type PendingCarry, type PlanNode, type SecurityNode } from "./nodes";
 import { add, exceeds, isNumeric, isQuantity, subtract } from "./numeric";
 
 /** The plan and quantity charged for this grant. */
@@ -169,7 +169,12 @@ function trackSourceQuantity(before: NodeMap, nodes: NodeMap, descriptor: Descri
   if (type === "TX_STOCK_CANCELLATION" || type === "TX_STOCK_REPURCHASE" || type === "TX_EQUITY_COMPENSATION_CANCELLATION") {
     value = fits ? quantity : ZERO;
   }
-  if (source.family === "stockIssuances" && source.consolidatedInto?.value) value = ZERO;
+  if (source.family === "stockIssuances" && source.consolidatedInto) {
+    if (source.consolidatedInto.defects.length) {
+      return withSecurity(nodes, { ...source, returnable: markDefects(source.returnable ?? unknown<string>(), source.consolidatedInto.defects) });
+    }
+    if (source.consolidatedInto.value) value = ZERO;
+  }
   return withSecurity(nodes, { ...source, returnable: written(value, by.writer) });
 }
 
@@ -347,7 +352,8 @@ function carryStock(nodes: NodeMap, id: string, plan: string | undefined, date: 
     : same(claim) || stock.pendingCarries?.some((reference) => reference.writer && same(reference));
   if (kept || (issuance && issuance.date !== date)) return nodes;
   // Stock can be issued and removed before its settlement or consolidation runs that day.
-  if (stock.lifecycle.value === "removed" && !removedThatDay(stock, date)) return nodes;
+  if (stock.lifecycle.value === "removed" && !removedThatDay(stock, date) &&
+      (by.ok || stock.removal?.value?.date !== date)) return nodes;
   // Before issuance the first successful source takes the carry and others keep what they expected.
   // The issuance decides between them. After it, a source the issuance did not meet gives way.
   const carry = by.ok && claim && !issuance ? stock.carry : stamped(stock.carry, { plan, date }, by);
@@ -366,34 +372,60 @@ function carryStock(nodes: NodeMap, id: string, plan: string | undefined, date: 
   return adjusted(marked, draw.plan, draw.quantity, subtract, by, "carriesStock");
 }
 
+/** A consolidation names distinct input stocks and a separate output. */
+export function consolidationInputs(tx: Pick<PoolTransaction, "security_ids" | "resulting_security_id">): readonly string[] {
+  const ids = tx.security_ids;
+  if (typeof tx.resulting_security_id !== "string" || !Array.isArray(ids) ||
+      !ids.every((id) => typeof id === "string") || ids.includes(tx.resulting_security_id) ||
+      new Set(ids).size !== ids.length) return [];
+  return ids;
+}
+
 /** Only an exact, same-plan consolidation identifies the whole draw carried to the output. */
 function consolidatedStock(nodes: NodeMap, tx: PoolTransaction, by: Stamp): NodeMap {
-  const ids = tx.security_ids;
+  const ids = consolidationInputs(tx);
   const result = tx.resulting_security_id;
-  if (!by.ok || typeof result !== "string" || !Array.isArray(ids) || !ids.length ||
-      ids.includes(result) || new Set(ids).size !== ids.length) return nodes;
-
+  if (typeof result !== "string" || ids.length === 0) return nodes;
   const output = securityById(nodes, result);
   if (output?.family !== "stockIssuances") return nodes;
   const issuance = output.issuance.value;
-  if (!isStockPlanId(issuance?.stock_plan_id) || !isQuantity(issuance.quantity) ||
-      output.lifecycle.defects.length || output.issuance.defects.length) return nodes;
+  if (!isStockPlanId(issuance?.stock_plan_id)) return nodes;
+  if (by.ok && (output.lifecycle.defects.length || output.issuance.defects.length)) return nodes;
+
   const inputs: SecurityNode<"stockIssuances">[] = [];
   let total = ZERO;
+  let allQuantitiesKnown = true;
   for (const id of ids) {
     const stock = securityById(nodes, id);
-    if (stock?.family !== "stockIssuances" || stock.lifecycle.value !== "outstanding" || stock.consolidatedInto?.value ||
-        stock.lifecycle.defects.length || stock.issuance.defects.length) return nodes;
-    const source = stock.issuance.value;
-    if (!source || source.stock_plan_id !== issuance.stock_plan_id || source.stock_class_id !== issuance.stock_class_id ||
-        source.stakeholder_id !== issuance.stakeholder_id || !isQuantity(source.quantity)) return nodes;
-    total = add(total, source.quantity);
+    if (stock?.family !== "stockIssuances") {
+      // A failed read can leave even the stock's family uncertain.
+      if (by.ok || !fieldAt(nodes, securityField("stockIssuances", id, "issuance"))?.defects.length) return nodes;
+      allQuantitiesKnown = false;
+      continue;
+    }
+    if (stock.consolidatedInto?.value) return nodes;
+    if (by.ok && (stock.lifecycle.defects.length || stock.issuance.defects.length)) return nodes;
+    if (!stock.lifecycle.defects.length && stock.lifecycle.value !== "outstanding") return nodes;
     inputs.push(stock);
+
+    // The amendment may have changed the quantity, plan, class or holder on this issuance.
+    if (stock.issuance.defects.length) {
+      allQuantitiesKnown = false;
+      continue;
+    }
+    const source = stock.issuance.value;
+    if (!source || !isQuantity(source.quantity)) return nodes;
+    if (!output.issuance.defects.length && (source.stock_plan_id !== issuance.stock_plan_id ||
+        source.stock_class_id !== issuance.stock_class_id || source.stakeholder_id !== issuance.stakeholder_id)) return nodes;
+    total = add(total, source.quantity);
   }
-  if (subtract(total, issuance.quantity) !== ZERO) return nodes;
+  if (!output.issuance.defects.length && (!isQuantity(issuance.quantity) || exceeds(total, issuance.quantity) ||
+      (allQuantitiesKnown && subtract(total, issuance.quantity) !== ZERO))) return nodes;
   let next = carryStock(nodes, result, issuance.stock_plan_id, tx.date, by);
   if (next === nodes) return nodes;
-  for (const input of inputs) next = withSecurity(next, { ...input, consolidatedInto: written(result, by.writer) });
+  for (const input of inputs) {
+    next = withSecurity(next, { ...input, consolidatedInto: stamped(input.consolidatedInto, result, by) });
+  }
   return next;
 }
 
@@ -401,7 +433,11 @@ function carriedStock(nodes: NodeMap, transaction: PoolTransaction, by: Stamp): 
   const type = currentName(transaction.object_type);
   if (type === "TX_STOCK_CONSOLIDATION") return consolidatedStock(nodes, transaction, by);
   const source = securityById(nodes, transaction.security_id);
-  if (source?.family === "stockIssuances" && source.consolidatedInto?.value) return nodes;
+  if (source?.family === "stockIssuances" && source.consolidatedInto) {
+    if (source.consolidatedInto.value) return nodes;
+    const defects = source.consolidatedInto.defects;
+    if (defects.length) by = { ok: false, roots: by.ok ? defects : withRoots(by.roots, defects) };
+  }
   const settlement = type === "TX_EQUITY_COMPENSATION_EXERCISE" || type === "TX_EQUITY_COMPENSATION_RELEASE";
   const issued = source?.family === (settlement ? "equityCompensation" : "stockIssuances") ? source.issuance.value : undefined;
   const sourcePlan = issued?.stock_plan_id;

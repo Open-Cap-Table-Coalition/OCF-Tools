@@ -1056,6 +1056,55 @@ describe("stock issued from a plan", () => {
     expect(context.snapshots.at(-1)?.stockPlans[0].drawn).toBe(expected);
   });
 
+  describe("a plan stock consolidation after an amendment", () => {
+    const second = { ...stock, id: "issue-b", security_id: "b" };
+    const output = { ...stock, id: "combined", security_id: "combined", date: "2022-03-01", quantity: "100" };
+    const amendment = { id: "amend", object_type: "TX_STOCK_AMENDMENT", security_id: stock.security_id, date: "2022-02-15" };
+    const merge = { id: "merge", object_type: "TX_STOCK_CONSOLIDATION", security_ids: [stock.security_id, second.security_id],
+      resulting_security_id: output.security_id, date: output.date };
+
+    it.each([{ ids: ["stock-1"] }, { ids: ["b"] }, { ids: ["stock-1", "b"] }])("blocks a consolidation when $ids was amended", ({ ids }) => {
+      const amendments = ids.map((id) => ({ ...amendment, id: "amend-" + id, security_id: id }));
+      const roots = amendments.map(({ object_type, id }) => ({ object_type, id }));
+      const other = { ...stock, id: "other", security_id: "other", stock_plan_id: "other-plan", date: "2022-03-02" };
+      const context = validatePackage([stock, second, ...amendments, output, merge, other], stakeholders, [{ id: "common" }],
+        [{ ...PLAN, initial_shares_reserved: "150" }]);
+
+      expect(context.findings.filter((f) => f.outcome === "failed").map((f) => f.subject)).toEqual(roots);
+      expect(context.findings.filter((f) => f.outcome === "blocked")).toMatchObject([
+        { check: "consolidation-pool-inputs", subject: { id: merge.id }, roots },
+        { check: "pool-not-exceeded", subject: { id: PLAN.id }, roots },
+      ]);
+      expect(context.nodes.security.get(output.security_id)).toMatchObject({ carry: { defects: roots }, draw: { defects: roots } });
+      expect(context.snapshots.at(-1)?.stockPlans).toEqual([
+        { id: PLAN.id, reserved: "150", drawn: "200", defects: { drawn: roots } },
+        { id: "other-plan", drawn: "50" },
+      ]);
+    });
+
+    it("keeps an output's draw reliable when a known input belongs to another plan", () => {
+      const other = { ...second, stock_plan_id: "other-plan" };
+      const context = runStock([stock, other, amendment, output, merge]);
+
+      expect(context.snapshots.at(-1)?.stockPlans).toEqual([
+        { id: PLAN.id, reserved: "1000", drawn: "150" }, { id: "other-plan", drawn: "50" },
+      ]);
+      expect(securityAt(context.nodes, "stockIssuances", output.security_id)?.carry).toBeUndefined();
+    });
+
+    it("keeps a blocked consolidation's root when the other input is retired and returned to a successor plan", () => {
+      const root = { object_type: amendment.object_type, id: amendment.id };
+      const cancel = { id: "cancel", object_type: "TX_STOCK_CANCELLATION", security_id: second.security_id, date: "2022-03-02", quantity: "50" };
+      const returned = returnToPool("return", second.security_id, "50", { date: "2022-03-03", stock_plan_id: "successor" });
+      const context = runStock([stock, second, amendment, output, merge, cancel, returned]);
+
+      expect(context.findings.filter((f) => f.subject.id === returned.id)).toMatchObject([
+        { check: "quantity-returnable", outcome: "blocked", roots: [root] },
+      ]);
+      expect(context.snapshots.at(-1)?.stockPlans).toContainEqual({ id: "successor", drawn: "0", defects: { drawn: [root] } });
+    });
+  });
+
   it("carries a consolidated output cancelled on its issuance date and later returned", () => {
     const second = { ...stock, id: "issue-b", security_id: "b" };
     const output = { ...stock, id: "combined", security_id: "combined", date: "2022-03-01", quantity: "100" };

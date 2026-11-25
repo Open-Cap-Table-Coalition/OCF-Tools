@@ -191,6 +191,9 @@ export const EXPLANATIONS = {
    * A consolidation lists several security IDs and has no removal effect in the validator. The chart
    * sees each removal, while the index misses them (#224).
    */
+  "consolidation inputs are absent from the stock transaction history":
+    "The stock history indexes security_id. A consolidation lists its inputs in security_ids, so no-other-transactions misses it.",
+
   "removed by a transaction the removals index doesn't hold":
     "The chart removed the security on a consolidation, which no-earlier-removal's index leaves out.",
 
@@ -226,6 +229,9 @@ export function explain(row: ShadowRow): Explanation | undefined {
   if (row.runs.length === 0 && row.indexedRemoval === row.removedBy) {
     if (row.issuanceCheck === "failed") return "removed, and neither check runs on it";
     if (row.issuanceCheck === "replayed") return "the validator stopped before checking the issuance";
+  }
+  if (row.removedBy.object_type === "TX_STOCK_CONSOLIDATION" && row.runs.length === 1 && row.runs[0] === NO_OTHER_TRANSACTIONS) {
+    return "consolidation inputs are absent from the stock transaction history";
   }
   if (row.runs.length === 1 && row.runs[0] === NO_EARLIER_REMOVAL) {
     const indexedDate = row.indexedRemoval?.date;

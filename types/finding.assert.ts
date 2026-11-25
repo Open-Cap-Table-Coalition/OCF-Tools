@@ -26,6 +26,7 @@ type _FindingIsFailedOrBlocked = Expect<Equal<Finding, FailedFinding | BlockedFi
 // The package can supply any string for object_type, including in blocked roots and snapshot defects.
 type _SubjectKeys = Expect<Equal<keyof Finding["subject"], "object_type" | "id">>;
 type _SubjectObjectType = Expect<Equal<Finding["subject"]["object_type"], string>>;
+type _SubjectId = Expect<Equal<Finding["subject"]["id"], unknown>>;
 type _Roots = Expect<Equal<BlockedFinding["roots"], Subject[]>>;
 type _SecurityDefects = Expect<Equal<DefectMark["defects"][keyof DefectMark["defects"]], Subject[] | undefined>>;
 type PlanDefects = NonNullable<SnapshotStockPlan["defects"]>;
