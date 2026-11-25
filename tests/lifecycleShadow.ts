@@ -5,7 +5,7 @@
 import { getNextSnapshot } from "xstate";
 import { lifecycleStep, type LifecycleState } from "../ocf_validator/lifecycle";
 import { passthroughRules, ocfMachine, type OcfMachineEvent } from "../ocf_validator/ocfMachine";
-import { lifecycleFamilies, TX_DESCRIPTORS, type CollectionKey } from "../ocf_validator/validators";
+import { isTxKey, lifecycleFamilies, TX_DESCRIPTORS, type CollectionKey } from "../ocf_validator/validators";
 import { applyTransaction } from "../ocf_validator/nodes";
 import { toValidate, type CheckObject } from "../ocf_validator/validators/checkKit";
 import type { Finding } from "../types/finding";
@@ -44,6 +44,8 @@ export type ShadowRow = {
   removedBy: Transaction | undefined;
   /** The first removal the validator indexed for this security. */
   indexedRemoval?: Pick<Transaction, "date" | "object_type">;
+  /** Whether an unrecognized transaction names this security on or before this date. */
+  afterUnrecognized: boolean;
 };
 
 /**
@@ -57,6 +59,17 @@ const securitiesOf = (transaction: Transaction): unknown[] => {
   }
   return [];
 };
+
+/** The removal check scans the whole package, including transactions later in the same day. */
+function firstUnrecognizedDates(transactions: readonly Transaction[]): Map<unknown, string> {
+  const dates = new Map<unknown, string>();
+  for (const { object_type, security_id, date } of transactions) {
+    if (isTxKey(object_type) || security_id == null) continue;
+    const first = dates.get(security_id);
+    if (first === undefined || date < first) dates.set(security_id, date);
+  }
+  return dates;
+}
 
 /** Resume from the holdings the validator kept. A failed transaction leaves those holdings alone. */
 function replay(context: OcfMachineContext, transaction: Transaction, checks: readonly CheckObject<any>[]) {
@@ -72,19 +85,20 @@ function replay(context: OcfMachineContext, transaction: Transaction, checks: re
 }
 
 /**
- * Compare each named security in processing order. Skip unknown transaction types because there is
- * no chart entry for them.
+ * Compare each named security in processing order. Skip unrecognized transaction types because
+ * there is no chart entry for them, and remember which securities they name.
  */
 export function shadowRows(transactions: readonly Transaction[], run?: Run): ShadowRow[] {
   let context = run?.context ?? baseContext({
     ocfPackageContent: { ...baseContext().ocfPackageContent, transactions } as unknown as OcfMachineContext["ocfPackageContent"],
   });
   const securities = new Map<unknown, { family: CollectionKey; state: LifecycleState; issuance: Transaction; removedBy?: Transaction }>();
+  const unrecognizedDates = firstUnrecognizedDates(transactions);
   const rows: ShadowRow[] = [];
 
   for (const [index, transaction] of transactions.entries()) {
-    if (!Object.hasOwn(TX_DESCRIPTORS, transaction.object_type)) continue;
-    const descriptor = TX_DESCRIPTORS[transaction.object_type as keyof typeof TX_DESCRIPTORS];
+    if (!isTxKey(transaction.object_type)) continue;
+    const descriptor = TX_DESCRIPTORS[transaction.object_type];
     const actual = run?.visits[index];
     const skipped = run !== undefined && actual === undefined;
     const rules: readonly CheckObject<any>[] = "rules" in descriptor ? descriptor.rules : passthroughRules;
@@ -118,6 +132,7 @@ export function shadowRows(transactions: readonly Transaction[], run?: Run): Sha
         known.state = step.next;
       }
 
+      const firstUnrecognized = unrecognizedDates.get(security);
       rows.push({
         id: transaction.id,
         object_type: transaction.object_type,
@@ -132,6 +147,7 @@ export function shadowRows(transactions: readonly Transaction[], run?: Run): Sha
         issuanceCheck: issuance?.outcome === "failed" && skipped ? "replayed" : issuance?.outcome,
         indexedRemoval: context.removals.get(security),
         removedBy: state === "removed" ? known?.removedBy : undefined,
+        afterUnrecognized: firstUnrecognized !== undefined && firstUnrecognized <= transaction.date,
       });
     }
   }
@@ -175,14 +191,28 @@ export const EXPLANATIONS = {
    * A consolidation lists several security IDs and has no removal effect in the validator. The chart
    * sees each removal, while the index misses them (#224).
    */
+  "consolidation inputs are absent from the stock transaction history":
+    "The stock history indexes security_id. A consolidation lists its inputs in security_ids, so no-other-transactions misses it.",
+
   "removed by a transaction the removals index doesn't hold":
     "The chart removed the security on a consolidation, which no-earlier-removal's index leaves out.",
+
+  /**
+   * The check allows a fixed list of transaction types on a security before its removal, so it
+   * counts a type the validator does not recognize (#186). The chart has no arrow for that type and
+   * passes over the transaction.
+   */
+  "named by an unrecognized transaction":
+    "no-other-transactions counts a transaction whose type the validator does not recognize; the chart skips it.",
 } as const;
 
 export type Explanation = keyof typeof EXPLANATIONS;
 
 /** Identify a known difference so tests can report any new one. */
 export function explain(row: ShadowRow): Explanation | undefined {
+  if (row.allowed && row.afterUnrecognized && row.reported.length === 1 && row.reported[0] === NO_OTHER_TRANSACTIONS) {
+    return "named by an unrecognized transaction";
+  }
   const refusedInSilence = !row.allowed && row.reported.length === 0;
   if (refusedInSilence && (row.blocked || (row.runs.length === 0 && row.issuanceCheck === "blocked"))) {
     return "an earlier failure blocked the check";
@@ -199,6 +229,9 @@ export function explain(row: ShadowRow): Explanation | undefined {
   if (row.runs.length === 0 && row.indexedRemoval === row.removedBy) {
     if (row.issuanceCheck === "failed") return "removed, and neither check runs on it";
     if (row.issuanceCheck === "replayed") return "the validator stopped before checking the issuance";
+  }
+  if (row.removedBy.object_type === "TX_STOCK_CONSOLIDATION" && row.runs.length === 1 && row.runs[0] === NO_OTHER_TRANSACTIONS) {
+    return "consolidation inputs are absent from the stock transaction history";
   }
   if (row.runs.length === 1 && row.runs[0] === NO_EARLIER_REMOVAL) {
     const indexedDate = row.indexedRemoval?.date;

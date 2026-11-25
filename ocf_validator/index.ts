@@ -4,6 +4,7 @@ import type { Finding } from "../types/finding";
 import { transactionPriority } from "./constants/constants";
 import { emptyResult, errorResult, malformedResult, ocfMachine, type OcfMachineEvent } from "./ocfMachine";
 import { type OcfMachineContext } from "../types/validator";
+import { isTxKey } from "./validators";
 
 export const ocfValidator = (packagePath: string): OcfMachineContext => validateOcfPackage(readOcfPackage(packagePath));
 
@@ -14,10 +15,10 @@ export const validateOcfPackage = (
 ): OcfMachineContext => {
   const { manifest, transactions } = ocfPackage;
 
-  // The run sorts transactions by date and sends each to the machine as an
-  // event of its object_type. A transaction where either isn't a string can't
-  // take its place in the run, and can make the sort or the machine throw
-  // (#218), so the run stops on it before it starts.
+  // The run sorts transactions by date and looks each one up by its
+  // object_type. A transaction where either isn't a string can't take its
+  // place in the run, and can make the sort or the machine throw (#218), so
+  // the run stops on it before it starts.
   const malformed = transactions.find((ele) => typeof ele?.date !== "string" || typeof ele?.object_type !== "string");
   if (malformed !== undefined) {
     return {
@@ -44,10 +45,9 @@ export const validateOcfPackage = (
   ocfXstateActor.subscribe({ error: () => {} });
   ocfXstateActor.start();
 
-  // Sends `event` unless the run has stopped: on a transaction that failed
-  // validation (the machine is done), or on a throw (its status is "error").
-  // A throw stops the actor before it can record anything, so `send` records
-  // it, naming the event being handled.
+  // Sends `event` unless the run has stopped on a throw (the actor's status is
+  // "error"). A throw stops the actor before it can record anything, so `send`
+  // records it, naming the event being handled.
   let thrown: string | undefined;
   const send = (event: OcfMachineEvent, onFindings?: (findings: Finding[]) => void) => {
     const before = ocfXstateActor.getSnapshot();
@@ -68,11 +68,14 @@ export const validateOcfPackage = (
   for (const ele of sortedTransactions) {
     if (currentDate !== undefined && ele.date !== currentDate) send({ type: "RUN_EOD", date: currentDate });
     currentDate = ele.date;
-    // Boundary cast: `ele.object_type` and `ele` are read from disk, so TS
-    // cannot correlate the runtime `type` with its matching payload in the
-    // per-key event union. This single declared cast bridges parsed input to
-    // the typed event; the machine's `'*'` handler rejects any unknown type.
-    send({ type: ele.object_type, data: ele } as OcfMachineEvent, onTransaction);
+    // The package chooses object_type. A type the table lists is sent as the event type. Anything
+    // else is sent as UNRECOGNIZED, so that no value in a package can pass for one of the run's own
+    // events.
+    const type: string = ele.object_type;
+    // Boundary cast: `ele` is read from disk, so TS cannot correlate the runtime `type` with its
+    // matching payload in the per-key event union. This single declared cast bridges parsed input
+    // to the typed event.
+    send(isTxKey(type) ? ({ type, data: ele } as OcfMachineEvent) : { type: "UNRECOGNIZED", data: ele }, onTransaction);
   }
 
   // A package with no transactions has no day to close, so it gets no snapshot.

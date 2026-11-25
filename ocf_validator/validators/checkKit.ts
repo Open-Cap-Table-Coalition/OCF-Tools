@@ -90,10 +90,12 @@ type Spec = { pool?: PoolEffect } & (
       checks: readonly CheckObject<any>[];
     }
   | { transaction: TxKey; effect: "append" | "remove"; collection: CollectionKey; checks: readonly CheckObject<any>[] }
+  | { transaction: TxKey; effect: "passthrough"; lifecycle: LifecycleWord; families: readonly CollectionKey[]; checks: readonly CheckObject<any>[] }
 );
 
 /** Derive the usual lifecycle change from the effect so authors only specify it once. */
 const LIFECYCLE_OF_EFFECT = {
+  passthrough: "stays",
   append: "issue",
   none: "stays",
   remove: "removes",

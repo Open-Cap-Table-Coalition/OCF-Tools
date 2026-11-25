@@ -65,7 +65,23 @@ OCF has no separate object for a restricted stock award (RSA). It is a `TX_STOCK
 - **Removal on an earlier day blocks later use.** The `no-earlier-removal` check fails only when the removal is dated before the transaction. A removal the same day is allowed, for example vesting on the day of a cancellation. (#214)
 - **A retraction fails if the stock was accepted.** The check looks for any acceptance of the same stock in the package, whatever its date.
 
+## Unrecognized transaction types
+
+These rules cover a transaction whose `object_type` the validator has no entry for, such as a type added by a newer version of OCF. The tests are in [`unrecognizedTransactionType.test.ts`](../tests/unrecognizedTransactionType.test.ts). (#186)
+
+- **It is reported, and the run continues.** The transaction gets one `transaction-type-known` error. It is not checked and none of its changes are applied.
+- **The security it names can no longer be relied on.** Nothing says what the transaction did to the security in its `security_id`. Its lifecycle and issuance are marked unreliable, whether it is outstanding or removed, and a later check that reads either is blocked and points at the unrecognized transaction. This also applies when the check looks for an issuance in another security family.
+- **A replacement can depend on an amended source across plans.** An unreliable source issuance can no longer establish which plan paid for its shares, even if the saved issuance has no plan ID. A matching balance grant, resulting grant or settlement stock carries the failure to its draw and its plan’s total. The expected issuance date, including a release’s settlement date, still limits which outputs can be affected. [Stock plan tests](../tests/stockPlanNode.test.ts)
+- **A plan stock consolidation depends on every input.** If an amended input makes the carry uncertain, the consolidation and the day-end pool check identify the amendment. The snapshot keeps the drawn total and lists the amendment under its defects.
+- **It runs after the day's other transactions.** A security issued that day then has a record to mark. Other transactions on the security that day are checked before it.
+- **A security with no issuance in the package is not marked.** There is no record to mark, so a later transaction on that security reports the missing issuance itself.
+- **A removal that checks `no-other-transactions` counts an unrecognized transaction on the same security.** It scans the package for transactions dated on or before the removal, including an amendment that runs later that day.
+- **Only `security_id` is read.** A security the transaction names in another field, such as `balance_security_id` or `resulting_security_ids`, is not marked. Neither is a stock plan it names.
+- **An `object_type` that matches one of the run's own event names is unrecognized too.** A transaction typed `RUN_END` is reported like any other, and is not handled as the run's own event.
+
 ## Open questions
+
+- **Stakeholder change events.** OCF allows `CE_STAKEHOLDER_RELATIONSHIP` and `CE_STAKEHOLDER_STATUS` in a transactions file. The validator has no entry for them, so it reports each one as unrecognized. Nothing has decided whether to accept them without a finding or to check them against the stakeholder file.
 
 - **Conversion ratio.** Nothing compares `quantity_converted` with the quantities of the resulting stock.
 - **Other transactions on transferred stock.** The transfer check does not yet reject a security that another transaction also names.

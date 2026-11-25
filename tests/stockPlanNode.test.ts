@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { applyTransaction, emptyNodes, fieldAt, securityAt, securityField, securityRecords, withPlans, type NodeMap } from "../ocf_validator/nodes";
+import { applyTransaction, emptyNodes, fieldAt, securityAt, securityField, securityRecords, withPlans, withUnrecognizedChange, type NodeMap } from "../ocf_validator/nodes";
 import { TX_DESCRIPTORS, type TxKey } from "../ocf_validator/validators";
 import type { Subject } from "../types/finding";
 import { toValidate, type CheckObject } from "../ocf_validator/validators/checkKit";
@@ -236,6 +236,26 @@ describe("accounting for returns and replacements", () => {
     const context = run([source, cancel, returnToPool("excess", "option", "200"), returnToPool("valid", "option", "40", { date: "2022-03-02" })]);
     expect(ofTransactions(context)).toMatchObject([{ check: "quantity-returnable", subject: { id: "excess" }, outcome: "failed" }]);
     expect(drawnByDay(context).map(([, drawn]) => drawn)).toEqual(["100", "100", "100", "60"]);
+  });
+
+  it("blocks a return against an allowance made uncertain by a grant amendment", () => {
+    const amendment = subject("TX_GRANT_AMENDMENT", "amend");
+    const returned = returnToPool("return", "option", "60");
+    const context = run([
+      source, cancel, { ...amendment, security_id: "option", date: "2022-02-15" }, returned,
+      grant("independent", "option-2", "10", { date: "2022-03-02", stock_plan_id: successor.id }),
+    ], [PLAN, successor]);
+
+    expect(context.result).toContain("complete and found 1 error and 3 checks blocked by it");
+    expect(ofTransactions(context)).toMatchObject([
+      { check: "transaction-type-known", outcome: "failed", subject: amendment },
+      { check: "security-removed", outcome: "blocked", subject: { id: returned.id }, roots: [amendment] },
+      { check: "quantity-returnable", outcome: "blocked", subject: { id: returned.id }, roots: [amendment] },
+    ]);
+    expect(context.snapshots.at(-1)?.stockPlans).toEqual([
+      { id: PLAN.id, reserved: "1000", drawn: "100", defects: { drawn: [amendment] } },
+      { id: successor.id, reserved: "1000", drawn: "10" },
+    ]);
   });
 
   it("shares one exact return allowance across dates, destinations, and transaction IDs", () => {
@@ -794,6 +814,80 @@ describe("stock issued from a plan", () => {
   const runTwoPlans = (transactions: Record<string, unknown>[]) =>
     validatePackage(transactions, stakeholders, [{ id: "common" }], [PLAN, { ...PLAN, id: "plan-2" }]);
 
+  describe.each(["plan-1", undefined])("an amended source originally issued with plan %s", (sourcePlan) => {
+    const amended = { object_type: "TX_UNKNOWN", id: "amend", date: "2022-01-15", security_id: "source" };
+    const roots = [subject(amended.object_type, amended.id)];
+    const option = grant("grant", "source", "100", { stock_plan_id: sourcePlan });
+    const destination = { ...PLAN, id: "plan-2", initial_shares_reserved: "30" };
+    const independent = grant("independent", "other", "7", { stock_plan_id: "plan-3", date: "2022-03-01" });
+
+    it.each(["2022-02-01", "2022-02-15"])("marks settlement stock and its plan for settlement on %s", (date) => {
+      const release = releaseOf("release", "source", "2022-02-01", date);
+      const output = { ...stock, date, quantity: "40", stock_plan_id: destination.id };
+      const context = validatePackage([option, amended, release, output, independent], stakeholders, [{ id: "common" }], [PLAN, destination]);
+      const sameDay = release.date === date;
+
+      expect(context.findings.filter((f) => f.check === "pool-not-exceeded")).toMatchObject([
+        { subject: { id: destination.id }, outcome: "blocked", roots },
+      ]);
+      expect(securityAt(context.nodes, "stockIssuances", output.security_id)).toMatchObject({
+        carry: { defects: roots }, draw: { defects: roots },
+      });
+      expect(context.snapshots.at(-1)?.stockPlans).toEqual([
+        { id: PLAN.id, reserved: "1000", drawn: sourcePlan ? "100" : "0" },
+        { id: destination.id, reserved: "30", drawn: sameDay ? "40" : "0", defects: { drawn: roots } },
+        { id: "plan-3", drawn: "7" },
+      ]);
+    });
+
+    it("marks a stock cancellation's balance on the other plan", () => {
+      const source = { ...stock, security_id: "source", date: option.date, stock_plan_id: sourcePlan };
+      const cancel = { ...cancellation("cancel", "source", "10"), object_type: "TX_STOCK_CANCELLATION", balance_security_id: "balance" };
+      const balance = { ...stock, id: "issue-balance", security_id: "balance", date: cancel.date, quantity: "40", stock_plan_id: destination.id };
+      const context = validatePackage([source, amended, cancel, balance], stakeholders, [{ id: "common" }], [PLAN, destination]);
+
+      expect(context.findings.filter((f) => f.subject.id === destination.id)).toMatchObject([{ outcome: "blocked", roots }]);
+      expect(securityAt(context.nodes, "stockIssuances", "balance")).toMatchObject({ carry: { defects: roots }, draw: { defects: roots } });
+    });
+
+    it("marks both the balance and the resulting grant on a transfer", () => {
+      const transfer = { id: "transfer", object_type: "TX_PLAN_SECURITY_TRANSFER", security_id: "source", quantity: "40",
+        balance_security_id: "balance", resulting_security_ids: ["result"], date: "2022-02-01" };
+      const output = (id: string, quantity: string) => grant("issue-" + id, id, quantity, { date: transfer.date, stock_plan_id: destination.id });
+      const context = run([option, amended, transfer, output("balance", "60"), output("result", "40")], [PLAN, destination]);
+
+      for (const id of ["balance", "result"]) {
+        expect(securityAt(context.nodes, "equityCompensation", id)).toMatchObject({ provenance: { defects: roots }, draw: { defects: roots } });
+      }
+      expect(context.snapshots.at(-1)?.stockPlans[1]).toEqual({ id: destination.id, reserved: "30", drawn: "100", defects: { drawn: roots } });
+    });
+  });
+
+  it.each([
+    { stock_plan_id: "plan-2", date: "2022-02-16", drawn: "40" },
+    { stock_plan_id: undefined, date: "2022-02-15", drawn: "0" },
+  ])("rules out an amended grant's carry when the output is issued with %j", ({ stock_plan_id, date, drawn }) => {
+    const amendment = { id: "amend", object_type: "TX_UNKNOWN", security_id: "option-a", date: "2022-01-15" };
+    const context = runTwoPlans([grant("a", "option-a", "100"), amendment, blockedRelease, { ...stock, stock_plan_id, date, quantity: "40" }]);
+
+    expect(context.snapshots.at(-1)?.stockPlans[1]).toEqual({ id: "plan-2", reserved: "1000", drawn });
+    expect(securityAt(context.nodes, "stockIssuances", stock.security_id)?.carry?.defects).toEqual([]);
+  });
+
+  it("keeps both amendments when another release names settlement stock whose draw is already uncertain", () => {
+    const date = "2022-02-15";
+    const amend = (id: string) => ({ id: "amend-" + id, object_type: "TX_UNKNOWN", security_id: id, date: "2022-01-15" });
+    const context = runTwoPlans([
+      grant("a", "a", "100"), grant("b", "b", "100"), amend("a"), amend("b"),
+      releaseOf("first", "a", "2022-02-01", date), { ...stock, date, stock_plan_id: "plan-2", quantity: "40" },
+      releaseOf("second", "b", date, date),
+    ]);
+    const roots = [subject("TX_UNKNOWN", "amend-a"), subject("TX_UNKNOWN", "amend-b")];
+
+    expect(securityAt(context.nodes, "stockIssuances", stock.security_id)).toMatchObject({ carry: { defects: roots }, draw: { defects: roots } });
+    expect(context.snapshots.at(-1)?.stockPlans[1]).toMatchObject({ id: "plan-2", drawn: "0", defects: { drawn: roots } });
+  });
+
   it.each(["2022-02-15", "2022-02-16"])("checks a release whose settlement stock another plan's blocked release also named (settles %s)", (settles) => {
     const context = runTwoPlans([
       grant("a", "option-a", "100"), grant("b", "option-b", "100", { stock_plan_id: "plan-2" }), overdrawn, blockedRelease,
@@ -1036,6 +1130,55 @@ describe("stock issued from a plan", () => {
     expect(context.snapshots.at(-1)?.stockPlans[0].drawn).toBe(expected);
   });
 
+  describe("a plan stock consolidation after an amendment", () => {
+    const second = { ...stock, id: "issue-b", security_id: "b" };
+    const output = { ...stock, id: "combined", security_id: "combined", date: "2022-03-01", quantity: "100" };
+    const amendment = { id: "amend", object_type: "TX_STOCK_AMENDMENT", security_id: stock.security_id, date: "2022-02-15" };
+    const merge = { id: "merge", object_type: "TX_STOCK_CONSOLIDATION", security_ids: [stock.security_id, second.security_id],
+      resulting_security_id: output.security_id, date: output.date };
+
+    it.each([{ ids: ["stock-1"] }, { ids: ["b"] }, { ids: ["stock-1", "b"] }])("blocks a consolidation when $ids was amended", ({ ids }) => {
+      const amendments = ids.map((id) => ({ ...amendment, id: "amend-" + id, security_id: id }));
+      const roots = amendments.map(({ object_type, id }) => ({ object_type, id }));
+      const other = { ...stock, id: "other", security_id: "other", stock_plan_id: "other-plan", date: "2022-03-02" };
+      const context = validatePackage([stock, second, ...amendments, output, merge, other], stakeholders, [{ id: "common" }],
+        [{ ...PLAN, initial_shares_reserved: "150" }]);
+
+      expect(context.findings.filter((f) => f.outcome === "failed").map((f) => f.subject)).toEqual(roots);
+      expect(context.findings.filter((f) => f.outcome === "blocked")).toMatchObject([
+        { check: "consolidation-pool-inputs", subject: { id: merge.id }, roots },
+        { check: "pool-not-exceeded", subject: { id: PLAN.id }, roots },
+      ]);
+      expect(context.nodes.security.get(output.security_id)).toMatchObject({ carry: { defects: roots }, draw: { defects: roots } });
+      expect(context.snapshots.at(-1)?.stockPlans).toEqual([
+        { id: PLAN.id, reserved: "150", drawn: "200", defects: { drawn: roots } },
+        { id: "other-plan", drawn: "50" },
+      ]);
+    });
+
+    it("keeps an output's draw reliable when a known input belongs to another plan", () => {
+      const other = { ...second, stock_plan_id: "other-plan" };
+      const context = runStock([stock, other, amendment, output, merge]);
+
+      expect(context.snapshots.at(-1)?.stockPlans).toEqual([
+        { id: PLAN.id, reserved: "1000", drawn: "150" }, { id: "other-plan", drawn: "50" },
+      ]);
+      expect(securityAt(context.nodes, "stockIssuances", output.security_id)?.carry).toBeUndefined();
+    });
+
+    it("keeps a blocked consolidation's root when the other input is retired and returned to a successor plan", () => {
+      const root = { object_type: amendment.object_type, id: amendment.id };
+      const cancel = { id: "cancel", object_type: "TX_STOCK_CANCELLATION", security_id: second.security_id, date: "2022-03-02", quantity: "50" };
+      const returned = returnToPool("return", second.security_id, "50", { date: "2022-03-03", stock_plan_id: "successor" });
+      const context = runStock([stock, second, amendment, output, merge, cancel, returned]);
+
+      expect(context.findings.filter((f) => f.subject.id === returned.id)).toMatchObject([
+        { check: "quantity-returnable", outcome: "blocked", roots: [root] },
+      ]);
+      expect(context.snapshots.at(-1)?.stockPlans).toContainEqual({ id: "successor", drawn: "0", defects: { drawn: [root] } });
+    });
+  });
+
   it("carries a consolidated output cancelled on its issuance date and later returned", () => {
     const second = { ...stock, id: "issue-b", security_id: "b" };
     const output = { ...stock, id: "combined", security_id: "combined", date: "2022-03-01", quantity: "100" };
@@ -1113,7 +1256,10 @@ describe("stock issued from a plan", () => {
     for (const nodes of [outstanding, planless]) {
       expect(validate(nodes)).toMatchObject([{ check: "security-removed", outcome: "failed" }]);
     }
-    expect(validate(uncertain)).toMatchObject([{ check: "security-removed", outcome: "blocked", roots: [bad] }]);
+    expect(validate(uncertain)).toMatchObject([
+      { check: "security-removed", outcome: "blocked", roots: [bad] },
+      { check: "quantity-returnable", outcome: "blocked", roots: [bad] },
+    ]);
   });
 });
 
@@ -1157,6 +1303,26 @@ describe("equity compensation field reads", () => {
 
     expect(fieldAt(named, ref)?.defects).toEqual(defects ? [failed] : []);
     expect(fieldAt(reduce(named, [balance]), ref)?.defects).toEqual(defects ? [failed] : []);
+  });
+
+  it("keeps competing claims on the same date when the claiming grant's plan is unknown", () => {
+    const first = subject("TX_EQUITY_COMPENSATION_CANCELLATION", "first");
+    const amend = subject("TX_UNKNOWN", "amend");
+    const date = "2022-02-01";
+    const named = reduce(withPlan(), [grant("a", "a", "100", { stock_plan_id: "plan-2" })], [grant("b", "b", "100")],
+      [cancellation("first", "a", "40", { balance_security_id: "balance" }), [first]]);
+    const amended = withUnrecognizedChange(named, "b", amend);
+    const claim = { source: "b", date };
+    const field = (issuance?: { plan: string; date: string }) =>
+      securityField("equityCompensation", "balance", "provenance", { ...claim, issuance });
+    const output = { plan: "plan-2", date };
+
+    expect(fieldAt(named, field(output))?.defects).toEqual([]);
+    expect(fieldAt(amended, field())?.defects).toEqual([first]);
+    expect(fieldAt(amended, field(output))?.defects).toEqual([first]);
+    expect(fieldAt(amended, field({ ...output, date: "2022-03-01" }))?.defects).toEqual([]);
+    const issued = reduce(amended, [grant("balance", "balance", "60", { stock_plan_id: output.plan, date })]);
+    expect(fieldAt(issued, field())?.defects).toEqual([first]);
   });
 
   it("returns undefined for optional state that has not been written", () => {

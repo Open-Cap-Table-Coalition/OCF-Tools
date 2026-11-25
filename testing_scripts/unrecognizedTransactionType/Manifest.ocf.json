@@ -1,0 +1,28 @@
+{
+  "ocf_version": "1.2.1-alpha+main",
+  "file_type": "OCF_MANIFEST_FILE",
+  "issuer": {
+    "id": "nextVersionCo",
+    "comments": [],
+    "object_type": "ISSUER",
+    "legal_name": "Next Version Co",
+    "formation_date": "2023-01-02",
+    "country_of_formation": "US",
+    "country_subdivision_of_formation": "DE"
+  },
+  "as_of": "2023-12-31",
+  "generated_at": "2023-12-31T00:00:00.000Z",
+  "stock_plans_files": [{ "filepath": "./StockPlans.ocf.json", "md5": "00000000000000000000000000000000" }],
+  "stock_legend_templates_files": [],
+  "stock_classes_files": [{ "filepath": "./StockClasses.ocf.json", "md5": "00000000000000000000000000000000" }],
+  "transactions_files": [{ "filepath": "./Transactions.ocf.json", "md5": "00000000000000000000000000000000" }],
+  "stakeholders_files": [{ "filepath": "./Stakeholders.ocf.json", "md5": "00000000000000000000000000000000" }],
+  "vesting_terms_files": [],
+  "valuations_files": [],
+  "comments": [
+    "Check that a transaction type the validator does not recognize is reported and the rest of the package is still checked (#186).",
+    "amend-grace is a TX_WARRANT_AMENDMENT, a type OCF does not define. It lowers the exercise price of Grace's warrant, so her later acceptance wa-grace cannot be checked.",
+    "status-emily is a CE_STAKEHOLDER_STATUS, which OCF allows in a transactions file. It names Emily and no security, so her option grant and its acceptance are unaffected.",
+    "Ada's founder stock is never named by either transaction and stays valid throughout."
+  ]
+}

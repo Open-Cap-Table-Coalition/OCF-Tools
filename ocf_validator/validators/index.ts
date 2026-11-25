@@ -7,6 +7,7 @@ import type {
 } from "@opencaptablecoalition/ocf-types";
 import type { TransactionFor } from "../../types/ocf-input";
 import type { Check, GradedValidator, LifecycleWord, PoolEffect } from "../../types/validator";
+import { TX_STOCK_CONSOLIDATION } from "./stock/tx_stock_consolidation";
 import { TX_STOCK_ACCEPTANCE } from "./stock/tx_stock_acceptance";
 import { TX_CONVERTIBLE_ISSUANCE } from "./convertible/tx_convertible_issuance";
 import { TX_CONVERTIBLE_ACCEPTANCE } from "./convertible/tx_convertible_acceptance";
@@ -137,7 +138,7 @@ export const TX_DESCRIPTORS = {
   TX_VESTING_EVENT: { effect: "passthrough", lifecycle: "stays", families: VESTING_FAMILIES },
   TX_VESTING_ACCELERATION: { effect: "passthrough", lifecycle: "stays", families: VESTING_FAMILIES },
   // A consolidation replaces several stock securities with one.
-  TX_STOCK_CONSOLIDATION: { pool: "carriesStock", effect: "passthrough", lifecycle: "removes", families: ["stockIssuances"] },
+  TX_STOCK_CONSOLIDATION,
   // Class and issuer transactions name no individual security. They have no entry on a security
   // family's chart.
   TX_STOCK_CLASS_SPLIT: { effect: "passthrough", lifecycle: "stays", families: [] },
@@ -145,6 +146,12 @@ export const TX_DESCRIPTORS = {
   TX_STOCK_CLASS_CONVERSION_RATIO_ADJUSTMENT: { effect: "passthrough", lifecycle: "stays", families: [] },
   TX_ISSUER_AUTHORIZED_SHARES_ADJUSTMENT: { effect: "passthrough", lifecycle: "stays", families: [] },
 } satisfies DescriptorTable;
+
+/**
+ * Whether the table lists this object_type. A name every JavaScript object inherits, such as
+ * "constructor", is not listed.
+ */
+export const isTxKey = (type: unknown): type is TxKey => typeof type === "string" && Object.hasOwn(TX_DESCRIPTORS, type);
 
 export const lifecycleFamilies = (descriptor: Descriptor): readonly CollectionKey[] =>
   "collection" in descriptor ? [descriptor.collection] : descriptor.families;

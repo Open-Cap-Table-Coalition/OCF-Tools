@@ -1,0 +1,75 @@
+{
+  "file_type": "OCF_TRANSACTIONS_FILE",
+  "items": [
+    {
+      "id": "si-ada",
+      "object_type": "TX_STOCK_ISSUANCE",
+      "date": "2023-01-15",
+      "security_id": "stock-ada",
+      "custom_id": "CS-1",
+      "stakeholder_id": "ada",
+      "stock_class_id": "common",
+      "security_law_exemptions": [],
+      "share_price": { "amount": "0.0001", "currency": "USD" },
+      "quantity": "4000000",
+      "stock_legend_ids": []
+    },
+    {
+      "id": "wi-grace",
+      "object_type": "TX_WARRANT_ISSUANCE",
+      "date": "2023-02-01",
+      "security_id": "warrant-grace",
+      "custom_id": "W-1",
+      "stakeholder_id": "grace",
+      "security_law_exemptions": [],
+      "quantity": "50000",
+      "exercise_price": { "amount": "1.00", "currency": "USD" },
+      "purchase_price": { "amount": "100.00", "currency": "USD" },
+      "exercise_triggers": [],
+      "warrant_expiration_date": "2028-02-01"
+    },
+    {
+      "id": "eci-emily",
+      "object_type": "TX_EQUITY_COMPENSATION_ISSUANCE",
+      "date": "2023-03-01",
+      "security_id": "option-emily",
+      "custom_id": "OPT-1",
+      "stakeholder_id": "emily",
+      "stock_plan_id": "plan-2023",
+      "stock_class_id": "common",
+      "security_law_exemptions": [],
+      "compensation_type": "OPTION_ISO",
+      "quantity": "20000",
+      "exercise_price": { "amount": "0.50", "currency": "USD" },
+      "expiration_date": "2033-03-01",
+      "termination_exercise_windows": []
+    },
+    {
+      "id": "amend-grace",
+      "object_type": "TX_WARRANT_AMENDMENT",
+      "date": "2023-06-15",
+      "security_id": "warrant-grace",
+      "new_exercise_price": { "amount": "0.80", "currency": "USD" },
+      "comments": ["The board lowered the exercise price when the loan was extended."]
+    },
+    {
+      "id": "wa-grace",
+      "object_type": "TX_WARRANT_ACCEPTANCE",
+      "date": "2023-07-01",
+      "security_id": "warrant-grace"
+    },
+    {
+      "id": "status-emily",
+      "object_type": "CE_STAKEHOLDER_STATUS",
+      "date": "2023-08-01",
+      "stakeholder_id": "emily",
+      "new_status": "LEAVE_OF_ABSENCE"
+    },
+    {
+      "id": "eca-emily",
+      "object_type": "TX_EQUITY_COMPENSATION_ACCEPTANCE",
+      "date": "2023-09-01",
+      "security_id": "option-emily"
+    }
+  ]
+}

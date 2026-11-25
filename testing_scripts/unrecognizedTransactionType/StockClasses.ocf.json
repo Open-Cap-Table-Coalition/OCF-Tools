@@ -1,0 +1,16 @@
+{
+  "file_type": "OCF_STOCK_CLASSES_FILE",
+  "items": [
+    {
+      "id": "common",
+      "object_type": "STOCK_CLASS",
+      "name": "Common Stock",
+      "class_type": "COMMON",
+      "default_id_prefix": "CS-",
+      "initial_shares_authorized": "10000000",
+      "votes_per_share": "1",
+      "par_value": { "amount": "0.0001", "currency": "USD" },
+      "seniority": "1"
+    }
+  ]
+}

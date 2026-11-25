@@ -32,6 +32,9 @@ const quantityReturnable = {
   severity: "error",
   description: "No more is returned than the security's removals took out of it, less what was returned before.",
   reads: ({ security_id }) => [
+    // The saved allowance depends on the removal still being reliable.
+    securityField("equityCompensation", security_id, "lifecycle"),
+    securityField("stockIssuances", security_id, "lifecycle"),
     securityField("equityCompensation", security_id, "returnable"),
     securityField("stockIssuances", security_id, "returnable"),
     securityField("equityCompensation", security_id, "removal"),

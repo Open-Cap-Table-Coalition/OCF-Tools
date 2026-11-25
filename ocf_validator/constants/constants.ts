@@ -63,5 +63,8 @@ export function currentName(type: unknown): unknown {
 
 const priorities = new Map<string, number>(transactionOrder.map((type, index) => [type, index]));
 
-/** Unknown types sort first so the machine can report them. */
-export const transactionPriority = (type: string): number => priorities.get(currentName(type)) ?? -1;
+/**
+ * An unrecognized type runs after the day's other transactions. A security issued that day then has
+ * a record the machine can mark as unreliable.
+ */
+export const transactionPriority = (type: string): number => priorities.get(currentName(type)) ?? transactionOrder.length;

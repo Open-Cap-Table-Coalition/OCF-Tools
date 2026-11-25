@@ -60,6 +60,19 @@ export const countable = <F extends string>(field: F, applies: (data: any) => bo
     },
   }) satisfies CheckObject<Record<F, string>>;
 
+/**
+ * Fails every transaction it runs on. The machine runs it only on a transaction whose object_type
+ * the transaction table does not list, such as a type added by a newer version of OCF.
+ */
+export const transactionTypeKnown = {
+  id: "transaction-type-known",
+  severity: "error",
+  description: "The transaction's object_type is a transaction type the validator recognizes.",
+  run: (_context, data) => [
+    text`The validator does not recognize object_type ${data.object_type}, so it did not check this transaction or apply any change it makes.`,
+  ],
+} satisfies CheckObject<{ object_type: string }>;
+
 export const destinationPlan = {
   id: "destination-plan",
   severity: "error",
